@@ -292,7 +292,7 @@ func TestExtensionNativePermissions(t *testing.T) {
 		// One repository page owns several named routes (one page identity).
 		{ID: "read", Title: "Read", Scope: "repository", Permission: "read", Entry: "main.js", Route: "feed", Routes: []extension.PageRoute{
 			{Route: "requests", Title: "Requests"}, {Route: "app", Title: "App"}, {Route: "terminals", Title: "Terminals", Persist: true},
-			{Route: "knowledge", Title: "Knowledge"}, {Route: "issue-factory", Title: "Factory status"},
+			{Route: "knowledge", Title: "Knowledge", Hidden: true}, {Route: "issue-factory", Title: "Factory status"},
 		}, Subroutes: []extension.Subroute{{Route: "requests", Pattern: "new", Title: "New request"}, {Route: "requests", Pattern: "{request}", Title: "Request"}}},
 		{ID: "write", Title: "Write", Scope: "repository", Permission: "write", Entry: "main.js"},
 		{ID: "admin", Title: "Admin", Scope: "repository", Permission: "admin", Entry: "main.js", Route: "settings", Subroutes: []extension.Subroute{{Pattern: "factory", Title: "Factory settings"}}},
@@ -438,6 +438,8 @@ func TestExtensionNativePermissions(t *testing.T) {
 		require.Contains(t, repoHome, `href="`+href+`"`)
 	}
 	require.NotContains(t, repoHome, `href="/user2/repo1/settings/sodaos"`)
+	require.NotContains(t, repoHome, `href="/user2/repo1/knowledge"`)
+	require.NotContains(t, repoHome, `href="/user2/repo1/issues/{index}/factory"`)
 	// The repository settings slot renders in the native settings layout.
 	for path, title := range map[string]string{"/user2/repo1/settings/sodaos": "Admin", "/user2/repo1/settings/sodaos/factory": "Factory settings"} {
 		body := owner.MakeRequest(t, NewRequest(t, http.MethodGet, path), http.StatusOK).Body.String()

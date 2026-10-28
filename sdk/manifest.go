@@ -77,6 +77,19 @@ type PageRoute struct {
 	Route   string `json:"route"`
 	Title   string `json:"title,omitempty"`
 	Persist bool   `json:"persist,omitempty"`
+	// Hidden serves the route without a navigation link, e.g. an old
+	// address the page forwards in the browser.
+	Hidden bool `json:"hidden,omitempty"`
+}
+
+// RouteHidden reports whether the route has no navigation link.
+func (p Page) RouteHidden(route string) bool {
+	for _, r := range p.Routes {
+		if r.Route == route {
+			return r.Hidden
+		}
+	}
+	return false
 }
 
 type Panel struct {

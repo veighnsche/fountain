@@ -160,7 +160,7 @@ func Navigation(ctx *context.Context) {
 			}
 			for _, route := range p.RouteNames() {
 				// The issue factory address needs an issue; it has no tab.
-				if p.Scope == "repository" && route == extension.RepositoryIssueFactoryRoute {
+				if p.RouteHidden(route) || p.Scope == "repository" && route == extension.RepositoryIssueFactoryRoute {
 					continue
 				}
 				path := route
