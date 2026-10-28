@@ -45,7 +45,7 @@
 			<a class="item{{if .PageIsExplore}} active{{end}}" {{if .PageIsExplore}}aria-current="page" {{end}}href="{{AppSubUrl}}/explore/repos">{{ctx.Locale.Tr "explore"}}</a>
 		{{end}}
 		{{with .ExtensionPages}}{{range index . "global"}}
-			<a class="item{{if eq .URL $.ExtensionPageURL}} active{{end}}"{{if eq .URL $.ExtensionPageURL}} aria-current="page"{{end}} href="{{.URL}}">{{.Title}}</a>
+			<a class="item{{if eq .Key $.ExtensionPageKey}} active{{end}}"{{if eq .Key $.ExtensionPageKey}} aria-current="page"{{end}} href="{{.URL}}">{{.Title}}</a>
 		{{end}}{{end}}
 
 		{{template "custom/extra_links" .}}

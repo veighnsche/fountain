@@ -92,8 +92,8 @@
 		{{if not (or .Repository.IsBeingCreated .Repository.IsBroken)}}
 			<div class="overflow-menu-items">
 				{{with .ExtensionPages}}{{range index . "repository"}}
-					{{if ne .Permission "admin"}}
-					<a class="{{if eq .URL $.ExtensionPageURL}}active {{end}}item" href="{{.URL}}">{{.Title}}</a>
+					{{if ne .Route "settings"}}
+					<a class="{{if eq .Key $.ExtensionPageKey}}active {{end}}item" href="{{.URL}}">{{.Title}}</a>
 					{{end}}
 				{{end}}{{end}}
 				{{if .Permission.CanRead $.UnitTypeCode}}

@@ -40,7 +40,7 @@ func TestExtensionNativeAuthentication(t *testing.T) {
 	defer tests.PrepareTestEnv(t)()
 	// Native documents use the host's normal sign-in redirect, including
 	// requests carrying Basic credentials instead of a browser session.
-	for _, path := range []string{"/workspace", "/workspace/new", "/workspace/requests/d0123456789abcdef01234567", "/feed", "/applications", "/tailnet", "/user/settings/identity", "/admin/workspace", "/user2/repo1/workspace"} {
+	for _, path := range []string{"/workspace", "/workspace/new", "/workspace/requests/d0123456789abcdef01234567", "/feed", "/applications", "/tailnet", "/user/settings/identity", "/admin/workspace", "/user2/repo1/workspace", "/requests", "/user/settings/development-keys", "/admin/sodaos", "/user2/repo1/requests/new", "/user2/repo1/terminals", "/user2/repo1/issues/1/factory", "/user2/repo1/settings/sodaos"} {
 		t.Run(path, func(t *testing.T) {
 			for _, request := range []*RequestWrapper{NewRequest(t, http.MethodGet, path), NewRequest(t, http.MethodGet, path).AddBasicAuth("user2")} {
 				response := MakeRequest(t, request, http.StatusSeeOther)
@@ -286,12 +286,16 @@ func TestExtensionNativePermissions(t *testing.T) {
 		extension.CapabilityPublicKeysRead,
 		extension.CapabilityContributionAuthorize,
 	}, Pages: []extension.Page{
-		{ID: "global", Title: "Global", Scope: "global", Route: "workspace", Entry: "main.js"},
-		{ID: "user", Title: "User", Scope: "user", Route: "identity", Permission: "user", Entry: "main.js"},
-		{ID: "site-admin", Title: "Site admin", Scope: "admin", Route: "workspace", Permission: "admin", Entry: "main.js"},
-		{ID: "read", Title: "Read", Scope: "repository", Permission: "read", Entry: "main.js"},
+		{ID: "global", Title: "Global", Scope: "global", Route: "workspace", Routes: []extension.PageRoute{{Route: "requests", Title: "Requests"}}, Entry: "main.js"},
+		{ID: "user", Title: "User", Scope: "user", Route: "identity", Routes: []extension.PageRoute{{Route: "development-keys", Title: "Development keys"}}, Permission: "user", Entry: "main.js"},
+		{ID: "site-admin", Title: "Site admin", Scope: "admin", Route: "workspace", Routes: []extension.PageRoute{{Route: "sodaos", Title: "SodaOS"}}, Permission: "admin", Entry: "main.js"},
+		// One repository page owns several named routes (one page identity).
+		{ID: "read", Title: "Read", Scope: "repository", Permission: "read", Entry: "main.js", Route: "feed", Routes: []extension.PageRoute{
+			{Route: "requests", Title: "Requests"}, {Route: "app", Title: "App"}, {Route: "terminals", Title: "Terminals", Persist: true},
+			{Route: "knowledge", Title: "Knowledge"}, {Route: "issue-factory", Title: "Factory status"},
+		}, Subroutes: []extension.Subroute{{Route: "requests", Pattern: "new", Title: "New request"}, {Route: "requests", Pattern: "{request}", Title: "Request"}}},
 		{ID: "write", Title: "Write", Scope: "repository", Permission: "write", Entry: "main.js"},
-		{ID: "admin", Title: "Admin", Scope: "repository", Permission: "admin", Entry: "main.js"},
+		{ID: "admin", Title: "Admin", Scope: "repository", Permission: "admin", Entry: "main.js", Route: "settings", Subroutes: []extension.Subroute{{Pattern: "factory", Title: "Factory settings"}}},
 	}}
 	manifest.Panels = []extension.Panel{{ID: "status", Title: "Status", Entry: "main.js"}}
 	encoded, err := json.Marshal(manifest)
@@ -411,6 +415,42 @@ func TestExtensionNativePermissions(t *testing.T) {
 	require.Contains(t, repoWorkspace.Body.String(), `data-extension-page-id="global"`)
 	require.Contains(t, repoWorkspace.Body.String(), `data-extension-repository-id="`+strconv.FormatInt(repoModel.ID, 10)+`"`)
 	require.Contains(t, repoWorkspace.Body.String(), `data-extension-api-base="/-/native/pages/pages/global/api/"`)
+	// Named repository routes all render the same page identity, so the
+	// host readopts one retained root while moving between them.
+	for path, title := range map[string]string{
+		"/user2/repo1/feed": "Read", "/user2/repo1/requests": "Requests", "/user2/repo1/requests/new": "New request",
+		"/user2/repo1/requests/abc": "Request", "/user2/repo1/app": "App", "/user2/repo1/terminals": "Terminals",
+		"/user2/repo1/knowledge": "Knowledge", "/user2/repo1/issues/1/factory": "Factory status",
+	} {
+		body := owner.MakeRequest(t, NewRequest(t, http.MethodGet, path), http.StatusOK).Body.String()
+		require.Contains(t, body, `data-extension-page-id="read"`, path)
+		require.Contains(t, body, `data-extension-api-base="/user2/repo1/-/native/pages/pages/read/api/"`, path)
+		require.Contains(t, body, `<h1 id="extension-page-title" class="ui dividing header">`+title+`</h1>`, path)
+		require.Equal(t, path == "/user2/repo1/terminals", strings.Contains(body, "data-extension-persist"), path)
+		require.NotContains(t, body, "repository settings extensions", path)
+	}
+	owner.MakeRequest(t, NewRequest(t, http.MethodGet, "/user2/repo1/feed/unknown"), http.StatusNotFound)
+	owner.MakeRequest(t, NewRequest(t, http.MethodGet, "/user2/repo1/requests/a/b"), http.StatusNotFound)
+	// Native issue routes are not shadowed by the issue factory slot.
+	owner.MakeRequest(t, NewRequest(t, http.MethodGet, "/user2/repo1/issues/1"), http.StatusOK)
+	repoHome := owner.MakeRequest(t, NewRequest(t, http.MethodGet, "/user2/repo1"), http.StatusOK).Body.String()
+	for _, href := range []string{"/user2/repo1/feed", "/user2/repo1/requests", "/user2/repo1/terminals"} {
+		require.Contains(t, repoHome, `href="`+href+`"`)
+	}
+	require.NotContains(t, repoHome, `href="/user2/repo1/settings/sodaos"`)
+	// The repository settings slot renders in the native settings layout.
+	for path, title := range map[string]string{"/user2/repo1/settings/sodaos": "Admin", "/user2/repo1/settings/sodaos/factory": "Factory settings"} {
+		body := owner.MakeRequest(t, NewRequest(t, http.MethodGet, path), http.StatusOK).Body.String()
+		require.Contains(t, body, "repository settings extensions", path)
+		require.Contains(t, body, `class="active item" href="/user2/repo1/settings/sodaos">Admin</a>`, path)
+		require.Contains(t, body, title, path)
+	}
+	require.Contains(t, owner.MakeRequest(t, NewRequest(t, http.MethodGet, "/user2/repo1/settings"), http.StatusOK).Body.String(), `href="/user2/repo1/settings/sodaos"`)
+	// Global, user and admin slots.
+	owner.MakeRequest(t, NewRequest(t, http.MethodGet, "/requests"), http.StatusOK)
+	owner.MakeRequest(t, NewRequest(t, http.MethodGet, "/user/settings/development-keys"), http.StatusOK)
+	owner.MakeRequest(t, NewRequest(t, http.MethodGet, "/admin/sodaos"), http.StatusForbidden)
+	siteAdmin.MakeRequest(t, NewRequest(t, http.MethodGet, "/admin/sodaos"), http.StatusOK)
 	owner.MakeRequest(t, NewRequestWithValues(t, http.MethodPost, "/org/create", map[string]string{
 		"org_name":                      "native_callback_owner",
 		"visibility":                    "0",

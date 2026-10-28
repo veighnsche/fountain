@@ -77,8 +77,16 @@ func Register(m *web.Route, signedIn, admin any) {
 			m.Get(prefix+"/"+route+"/*", guard, NativeSession, pageSubroute(scope, route))
 		}
 	}
-	m.Get("/{username}/{reponame}/workspace", signedIn, NativeSession, context.RepoAssignment, context.UnitTypes(), Navigation, repositoryWorkspace)
-	m.Get("/{username}/{reponame}/workspace/*", signedIn, NativeSession, context.RepoAssignment, context.UnitTypes(), Navigation, repositorySubroute)
+	// Named repository slots (requests, feed, app, terminals, knowledge,
+	// issues/{index}/factory, settings/sodaos and the legacy workspace).
+	// None collides with a native repository route; the issue factory
+	// slot is a static child under issues/{index}, which chi prefers over
+	// the native {type:issues|pulls} pattern without shadowing it.
+	for _, route := range extension.NativePageRoutes("repository") {
+		path := "/{username}/{reponame}/" + extension.RepositoryRoutePath(route)
+		m.Get(path, signedIn, NativeSession, context.RepoAssignment, context.UnitTypes(), Navigation, repositoryPage(route))
+		m.Get(path+"/*", signedIn, NativeSession, context.RepoAssignment, context.UnitTypes(), Navigation, repositorySubroute(route))
+	}
 	m.Get("/-/native/session", NativeSession, signedIn, SessionCheck)
 	m.Methods("GET,HEAD", "/-/native/assets/{extension}/*", NativeSession, signedIn, Assets)
 	m.Methods("GET,HEAD,POST,PUT,PATCH,DELETE", "/-/native/panels/{extension}/{page}/api/*", NativeSession, signedIn, api("panel", true))
@@ -105,6 +113,13 @@ func sessionStreamTest(ctx *context.Context) {
 type Link struct {
 	ID, Title, ExtensionID, URL, Entry, APIBase, AssetBase, Permission string
 	OwnerID                                                            string
+	// Route is the native slot the link opens; Key identifies the
+	// (extension, page, route) so every address under it marks it active.
+	Route, Key string
+}
+
+func linkKey(extensionID, pageID, route string) string {
+	return extensionID + "/" + pageID + "/" + route
 }
 
 // Navigation also runs after repository assignment, when its permission is known.
@@ -143,10 +158,20 @@ func Navigation(ctx *context.Context) {
 			if base == "" && p.Scope == "repository" {
 				continue
 			}
-			pages[p.Scope] = append(pages[p.Scope], Link{ID: p.ID, Title: p.Title, ExtensionID: descriptor.Manifest.ID, Permission: p.Permission, URL: base + "/" + p.Route})
+			for _, route := range p.RouteNames() {
+				// The issue factory address needs an issue; it has no tab.
+				if p.Scope == "repository" && route == extension.RepositoryIssueFactoryRoute {
+					continue
+				}
+				path := route
+				if p.Scope == "repository" {
+					path = extension.RepositoryRoutePath(route)
+				}
+				pages[p.Scope] = append(pages[p.Scope], Link{ID: p.ID, Title: p.RouteTitle(route), ExtensionID: descriptor.Manifest.ID, Permission: p.Permission, URL: base + "/" + path, Route: route, Key: linkKey(descriptor.Manifest.ID, p.ID, route)})
+			}
 			if p.Scope == "global" && p.Route == "workspace" && ctx.Repo != nil && ctx.Repo.Repository != nil && ctx.Repo.CanRead(unit.TypeCode) {
 				if _, _, _, exists := findRoute(ctx, "repository", "workspace"); !exists {
-					pages["repository"] = append(pages["repository"], Link{ID: p.ID, Title: p.Title, ExtensionID: descriptor.Manifest.ID, Permission: "read", URL: ctx.Repo.RepoLink + "/workspace"})
+					pages["repository"] = append(pages["repository"], Link{ID: p.ID, Title: p.Title, ExtensionID: descriptor.Manifest.ID, Permission: "read", URL: ctx.Repo.RepoLink + "/workspace", Route: "workspace", Key: linkKey(descriptor.Manifest.ID, p.ID, "workspace")})
 				}
 			}
 		}
@@ -217,7 +242,7 @@ func pageRoute(scope, route string) func(*context.Context) {
 			ctx.NotFound("Page", nil)
 			return
 		}
-		renderPage(ctx, d, transport, p)
+		renderPage(ctx, d, transport, p, route, nil)
 	}
 }
 
@@ -290,42 +315,40 @@ func pageSubroute(scope, route string) func(*context.Context) {
 			ctx.NotFound("Page", nil)
 			return
 		}
-		sub, _, matched := p.MatchSubroute(ctx.Params("*"))
+		sub, _, matched := p.MatchSubroute(route, ctx.Params("*"))
 		if !matched {
 			ctx.NotFound("Page", nil)
 			return
 		}
-		if sub.Title != "" {
-			p.Title = sub.Title
-		}
-		renderPage(ctx, d, transport, p)
+		renderPage(ctx, d, transport, p, route, &sub)
 	}
 }
 
-func repositorySubroute(ctx *context.Context) {
-	if !ctx.Repo.CanRead(unit.TypeCode) {
-		ctx.NotFound("Workspace", nil)
-		return
+// repositorySubroute serves a declared subroute under one named
+// repository slot.
+func repositorySubroute(route string) func(*context.Context) {
+	return func(ctx *context.Context) {
+		if !ctx.Repo.CanRead(unit.TypeCode) {
+			ctx.NotFound("Page", nil)
+			return
+		}
+		// Unlike the workspace root, declared subroutes under a repository
+		// path resolve only to a repository-scoped page: the global owner's
+		// content routes stay at the application root and never claim the
+		// repository namespace.
+		d, transport, p, ok := findRoute(ctx, "repository", route)
+		if !ok {
+			ctx.NotFound("Page", nil)
+			return
+		}
+		sub, _, matched := p.MatchSubroute(route, ctx.Params("*"))
+		if !matched {
+			ctx.NotFound("Page", nil)
+			return
+		}
+		ctx.Data["ExtensionRepositoryID"] = strconv.FormatInt(ctx.Repo.Repository.ID, 10)
+		renderPage(ctx, d, transport, p, route, &sub)
 	}
-	// Unlike the workspace root, declared subroutes under a repository
-	// path resolve only to a repository-scoped page: the global owner's
-	// content routes stay at the application root and never claim the
-	// repository namespace.
-	d, transport, p, ok := findRoute(ctx, "repository", "workspace")
-	if !ok {
-		ctx.NotFound("Workspace", nil)
-		return
-	}
-	sub, _, matched := p.MatchSubroute(ctx.Params("*"))
-	if !matched {
-		ctx.NotFound("Page", nil)
-		return
-	}
-	if sub.Title != "" {
-		p.Title = sub.Title
-	}
-	ctx.Data["ExtensionRepositoryID"] = strconv.FormatInt(ctx.Repo.Repository.ID, 10)
-	renderPage(ctx, d, transport, p)
 }
 
 func findRoute(ctx *context.Context, scope, route string) (extensions_service.Descriptor, http.RoundTripper, extension.Page, bool) {
@@ -336,7 +359,7 @@ func findRoute(ctx *context.Context, scope, route string) (extensions_service.De
 				continue
 			}
 			for _, p := range d.Manifest.Pages {
-				if p.Scope == scope && p.Route == route && allowed(ctx, p) {
+				if p.Scope == scope && p.Serves(route) && allowed(ctx, p) {
 					return d, transport, p, true
 				}
 			}
@@ -345,23 +368,26 @@ func findRoute(ctx *context.Context, scope, route string) (extensions_service.De
 	return extensions_service.Descriptor{}, nil, extension.Page{}, false
 }
 
-func repositoryWorkspace(ctx *context.Context) {
-	if !ctx.Repo.CanRead(unit.TypeCode) {
-		ctx.NotFound("Workspace", nil)
-		return
+// repositoryPage serves the root of one named repository slot.
+func repositoryPage(route string) func(*context.Context) {
+	return func(ctx *context.Context) {
+		if !ctx.Repo.CanRead(unit.TypeCode) {
+			ctx.NotFound("Page", nil)
+			return
+		}
+		d, transport, p, ok := findRoute(ctx, "repository", route)
+		if !ok && route == "workspace" {
+			d, transport, p, ok = findRoute(ctx, "global", "workspace")
+		}
+		if !ok {
+			ctx.NotFound("Page", nil)
+			return
+		}
+		ctx.Data["ExtensionRepositoryID"] = strconv.FormatInt(ctx.Repo.Repository.ID, 10)
+		// Observed repository metadata chooses the display only. A global contribution
+		// retains its global authority; each product API still checks its target.
+		renderPage(ctx, d, transport, p, route, nil)
 	}
-	d, transport, p, ok := findRoute(ctx, "repository", "workspace")
-	if !ok {
-		d, transport, p, ok = findRoute(ctx, "global", "workspace")
-	}
-	if !ok {
-		ctx.NotFound("Workspace", nil)
-		return
-	}
-	ctx.Data["ExtensionRepositoryID"] = strconv.FormatInt(ctx.Repo.Repository.ID, 10)
-	// Observed repository metadata chooses the display only. A global contribution
-	// retains its global authority; each product API still checks its target.
-	renderPage(ctx, d, transport, p)
 }
 
 func pageAPIBase(ctx *context.Context, d extensions_service.Descriptor, p extension.Page) string {
@@ -377,7 +403,19 @@ func pageAPIBase(ctx *context.Context, d extensions_service.Descriptor, p extens
 	return prefix + "/-/native/pages/" + d.Manifest.ID + "/" + p.ID + "/api/"
 }
 
-func renderPage(ctx *context.Context, d extensions_service.Descriptor, transport http.RoundTripper, p extension.Page) {
+// renderPage renders page p on one of its routes, optionally at a
+// declared subroute. The route and subroute choose only the title,
+// layout and persistence; the page identity stays the same on every
+// route, so the retained root is readopted instead of remounted.
+func renderPage(ctx *context.Context, d extensions_service.Descriptor, transport http.RoundTripper, p extension.Page, route string, sub *extension.Subroute) {
+	persist := p.RoutePersists(route)
+	p.Title = p.RouteTitle(route)
+	if sub != nil {
+		persist = persist || sub.Persist
+		if sub.Title != "" {
+			p.Title = sub.Title
+		}
+	}
 	generation, err := sessionGeneration(ctx)
 	if err != nil {
 		ctx.Error(http.StatusServiceUnavailable, "Session authority unavailable")
@@ -396,8 +434,12 @@ func renderPage(ctx *context.Context, d extensions_service.Descriptor, transport
 	ctx.Data["PageIsUserSettings"] = p.Scope == "user"
 	ctx.Data["PageIsAdmin"] = p.Scope == "admin"
 	ctx.Data["ExtensionScope"] = p.Scope
-	ctx.Data["ExtensionRepoSettings"] = p.Scope == "repository" && p.Permission == "admin"
-	ctx.Data["PageIsRepoSettings"] = p.Scope == "repository" && p.Permission == "admin"
+	// Only the settings slot renders inside the native settings layout.
+	repoSettings := p.Scope == "repository" && route == extension.RepositorySettingsRoute
+	ctx.Data["ExtensionRepoSettings"] = repoSettings
+	ctx.Data["PageIsRepoSettings"] = repoSettings
+	ctx.Data["ExtensionPersist"] = persist
+	ctx.Data["ExtensionPageKey"] = linkKey(d.Manifest.ID, p.ID, route)
 	ctx.Data["Extension"] = map[string]string{"ID": d.Manifest.ID, "Name": d.Manifest.Name, "PageID": p.ID, "Title": p.Title, "OwnerID": p.Owner}
 	ctx.Data["ExtensionAPIBase"] = pageAPIBase(ctx, d, p)
 	ctx.Data["ExtensionAssetBase"] = assetBase
@@ -411,7 +453,6 @@ func renderPage(ctx *context.Context, d extensions_service.Descriptor, transport
 	// independent page (including a repository feed at /workspace) owns
 	// its own mount and must not expose the workspace panels below it.
 	ctx.Data["PageIsWorkspacePage"] = p.Owner != ""
-	ctx.Data["ExtensionPageURL"] = setting.AppSubURL + ctx.Req.URL.EscapedPath()
 	ctx.PageData["extension"] = map[string]string{"id": d.Manifest.ID, "name": d.Manifest.Name, "pageID": p.ID, "title": p.Title}
 	ctx.PageData["apiBase"] = pageAPIBase(ctx, d, p)
 	ctx.PageData["assetBase"] = assetBase
@@ -475,7 +516,7 @@ func composePanelsHome(ctx *context.Context) {
 				continue
 			}
 			for _, sub := range pg.Subroutes {
-				directPatterns = append(directPatterns, "/"+pg.Route+"/"+sub.Pattern)
+				directPatterns = append(directPatterns, "/"+pg.SubrouteRoute(sub)+"/"+sub.Pattern)
 			}
 		}
 		for _, p := range d.Manifest.Panels {

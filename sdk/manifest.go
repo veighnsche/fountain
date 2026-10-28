@@ -54,11 +54,29 @@ type Page struct {
 	// (extension ID, owner ID); both modes share the page entry and the
 	// page API identity. Empty means an ordinary independent page.
 	Owner string `json:"owner,omitempty"`
+	// Routes are further host-owned slots served by this same page, in
+	// addition to Route. One page owning several named routes keeps one
+	// page identity (extension, page, API base), so moving between its
+	// routes readopts the same retained root instead of remounting.
+	Routes []PageRoute `json:"routes,omitempty"`
+	// Persist asks the host to keep this page's retained root in the
+	// shelter across other pages: it is never evicted by the shelter
+	// bound. Routes and subroutes may also set it; the host marks the
+	// root persistent once any persistent route has been entered.
+	Persist bool `json:"persist,omitempty"`
 	// Subroutes are bounded subordinate content routes declared under
-	// Route (NFX-C04/H-ROUTE). The host enforces only their bounded
-	// shape and conflicts; parameter meaning and any product-ID
-	// validation stay with the consumer backend.
+	// Route, or under one of Routes when Subroute.Route names it
+	// (NFX-C04/H-ROUTE). The host enforces only their bounded shape and
+	// conflicts; parameter meaning and any product-ID validation stay
+	// with the consumer backend.
 	Subroutes []Subroute `json:"subroutes,omitempty"`
+}
+
+// PageRoute is one further native slot served by a page.
+type PageRoute struct {
+	Route   string `json:"route"`
+	Title   string `json:"title,omitempty"`
+	Persist bool   `json:"persist,omitempty"`
 }
 
 type Panel struct {
@@ -73,8 +91,60 @@ type Panel struct {
 // is 1-3 segments; each segment is a slug literal or a single "{name}"
 // parameter capturing one bounded opaque segment.
 type Subroute struct {
+	// Route names the page route this subroute sits under; empty means
+	// the page's primary Route.
+	Route   string `json:"route,omitempty"`
 	Pattern string `json:"pattern"`
 	Title   string `json:"title,omitempty"`
+	Persist bool   `json:"persist,omitempty"`
+}
+
+// RouteNames lists every native slot the page serves, primary first.
+func (p Page) RouteNames() []string {
+	if p.Route == "" {
+		return nil
+	}
+	names := []string{p.Route}
+	for _, r := range p.Routes {
+		names = append(names, r.Route)
+	}
+	return names
+}
+
+// Serves reports whether the page serves the named native slot.
+func (p Page) Serves(route string) bool {
+	return route != "" && slices.Contains(p.RouteNames(), route)
+}
+
+// RouteTitle is the page title shown on one of its routes.
+func (p Page) RouteTitle(route string) string {
+	for _, r := range p.Routes {
+		if r.Route == route && r.Title != "" {
+			return r.Title
+		}
+	}
+	return p.Title
+}
+
+// RoutePersists reports whether entering the route marks the root persistent.
+func (p Page) RoutePersists(route string) bool {
+	if p.Persist {
+		return true
+	}
+	for _, r := range p.Routes {
+		if r.Route == route {
+			return r.Persist
+		}
+	}
+	return false
+}
+
+// SubrouteRoute is the page route a subroute sits under.
+func (p Page) SubrouteRoute(sub Subroute) string {
+	if sub.Route == "" {
+		return p.Route
+	}
+	return sub.Route
 }
 
 // LoadManifest reads and validates an extension package without executing it.
@@ -144,11 +214,25 @@ func (m Manifest) Validate() error {
 			return err
 		}
 		seenPages[p.ID] = true
-		if p.Route != "" {
-			if !slices.Contains(NativePageRoutes(p.Scope), p.Route) || seenRoutes[p.Scope+"/"+p.Route] {
-				return fmt.Errorf("invalid or duplicate native page route %q", p.Route)
+		if p.Route == "" && len(p.Routes) > 0 {
+			return fmt.Errorf("page %q declares routes without a route", p.ID)
+		}
+		if len(p.Routes) > 8 {
+			return fmt.Errorf("page %q declares too many routes", p.ID)
+		}
+		for _, r := range p.Routes {
+			if len(r.Title) > 128 || strings.TrimSpace(r.Title) != r.Title {
+				return fmt.Errorf("page %q route %q has invalid title", p.ID, r.Route)
 			}
-			seenRoutes[p.Scope+"/"+p.Route] = true
+		}
+		for _, route := range p.RouteNames() {
+			if !slices.Contains(NativePageRoutes(p.Scope), route) || seenRoutes[p.Scope+"/"+route] {
+				return fmt.Errorf("invalid or duplicate native page route %q", route)
+			}
+			seenRoutes[p.Scope+"/"+route] = true
+			if p.Scope == "repository" && route == RepositorySettingsRoute && p.Permission != "admin" {
+				return fmt.Errorf("repository page %q serves settings without admin permission", p.ID)
+			}
 		}
 		switch p.Scope {
 		case "global":
@@ -239,15 +323,19 @@ func validateSubroutes(p Page) error {
 	if p.Route == "" {
 		return fmt.Errorf("page %q declares subroutes without a route", p.ID)
 	}
-	if len(p.Subroutes) > 8 {
+	if len(p.Subroutes) > 16 {
 		return fmt.Errorf("page %q declares too many subroutes", p.ID)
 	}
 	seen := make(map[string]bool)
 	for _, sub := range p.Subroutes {
-		if sub.Pattern == "" || len(sub.Pattern) > 128 || seen[sub.Pattern] {
+		key := p.SubrouteRoute(sub) + "/" + sub.Pattern
+		if sub.Pattern == "" || len(sub.Pattern) > 128 || seen[key] {
 			return fmt.Errorf("page %q has invalid or duplicate subroute %q", p.ID, sub.Pattern)
 		}
-		seen[sub.Pattern] = true
+		if !p.Serves(p.SubrouteRoute(sub)) {
+			return fmt.Errorf("page %q subroute %q names a route the page does not serve", p.ID, sub.Pattern)
+		}
+		seen[key] = true
 		if len(sub.Title) > 128 || strings.TrimSpace(sub.Title) != sub.Title {
 			return fmt.Errorf("page %q subroute %q has invalid title", p.ID, sub.Pattern)
 		}
@@ -297,16 +385,20 @@ func (m Manifest) OwnerContributions(owner string) (Page, Panel, bool) {
 }
 
 // MatchSubroute matches a subordinate path suffix (no leading slash,
-// one optional trailing slash) against the page's declared subroutes.
-// Parameter values are bounded opaque segments: the host deliberately
-// applies no product-ID shape rule here.
-func (p Page) MatchSubroute(suffix string) (Subroute, map[string]string, bool) {
+// one optional trailing slash) under one of the page's routes against
+// the subroutes declared for that route. Parameter values are bounded
+// opaque segments: the host deliberately applies no product-ID shape
+// rule here.
+func (p Page) MatchSubroute(route, suffix string) (Subroute, map[string]string, bool) {
 	suffix = strings.TrimSuffix(suffix, "/")
 	if suffix == "" {
 		return Subroute{}, nil, false
 	}
 	segments := strings.Split(suffix, "/")
 	for _, sub := range p.Subroutes {
+		if p.SubrouteRoute(sub) != route {
+			continue
+		}
 		pattern := strings.Split(sub.Pattern, "/")
 		if len(pattern) != len(segments) {
 			continue
@@ -335,18 +427,42 @@ func (p Page) MatchSubroute(suffix string) (Subroute, map[string]string, bool) {
 	return Subroute{}, nil, false
 }
 
+// Repository slots whose address differs from their name.
+const (
+	// RepositorySettingsRoute renders inside the native repository
+	// settings layout at /{owner}/{repo}/settings/sodaos, with a sidebar
+	// entry; it requires admin permission.
+	RepositorySettingsRoute = "settings"
+	// RepositoryIssueFactoryRoute is /{owner}/{repo}/issues/{index}/factory.
+	RepositoryIssueFactoryRoute = "issue-factory"
+)
+
 // NativePageRoutes are host-owned contribution slots, never package namespaces.
 // An empty Page.Route contributes an API without adding a public page.
 func NativePageRoutes(scope string) []string {
 	switch scope {
 	case "global":
-		return []string{"workspace", "feed", "applications", "tailnet"}
+		return []string{"workspace", "feed", "applications", "tailnet", "requests"}
 	case "user":
-		return []string{"workspace", "identity"}
-	case "admin", "repository":
-		return []string{"workspace"}
+		return []string{"workspace", "identity", "development-keys"}
+	case "admin":
+		return []string{"workspace", "sodaos"}
+	case "repository":
+		return []string{"workspace", "feed", "requests", "app", "terminals", "knowledge", RepositoryIssueFactoryRoute, RepositorySettingsRoute}
 	}
 	return nil
+}
+
+// RepositoryRoutePath is the address of a repository slot below
+// /{owner}/{repo}, without a leading slash.
+func RepositoryRoutePath(route string) string {
+	switch route {
+	case RepositorySettingsRoute:
+		return "settings/sodaos"
+	case RepositoryIssueFactoryRoute:
+		return "issues/{index}/factory"
+	}
+	return route
 }
 
 func validateNames(names []string, allowed map[string]bool, kind string) error {

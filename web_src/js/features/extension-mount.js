@@ -151,7 +151,7 @@ export async function mountContribution(root, hooks = {}) {
   const {importer = defaultImporter, fetcher = (...args) => window.fetch(...args), websocketClass = globalThis.WebSocket, navigator = navigateNative, signal} = hooks;
   const parsed = parseMountDataset(root);
   if (!parsed.ok) {
-    root.textContent = 'This workspace view is unavailable.';
+    root.textContent = 'This view is unavailable.';
     return null;
   }
   if (signal?.aborted) return null;
@@ -241,13 +241,13 @@ export async function mountContribution(root, hooks = {}) {
     module = await importer(parsed.entryHref);
   } catch (error) {
     if (invalidated) return null;
-    console.error('Could not load workspace view', error);
-    root.textContent = 'Could not load this workspace view.';
+    console.error('Could not load extension view', error);
+    root.textContent = 'Could not load this view.';
     return null;
   }
   if (invalidated) return null;
   if (typeof module.mount !== 'function') {
-    root.textContent = 'Could not load this workspace view.';
+    root.textContent = 'Could not load this view.';
     return null;
   }
   let handle = {};
@@ -255,8 +255,8 @@ export async function mountContribution(root, hooks = {}) {
     handle = normalizeHandle(await module.mount(root, context));
   } catch (error) {
     invalidate('contribution-unavailable');
-    console.error('Could not load workspace view', error);
-    root.textContent = 'Could not load this workspace view.';
+    console.error('Could not load extension view', error);
+    root.textContent = 'Could not load this view.';
     return null;
   }
   if (invalidated) {

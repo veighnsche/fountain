@@ -555,7 +555,7 @@ func AdminExtensionSettings(ctx *context.Context) {
 	}
 	for _, page := range descriptor.Manifest.Pages {
 		if page.ID == pageID && page.Scope == "admin" && page.Permission == "admin" && page.Route == "" {
-			renderPage(ctx, descriptor, transport, page)
+			renderPage(ctx, descriptor, transport, page, "", nil)
 			return
 		}
 	}

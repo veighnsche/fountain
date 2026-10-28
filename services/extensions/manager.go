@@ -398,16 +398,15 @@ func (m *Manager) Start(ctx context.Context) (err error) {
 	claimedRoutes := make(map[string]bool)
 	claimRoutes := func(manifest sdk.Manifest) error {
 		for _, page := range manifest.Pages {
-			if page.Route == "" {
-				continue
+			for _, route := range page.RouteNames() {
+				key := page.Scope + "/" + route
+				if claimedRoutes[key] {
+					return fmt.Errorf("native page route %q is already claimed", key)
+				}
+				claimedRoutes[key] = true
 			}
-			key := page.Scope + "/" + page.Route
-			if claimedRoutes[key] {
-				return fmt.Errorf("native page route %q is already claimed", key)
-			}
-			claimedRoutes[key] = true
 			for _, sub := range page.Subroutes {
-				subKey := key + "/" + sub.Pattern
+				subKey := page.Scope + "/" + page.SubrouteRoute(sub) + "/" + sub.Pattern
 				if claimedRoutes[subKey] {
 					return fmt.Errorf("native page route %q is already claimed", subKey)
 				}
@@ -706,6 +705,7 @@ func needsNativeCallback(capabilities []string) bool {
 func cloneDescriptor(d Descriptor) Descriptor {
 	d.Manifest.Pages = append([]sdk.Page(nil), d.Manifest.Pages...)
 	for i := range d.Manifest.Pages {
+		d.Manifest.Pages[i].Routes = append([]sdk.PageRoute(nil), d.Manifest.Pages[i].Routes...)
 		d.Manifest.Pages[i].Subroutes = append([]sdk.Subroute(nil), d.Manifest.Pages[i].Subroutes...)
 	}
 	d.Manifest.Panels = append([]sdk.Panel(nil), d.Manifest.Panels...)

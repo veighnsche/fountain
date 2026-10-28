@@ -57,12 +57,14 @@ func StartRuntime(ctx context.Context) (close func() error, err error) {
 	}
 	if err := manager.SetManifestValidator(func(manifest sdk.Manifest) error {
 		for _, page := range manifest.Pages {
-			if page.Scope != "global" || page.Route == "" {
+			if page.Scope != "global" {
 				continue
 			}
-			_, err := user_model.GetUserByName(ctx, page.Route)
-			if !user_model.IsErrUserNotExist(err) {
-				return fmt.Errorf("native page route %q cannot claim an existing or unavailable account", page.Route)
+			for _, route := range page.RouteNames() {
+				_, err := user_model.GetUserByName(ctx, route)
+				if !user_model.IsErrUserNotExist(err) {
+					return fmt.Errorf("native page route %q cannot claim an existing or unavailable account", route)
+				}
 			}
 		}
 		return nil

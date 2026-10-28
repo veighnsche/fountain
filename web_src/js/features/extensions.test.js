@@ -14,7 +14,7 @@ test('repository product tabs precede native unit tabs in the overflow menu', ()
   expect(productTabs).toBeGreaterThan(template.indexOf('<overflow-menu'));
   expect(productTabs).toBeLessThan(codeTab);
   expect(template.match(/range index . "repository"/g)).toHaveLength(1);
-  expect(template.slice(productTabs, codeTab)).toContain('{{if ne .Permission "admin"}}');
+  expect(template.slice(productTabs, codeTab)).toContain('{{if ne .Route "settings"}}');
 });
 
 test('admits native same-origin paths and preserves deep links', () => {

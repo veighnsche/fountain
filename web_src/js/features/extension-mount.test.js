@@ -279,7 +279,7 @@ test('refuses invalid mounts without importing or fetching', async () => {
     const fetcher = vi.fn();
     const owner = await mountContribution(root, {importer, fetcher, websocketClass: FakeSocket});
     expect(owner).toBeNull();
-    expect(root.textContent).toBe('This workspace view is unavailable.');
+    expect(root.textContent).toBe('This view is unavailable.');
     expect(importer).not.toHaveBeenCalled();
     expect(fetcher).not.toHaveBeenCalled();
   }
@@ -323,7 +323,7 @@ test('closes streams and revokes helpers when mount throws synchronously', async
   try {
     const owner = await mountContribution(root, {importer: vi.fn(async () => ({mount})), websocketClass: FakeSocket});
     expect(owner).toBeNull();
-    expect(root.textContent).toBe('Could not load this workspace view.');
+    expect(root.textContent).toBe('Could not load this view.');
     expect(opened.socket.closed).toBe(true);
     expect(() => captured.request('context')).toThrow('Contribution transport is retired');
     expect(() => captured.stream('socket')).toThrow('Contribution transport is retired');

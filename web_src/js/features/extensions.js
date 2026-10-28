@@ -219,10 +219,12 @@ export function initExtensionPages(importer = importExtension, fetcher = (...arg
   // the persistent panels home; the post-swap sync readopts them into the
   // entered duplicate (same identity reuses the owner, streams suspended
   // meanwhile). The shelter holds at most four owners; the oldest parked
-  // root past four disposes, unless it carries data-extension-persist: a
-  // persistent shared owner (the Workspace terminal once C04 joins it) is
-  // never evicted silently, so the bound yields when every parked root
-  // persists.
+  // root past four disposes, unless it carries data-extension-persist: the
+  // host renders it for a page, route or subroute declared "persist" in the
+  // manifest, and an adopted root keeps it once any persistent route was
+  // entered (a page owning several routes holds their state together). A
+  // persistent root is never evicted silently, so the bound yields when
+  // every parked root persists.
   let park = home?.querySelector('[data-extension-page-park]') ?? null;
   function parkPageRoots() {
     if (leaving) return;
@@ -362,6 +364,7 @@ export function initExtensionPages(importer = importExtension, fetcher = (...arg
           duplicate.replaceWith(owner.root);
           if (duplicate.dataset.extensionRepositoryId === undefined) delete owner.root.dataset.extensionRepositoryId;
           else owner.root.dataset.extensionRepositoryId = duplicate.dataset.extensionRepositoryId;
+          if (duplicate.hasAttribute('data-extension-persist')) owner.root.setAttribute('data-extension-persist', '');
           owned.add(owner.root);
           owner.update({...facts, mode: 'page', visible: true});
           owner.resume({sessionGeneration: owner.root.dataset.extensionSessionGeneration});

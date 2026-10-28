@@ -139,15 +139,15 @@ func TestDeclaredSubroutes(t *testing.T) {
 	// The host admits bounded opaque parameters without any product-ID
 	// shape rule; the consumer backend validates product identities.
 	for _, suffix := range []string{"new", "new/", "requests/d0123456789abcdef01234567", "requests/not-an-id", "requests/ABC-123"} {
-		if _, _, ok := page.MatchSubroute(suffix); !ok {
+		if _, _, ok := page.MatchSubroute("workspace", suffix); !ok {
 			t.Fatalf("declared subroute %q refused", suffix)
 		}
 	}
-	if sub, params, ok := page.MatchSubroute("requests/abc"); !ok || sub.Title != "Build request" || params["request"] != "abc" {
+	if sub, params, ok := page.MatchSubroute("workspace", "requests/abc"); !ok || sub.Title != "Build request" || params["request"] != "abc" {
 		t.Fatalf("subroute match = %+v %v %v", sub, params, ok)
 	}
 	for _, suffix := range []string{"", "requests", "requests/", "requests/a/b", "new/extra", "unknown", "requests/" + strings.Repeat("x", 256)} {
-		if _, _, ok := page.MatchSubroute(suffix); ok {
+		if _, _, ok := page.MatchSubroute("workspace", suffix); ok {
 			t.Fatalf("undeclared subroute %q admitted", suffix)
 		}
 	}
@@ -187,5 +187,39 @@ func TestNativePageRouteSlots(t *testing.T) {
 	m.Pages[1].Route = ""
 	if err := m.Validate(); err != nil {
 		t.Fatal("API-only contribution rejected:", err)
+	}
+	// One repository page owns several named routes.
+	m.Pages[1] = Page{
+		ID: "places", Route: "feed", Title: "Feed", Scope: "repository", Permission: "read", Entry: "main.js",
+		Routes:    []PageRoute{{Route: "requests", Title: "Requests"}, {Route: "terminals", Title: "Terminals", Persist: true}, {Route: "issue-factory", Title: "Factory"}},
+		Subroutes: []Subroute{{Route: "requests", Pattern: "new"}, {Route: "requests", Pattern: "{request}"}},
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatal("named repository routes rejected:", err)
+	}
+	if !m.Pages[1].Serves("terminals") || !m.Pages[1].RoutePersists("terminals") || m.Pages[1].RoutePersists("feed") || m.Pages[1].RouteTitle("requests") != "Requests" {
+		t.Fatal("named route facts are wrong")
+	}
+	if _, _, ok := m.Pages[1].MatchSubroute("requests", "abc"); !ok {
+		t.Fatal("subroute under a named route refused")
+	}
+	if _, _, ok := m.Pages[1].MatchSubroute("feed", "abc"); ok {
+		t.Fatal("subroute matched under the wrong route")
+	}
+	for name, mutate := range map[string]func(p *Page){
+		"unknown route":          func(p *Page) { p.Routes = append(p.Routes, PageRoute{Route: "projects"}) },
+		"duplicate route":        func(p *Page) { p.Routes = append(p.Routes, PageRoute{Route: "feed"}) },
+		"settings without admin": func(p *Page) { p.Routes = append(p.Routes, PageRoute{Route: "settings"}) },
+		"unserved subroute":      func(p *Page) { p.Subroutes = append(p.Subroutes, Subroute{Route: "app", Pattern: "x"}) },
+	} {
+		page := m.Pages[1]
+		page.Routes = append([]PageRoute(nil), page.Routes...)
+		page.Subroutes = append([]Subroute(nil), page.Subroutes...)
+		mutate(&page)
+		candidate := m
+		candidate.Pages = []Page{m.Pages[0], page}
+		if err := candidate.Validate(); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
 	}
 }

@@ -661,8 +661,11 @@ var (
 		"pulls",
 		"milestones",
 		"notifications",
-		"workspace", // native workspace page
-		"tailnet",   // native network page
+		"workspace",    // native workspace page
+		"feed",         // native feed page
+		"applications", // native applications page
+		"requests",     // native requests page
+		"tailnet",      // native network page
 		"report_abuse",
 
 		"favicon.ico",

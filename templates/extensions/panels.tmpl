@@ -1,5 +1,5 @@
 {{if .ExtensionPanelsHome}}
-<aside id="extension-panels" class="extension-workspace-panels" aria-label="Workspace panels" data-extension-panels data-app-sub-url="{{AppSubUrl}}"{{if .ExtensionDirectPatterns}} data-extension-subroutes="{{.ExtensionDirectPatterns}}"{{end}}{{if .ExtensionRepositoryID}} data-extension-repository-id="{{.ExtensionRepositoryID}}"{{end}} data-extension-session-generation="{{.ExtensionSessionGeneration}}"{{if not .PageIsWorkspacePage}} hidden inert{{end}}>
+<aside id="extension-panels" class="extension-workspace-panels" aria-label="Extension panels" data-extension-panels data-app-sub-url="{{AppSubUrl}}"{{if .ExtensionDirectPatterns}} data-extension-subroutes="{{.ExtensionDirectPatterns}}"{{end}}{{if .ExtensionRepositoryID}} data-extension-repository-id="{{.ExtensionRepositoryID}}"{{end}} data-extension-session-generation="{{.ExtensionSessionGeneration}}"{{if not .PageIsWorkspacePage}} hidden inert{{end}}>
 	{{range .ExtensionPanels}}
 	<section class="extension-workspace-panel" aria-labelledby="extension-panel-{{.ExtensionID}}-{{.ID}}">
 		<h2 id="extension-panel-{{.ExtensionID}}-{{.ID}}">{{.Title}}</h2>

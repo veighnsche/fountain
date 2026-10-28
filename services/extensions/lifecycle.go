@@ -342,21 +342,19 @@ func claimedRouteConflict(running map[string]*running, manifest sdk.Manifest) st
 	claimed := make(map[string]bool)
 	for _, item := range running {
 		for _, page := range item.descriptor.Manifest.Pages {
-			if page.Route == "" {
-				continue
+			for _, route := range page.RouteNames() {
+				claimed[page.Scope+"/"+route] = true
 			}
-			claimed[page.Scope+"/"+page.Route] = true
 			for _, sub := range page.Subroutes {
-				claimed[page.Scope+"/"+page.Route+"/"+sub.Pattern] = true
+				claimed[page.Scope+"/"+page.SubrouteRoute(sub)+"/"+sub.Pattern] = true
 			}
 		}
 	}
 	for _, page := range manifest.Pages {
-		if page.Route == "" {
-			continue
-		}
-		if claimed[page.Scope+"/"+page.Route] {
-			return page.Scope + "/" + page.Route
+		for _, route := range page.RouteNames() {
+			if claimed[page.Scope+"/"+route] {
+				return page.Scope + "/" + route
+			}
 		}
 	}
 	return ""
