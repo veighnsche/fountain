@@ -453,6 +453,9 @@ func renderPage(ctx *context.Context, d extensions_service.Descriptor, transport
 	// independent page (including a repository feed at /workspace) owns
 	// its own mount and must not expose the workspace panels below it.
 	ctx.Data["PageIsWorkspacePage"] = p.Owner != ""
+	// Soda's custom header and settings templates still compare link URLs
+	// with the exact page address; Fountain's own templates use the key.
+	ctx.Data["ExtensionPageURL"] = setting.AppSubURL + ctx.Req.URL.EscapedPath()
 	ctx.PageData["extension"] = map[string]string{"id": d.Manifest.ID, "name": d.Manifest.Name, "pageID": p.ID, "title": p.Title}
 	ctx.PageData["apiBase"] = pageAPIBase(ctx, d, p)
 	ctx.PageData["assetBase"] = assetBase
