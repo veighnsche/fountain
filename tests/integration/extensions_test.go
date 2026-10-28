@@ -291,8 +291,11 @@ func TestExtensionNativePermissions(t *testing.T) {
 		{ID: "site-admin", Title: "Site admin", Scope: "admin", Route: "workspace", Routes: []extension.PageRoute{{Route: "sodaos", Title: "SodaOS"}}, Permission: "admin", Entry: "main.js"},
 		// One repository page owns several named routes (one page identity).
 		{ID: "read", Title: "Read", Scope: "repository", Permission: "read", Entry: "main.js", Route: "feed", Routes: []extension.PageRoute{
-			{Route: "requests", Title: "Requests"}, {Route: "app", Title: "App"}, {Route: "terminals", Title: "Terminals", Persist: true},
-			{Route: "knowledge", Title: "Knowledge", Hidden: true}, {Route: "issue-factory", Title: "Factory status"},
+			{Route: "requests", Title: "Requests"},
+			{Route: "app", Title: "App"},
+			{Route: "terminals", Title: "Terminals", Persist: true},
+			{Route: "knowledge", Title: "Knowledge", Hidden: true},
+			{Route: "issue-factory", Title: "Factory status"},
 		}, Subroutes: []extension.Subroute{{Route: "requests", Pattern: "new", Title: "New request"}, {Route: "requests", Pattern: "{request}", Title: "Request"}}},
 		{ID: "write", Title: "Write", Scope: "repository", Permission: "write", Entry: "main.js"},
 		{ID: "admin", Title: "Admin", Scope: "repository", Permission: "admin", Entry: "main.js", Route: "settings", Subroutes: []extension.Subroute{{Pattern: "factory", Title: "Factory settings"}}},
