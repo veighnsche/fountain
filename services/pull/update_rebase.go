@@ -44,7 +44,7 @@ func updateHeadByRebaseOnToBase(ctx context.Context, pr *issues_model.PullReques
 		if err := LFSPush(ctx, mergeCtx.tmpBasePath, baseBranch, oldMergeBase, &issues_model.PullRequest{
 			HeadRepoID: pr.BaseRepoID,
 			BaseRepoID: pr.HeadRepoID,
-		}); err != nil {
+		}, nil); err != nil {
 			log.Error("Unable to push lfs objects between %s and %s up to head branch in %-v: %v", baseBranch, oldMergeBase, pr, err)
 			return err
 		}

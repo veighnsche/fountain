@@ -157,13 +157,7 @@ func createPullRequestPrimary(ctx context.Context, repo *repo_model.Repository, 
 // ordinary service path and the conditional PR-creation operation share this
 // completion.
 func CompletePullRequestCreation(ctx context.Context, repo *repo_model.Repository, pr *issues_model.PullRequest) ([]*issue_service.ReviewRequestNotifier, error) {
-	// add first push codes comment
-	baseGitRepo, err := gitrepo.OpenRepository(ctx, pr.BaseRepo)
-	if err != nil {
-		return nil, err
-	}
-	defer baseGitRepo.Close()
-
+	var err error
 	if pr.Flow == issues_model.PullRequestFlowGithub {
 		err = PushToBaseRepo(ctx, pr)
 	} else {
@@ -172,6 +166,19 @@ func CompletePullRequestCreation(ctx context.Context, repo *repo_model.Repositor
 	if err != nil {
 		return nil, err
 	}
+	return FinishPullRequestCreation(ctx, repo, pr)
+}
+
+// FinishPullRequestCreation records the initial native push history and code
+// owner requests after the derived ref exists. It reads Git but never writes
+// refs. Journaled human creation establishes its exact ref separately, then
+// shares this ordinary completion work under a durable one-shot claim.
+func FinishPullRequestCreation(ctx context.Context, repo *repo_model.Repository, pr *issues_model.PullRequest) ([]*issue_service.ReviewRequestNotifier, error) {
+	baseGitRepo, err := gitrepo.OpenRepository(ctx, pr.BaseRepo)
+	if err != nil {
+		return nil, err
+	}
+	defer baseGitRepo.Close()
 
 	compareInfo, err := baseGitRepo.GetCompareInfo(pr.BaseRepo.RepoPath(),
 		git.BranchPrefix+pr.BaseBranch, pr.GetGitRefName(), false, false)

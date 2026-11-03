@@ -7,32 +7,33 @@ package pull
 import (
 	"bufio"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"sync"
 
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
+	nativeoperation_model "forgejo.org/models/nativeoperation"
 	"forgejo.org/modules/git/pipeline"
 	"forgejo.org/modules/lfs"
-	"forgejo.org/modules/log"
 )
 
-// LFSPush pushes lfs objects referred to in new commits in the head repository from the base repository
-func LFSPush(ctx context.Context, tmpBasePath, mergeHeadSHA, mergeBaseSHA string, pr *issues_model.PullRequest) error {
-	// Now we have to implement git lfs push
-	// git rev-list --objects --filter=blob:limit=1k HEAD --not base
-	// pass blob shas in to git cat-file --batch-check (possibly unnecessary)
-	// ensure only blobs and <=1k size then pass in to git cat-file --batch
-	// to read each sha and check each as a pointer
-	// Then if they are lfs -> add them to the baseRepo
+// LFSPush verifies shared-store content and associates new source LFS pointers
+// with the target repository. Failures stop before the caller's Git push.
+// beforeWrite rechecks a conditional caller's current authority after storage I/O.
+func LFSPush(ctx context.Context, tmpBasePath, mergeHeadSHA, mergeBaseSHA string, pr *issues_model.PullRequest, beforeWrite func() error) error {
+	// Stream candidate objects through native Git, inspect pointer-sized blobs,
+	// then verify source/content evidence before associating them with the target.
 	revListReader, revListWriter := io.Pipe()
 	shasToCheckReader, shasToCheckWriter := io.Pipe()
 	catFileCheckReader, catFileCheckWriter := io.Pipe()
 	shasToBatchReader, shasToBatchWriter := io.Pipe()
 	catFileBatchReader, catFileBatchWriter := io.Pipe()
-	errChan := make(chan error, 1)
+	errChan := make(chan error, 2)
 	wg := sync.WaitGroup{}
 	wg.Add(6)
 	// Create the go-routines in reverse order.
@@ -40,7 +41,10 @@ func LFSPush(ctx context.Context, tmpBasePath, mergeHeadSHA, mergeBaseSHA string
 	// 6. Take the output of cat-file --batch and check if each file in turn
 	// to see if they're pointers to files in the LFS store associated with
 	// the head repo and add them to the base repo if so
-	go createLFSMetaObjectsFromCatFileBatch(db.DefaultContext, catFileBatchReader, &wg, pr)
+	go func() {
+		defer wg.Done()
+		errChan <- createLFSMetaObjectsFromCatFileBatch(ctx, catFileBatchReader, pr, beforeWrite)
+	}()
 
 	// 5. Take the shas of the blobs and batch read them
 	go pipeline.CatFileBatch(ctx, shasToBatchReader, catFileBatchWriter, &wg, tmpBasePath)
@@ -58,50 +62,46 @@ func LFSPush(ctx context.Context, tmpBasePath, mergeHeadSHA, mergeBaseSHA string
 	go pipeline.RevListObjects(ctx, revListWriter, &wg, tmpBasePath, mergeHeadSHA, mergeBaseSHA, errChan)
 
 	wg.Wait()
-	select {
-	case err, has := <-errChan:
-		if has {
-			return err
-		}
-	default:
+	close(errChan)
+	var result error
+	for err := range errChan {
+		result = errors.Join(result, err)
 	}
-	return nil
+	return errors.Join(result, ctx.Err())
 }
 
-func createLFSMetaObjectsFromCatFileBatch(ctx context.Context, catFileBatchReader *io.PipeReader, wg *sync.WaitGroup, pr *issues_model.PullRequest) {
-	defer wg.Done()
-	defer catFileBatchReader.Close()
+func createLFSMetaObjectsFromCatFileBatch(ctx context.Context, catFileBatchReader *io.PipeReader, pr *issues_model.PullRequest, beforeWrite func() error) (result error) {
+	defer func() { _ = catFileBatchReader.CloseWithError(result) }()
 
 	contentStore := lfs.NewContentStore()
 
 	bufferedReader := bufio.NewReader(catFileBatchReader)
 	buf := make([]byte, 1025)
 	for {
-		// File descriptor line: sha
-		_, err := bufferedReader.ReadString(' ')
-		if err != nil {
-			_ = catFileBatchReader.CloseWithError(err)
-			break
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		// Throw away the blob
-		if _, err := bufferedReader.ReadString(' '); err != nil {
-			_ = catFileBatchReader.CloseWithError(err)
-			break
+		header, err := bufferedReader.ReadString('\n')
+		if errors.Is(err, io.EOF) && header == "" {
+			return nil
 		}
-		sizeStr, err := bufferedReader.ReadString('\n')
 		if err != nil {
-			_ = catFileBatchReader.CloseWithError(err)
-			break
+			return err
 		}
-		size, err := strconv.Atoi(sizeStr[:len(sizeStr)-1])
-		if err != nil {
-			_ = catFileBatchReader.CloseWithError(err)
-			break
+		fields := strings.Fields(header)
+		if len(fields) != 3 || fields[1] != "blob" {
+			return fmt.Errorf("invalid LFS scan object header")
+		}
+		size, err := strconv.Atoi(fields[2])
+		if err != nil || size < 0 || size > 1024 {
+			return fmt.Errorf("invalid LFS scan object size")
 		}
 		pointerBuf := buf[:size+1]
 		if _, err := io.ReadFull(bufferedReader, pointerBuf); err != nil {
-			_ = catFileBatchReader.CloseWithError(err)
-			break
+			return err
+		}
+		if pointerBuf[size] != '\n' {
+			return fmt.Errorf("invalid LFS scan object terminator")
 		}
 		pointerBuf = pointerBuf[:size]
 		// Now we need to check if the pointerBuf is an LFS pointer
@@ -110,26 +110,51 @@ func createLFSMetaObjectsFromCatFileBatch(ctx context.Context, catFileBatchReade
 			continue
 		}
 
-		exist, _ := contentStore.Exists(pointer)
-		if !exist {
-			continue
-		}
-
-		// Then we need to check that this pointer is in the db
-		if _, err := git_model.GetLFSMetaObjectByOid(ctx, pr.HeadRepoID, pointer.Oid); err != nil {
-			if err == git_model.ErrLFSObjectNotExist {
-				log.Warn("During merge of: %d in %-v, there is a pointer to LFS Oid: %s which although present in the LFS store is not associated with the head repo %-v", pr.Index, pr.BaseRepo, pointer.Oid, pr.HeadRepo)
-				continue
+		checkSource := func(ctx context.Context) error {
+			meta, err := git_model.GetLFSMetaObjectByOid(ctx, pr.HeadRepoID, pointer.Oid)
+			if err != nil {
+				return err
 			}
-			_ = catFileBatchReader.CloseWithError(err)
-			break
+			if meta.Size != pointer.Size {
+				return lfs.ErrSizeMismatch
+			}
+			return nil
 		}
-		// OK we have a pointer that is associated with the head repo
-		// and is actually a file in the LFS
-		// Therefore it should be associated with the base repo
-		if _, err := git_model.NewLFSMetaObject(ctx, pr.BaseRepoID, pointer); err != nil {
-			_ = catFileBatchReader.CloseWithError(err)
-			break
+		if err := checkSource(ctx); err != nil {
+			return err
+		}
+		verified, err := contentStore.Verify(pointer)
+		if err != nil {
+			return err
+		}
+		if !verified {
+			return fmt.Errorf("LFS content %s is missing or has the wrong size", pointer.Oid)
+		}
+		if beforeWrite != nil {
+			if err := beforeWrite(); err != nil {
+				return err
+			}
+		}
+		// Preserve the caller's execution/cancellation context. Re-read source
+		// association after storage I/O, and order the target write under the
+		// existing held reservation without holding SQL across that I/O.
+		if err := db.WithTx(ctx, func(tx context.Context) error {
+			if err := nativeoperation_model.RequireHeldOwnership(tx); err != nil {
+				return err
+			}
+			if err := checkSource(tx); err != nil {
+				return err
+			}
+			meta, err := git_model.NewLFSMetaObject(tx, pr.BaseRepoID, pointer)
+			if err != nil {
+				return err
+			}
+			if meta.Size != pointer.Size {
+				return lfs.ErrSizeMismatch
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
 }

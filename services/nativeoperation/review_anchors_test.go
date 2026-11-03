@@ -33,7 +33,7 @@ index 1111111..2222222 100644
 +++ b/b.go
 @@ -1,4 +1,4 @@
  first
-
+` + " \n" + `
 -third
 +third!
  fifth

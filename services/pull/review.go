@@ -221,6 +221,8 @@ func doCreateCodeCommentKnownReviewID(ctx context.Context, doer *user_model.User
 	line, reviewID int64, attachments []string,
 ) (*issues_model.Comment, error) {
 	var commitID, blamedCommitID, patch string
+	var originalAnchor *issues_model.CodeCommentAnchor
+	var reply bool
 	blamedLine := line
 	if err := issue.LoadPullRequest(ctx); err != nil {
 		return nil, fmt.Errorf("LoadPullRequest: %w", err)
@@ -241,22 +243,31 @@ func doCreateCodeCommentKnownReviewID(ctx context.Context, doer *user_model.User
 		// If the comment is a reply to an existing comment, populate properties based upon the comment we're replying
 		// to (commit, patch, etc.) rather than recalculating those unnecessarily.  The UI also doesn't provide enough
 		// context (eg. before_commit_id, after_commit_id) to calculate this.
-		first, err := issues_model.FindComments(ctx, &issues_model.FindCommentsOptions{
-			ReviewID: reviewID,
-			Line:     line,
-			TreePath: treePath,
-			Type:     issues_model.CommentTypeCode,
-			ListOptions: db.ListOptions{
-				PageSize: 1,
-				Page:     1,
-			},
-		})
-		if err == nil && len(first) > 0 {
-			commitID = first[0].CommitSHA
-			invalidated = first[0].Invalidated
-			patch = first[0].Patch
-		} else if err != nil && !issues_model.IsErrCommentNotExist(err) {
-			return nil, fmt.Errorf("Find first comment for %d line %d path %s. Error: %w", reviewID, line, treePath, err)
+		// This older native form names only a location, not a thread root.
+		// Never attach it to an arbitrary file side/range/original tree pair
+		// when that location now contains several immutable conversations.
+		var rows issues_model.CommentList
+		err := db.GetEngine(ctx).Where("issue_id = ? AND review_id = ? AND tree_path = ? AND line = ? AND type = ?",
+			issue.ID, reviewID, treePath, line, issues_model.CommentTypeCode).
+			Cols("id", "type", "issue_id", "review_id", "tree_path", "line", "created_unix", "original_anchor").
+			Asc("created_unix").Asc("id").Limit(10001).Find(&rows)
+		if err != nil {
+			return nil, fmt.Errorf("find reply conversation: %w", err)
+		}
+		threads := issues_model.GroupCodeThreads(rows)
+		if len(rows) > 10000 || len(threads) > 1 {
+			return nil, errors.New("reply location has ambiguous original context")
+		}
+		if len(threads) == 1 {
+			first, err := issues_model.GetCommentByID(ctx, threads[0].Root().ID)
+			if err != nil {
+				return nil, err
+			}
+			reply = true
+			originalAnchor = first.OriginalAnchor.Copy()
+			commitID = first.CommitSHA
+			invalidated = first.Invalidated
+			patch = first.Patch
 		} else {
 			review, err := issues_model.GetReviewByID(ctx, reviewID)
 			if err == nil && len(review.CommitID) > 0 {
@@ -266,8 +277,30 @@ func doCreateCodeCommentKnownReviewID(ctx context.Context, doer *user_model.User
 			}
 		}
 	}
+	if !reply {
+		// Resolve the selected pair before blame can change the line, side or
+		// commit. Old comments/replies with no captured context stay unknown.
+		before, err := gitRepo.GetCommit(beforeCommitID)
+		if err != nil {
+			return nil, fmt.Errorf("original diff base: %w", err)
+		}
+		after, err := gitRepo.GetCommit(afterCommitID)
+		if err != nil {
+			return nil, fmt.Errorf("original diff head: %w", err)
+		}
+		side := "new"
+		selectedLine := line
+		if selectedLine < 0 {
+			side = "old"
+			selectedLine = -selectedLine
+		}
+		originalAnchor = &issues_model.CodeCommentAnchor{Base: before.ID.String(), Head: after.ID.String(), Path: treePath, Side: side, Scope: "lines", StartLine: selectedLine, EndLine: selectedLine}
+		if err := originalAnchor.Validate(); err != nil {
+			return nil, err
+		}
+	}
 
-	if len(commitID) == 0 {
+	if !reply && len(commitID) == 0 {
 		if line > 0 {
 			// FIXME validate treePath
 			// Get latest commit referencing the commented line
@@ -310,7 +343,7 @@ func doCreateCodeCommentKnownReviewID(ctx context.Context, doer *user_model.User
 	}
 
 	// Only fetch diff if comment is review comment
-	if len(patch) == 0 && reviewID != 0 {
+	if !reply && len(patch) == 0 && reviewID != 0 {
 		if len(commitID) == 0 {
 			commitID, err = gitRepo.GetRefCommitID(head)
 			if err != nil {
@@ -340,18 +373,19 @@ func doCreateCodeCommentKnownReviewID(ctx context.Context, doer *user_model.User
 		}
 	}
 	return issues_model.CreateComment(ctx, &issues_model.CreateCommentOptions{
-		Type:        issues_model.CommentTypeCode,
-		Doer:        doer,
-		Repo:        repo,
-		Issue:       issue,
-		Content:     content,
-		LineNum:     blamedLine,
-		TreePath:    treePath,
-		CommitSHA:   blamedCommitID,
-		ReviewID:    reviewID,
-		Patch:       patch,
-		Invalidated: invalidated,
-		Attachments: attachments,
+		Type:           issues_model.CommentTypeCode,
+		Doer:           doer,
+		Repo:           repo,
+		Issue:          issue,
+		Content:        content,
+		LineNum:        blamedLine,
+		TreePath:       treePath,
+		OriginalAnchor: originalAnchor,
+		CommitSHA:      blamedCommitID,
+		ReviewID:       reviewID,
+		Patch:          patch,
+		Invalidated:    invalidated,
+		Attachments:    attachments,
 	})
 }
 

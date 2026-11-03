@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -193,6 +194,55 @@ func testReviewSubmitZeroCommentsEmitsLiveMergeBase(t *testing.T) {
 	replay, err := svc.Submit(ctx, decision, operationTestInstallation, intent)
 	require.NoError(t, err)
 	require.Equal(t, string(record.Receipt), string(replay.Receipt))
+
+	// A second real candidate adds one known line. Exercise the conditional
+	// producer, not just the model: the stored old side is the derived merge
+	// base, independently checked against Git, and survives replay/head moves.
+	work := t.TempDir()
+	blobPath := filepath.Join(work, "anchor.txt")
+	require.NoError(t, os.WriteFile(blobPath, []byte("persist original anchor\n"), 0o600))
+	blob := gitRun(t, repoPath, nil, "hash-object", "-w", blobPath)
+	indexEnv := []string{"GIT_INDEX_FILE=" + filepath.Join(work, "index")}
+	gitRun(t, repoPath, indexEnv, "read-tree", head)
+	gitRun(t, repoPath, indexEnv, "update-index", "--add", "--cacheinfo", "100644,"+blob+",original-anchor.txt")
+	tree := gitRun(t, repoPath, indexEnv, "write-tree")
+	identity := []string{"GIT_AUTHOR_NAME=anchor-proof", "GIT_AUTHOR_EMAIL=anchor@example.invalid", "GIT_COMMITTER_NAME=anchor-proof", "GIT_COMMITTER_EMAIL=anchor@example.invalid"}
+	inlineHead := gitRun(t, repoPath, identity, "commit-tree", tree, "-p", head, "-m", "original anchor candidate")
+	gitRun(t, repoPath, nil, "update-ref", git.BranchPrefix+"branch2", inlineHead)
+	inlineBase := gitMergeBase(t, repoPath, base, inlineHead)
+	var payload ReviewSubmitIntent
+	require.NoError(t, json.Unmarshal([]byte(reviewSubmitPayload(3, 1, 1, "refs/heads/branch2", "refs/heads/master", inlineHead, base, inlineHead, "APPROVED", "inline anchor")), &payload))
+	payload.Comments = []ReviewSubmitComment{{Key: "original", Path: "original-anchor.txt", Side: "new", Line: 1, Body: "retain original context"}}
+	raw, err := json.Marshal(payload)
+	require.NoError(t, err)
+	reservation, err := nativeoperation_model.ReadReservation(ctx)
+	require.NoError(t, err)
+	now := time.Now().Unix()
+	inlineIntent, err := ValidateIntent("review-original-anchor", 2, 1, nativeoperation_model.KindReviewSubmit, "accepted-revision", reservation.Revision, now+300, raw, now)
+	require.NoError(t, err)
+	inlineRecord, err := svc.Submit(ctx, decision, operationTestInstallation, inlineIntent)
+	require.NoError(t, err)
+	require.Equal(t, nativeoperation_model.EffectCommitted, inlineRecord.EffectState, inlineRecord.ReasonCode)
+	var inlineReceipt ReviewSubmitReceipt
+	require.NoError(t, json.Unmarshal(inlineRecord.Receipt, &inlineReceipt))
+	require.Equal(t, inlineBase, inlineReceipt.MergeBaseOID)
+	require.Len(t, inlineReceipt.Comments, 1)
+	storedInline, err := issues_model.GetCommentByID(ctx, inlineReceipt.Comments[0].CommentID)
+	require.NoError(t, err)
+	require.NotNil(t, storedInline.OriginalAnchor)
+	original := *storedInline.OriginalAnchor
+	require.Equal(t, inlineBase, original.Base)
+	require.Equal(t, inlineHead, original.Head)
+	require.Equal(t, "original-anchor.txt", original.Path)
+	require.Equal(t, "new", original.Side)
+	require.Equal(t, int64(1), original.StartLine)
+	gitAdvanceBranch(t, repoPath, "branch2", inlineHead, "later unrelated display tip", false)
+	inlineReplay, err := svc.Submit(ctx, decision, operationTestInstallation, inlineIntent)
+	require.NoError(t, err)
+	require.Equal(t, string(inlineRecord.Receipt), string(inlineReplay.Receipt))
+	storedInline, err = issues_model.GetCommentByID(ctx, storedInline.ID)
+	require.NoError(t, err)
+	require.Equal(t, &original, storedInline.OriginalAnchor)
 }
 
 func testReviewSubmitZeroCommentsDivergentBaseHead(t *testing.T) {

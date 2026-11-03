@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	sdk "forgejo.org/extension-sdk"
@@ -70,6 +71,8 @@ type Service struct {
 	refs          RefReader
 	now           func() int64
 	capabilityDir string
+	humanMergeMu  sync.Mutex
+	humanMerges   map[string]*humanMergeAdmission
 }
 
 // NewService returns a service with the real native bindings.
@@ -183,6 +186,11 @@ func validOID(oid string) bool {
 // conflicting values and out-of-scope requests fail validation rather than
 // silently broadening the request. now is host time in Unix seconds.
 func ValidateIntent(operationID string, actorID, repositoryID int64, kind, authRevision string, expectedRevision, notAfter int64, payload []byte, now int64) (*ValidIntent, error) {
+	// This operation-ID family belongs to live human callback admission.
+	// Background operations cannot occupy its actor/repository namespace.
+	if strings.HasPrefix(operationID, "human-comment:") || strings.HasPrefix(operationID, "human-edit:") || strings.HasPrefix(operationID, "human-issue-create:") || strings.HasPrefix(operationID, "human-lock:") || strings.HasPrefix(operationID, "human-state:") || strings.HasPrefix(operationID, "human-review:") || strings.HasPrefix(operationID, "human-inline:") || strings.HasPrefix(operationID, "human-thread:") || strings.HasPrefix(operationID, "human-review-request:") || strings.HasPrefix(operationID, "human-merge:") {
+		return nil, ErrInvalidIntent
+	}
 	if !validOperationID(operationID) || actorID <= 0 || repositoryID <= 0 {
 		return nil, ErrInvalidIntent
 	}

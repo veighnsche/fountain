@@ -225,6 +225,9 @@ func (s *Service) admitPrepared(ctx context.Context, reservation *nativeoperatio
 	if err != nil {
 		return TransactionDecision{}, err
 	}
+	if op != nil && op.Kind == nativeoperation_model.KindHumanPullCreate {
+		return s.admitHumanPullCreateRef(ctx, reservation, scope, op, lines)
+	}
 	if op != nil && op.Kind == nativeoperation_model.KindPRCreate {
 		// PR creation commits its primary effect in SQL, so its only
 		// Git write is bounded completion after the commit: the single
@@ -239,6 +242,9 @@ func (s *Service) admitPrepared(ctx context.Context, reservation *nativeoperatio
 	// can be staged deterministically against the atomic decision below.
 	if err := testAdmissionBarrier(); err != nil {
 		return TransactionDecision{}, err
+	}
+	if op.Kind == nativeoperation_model.KindHumanMerge {
+		return s.admitHumanMergePrepared(ctx, reservation, scope, op, lines)
 	}
 	var reason string
 	var checkErr error
@@ -578,6 +584,9 @@ func scopePermitsRef(scope Scope, ref string) bool {
 // secret, which was discarded after verification. It mirrors the submission
 // verifier's tail checks; any failure is ErrAuthorityLost.
 func (s *Service) revalidateSubmission(ctx context.Context, op *nativeoperation_model.Operation) error {
+	if op.TokenID == 0 && op.Kind == nativeoperation_model.KindIssueGraph {
+		return s.revalidateIssueIntake(ctx, op)
+	}
 	lost := func() error { return ErrAuthorityLost }
 	token := new(auth_model.AccessToken)
 	has, err := db.GetEngine(ctx).ID(op.TokenID).NoAutoCondition().Get(token)

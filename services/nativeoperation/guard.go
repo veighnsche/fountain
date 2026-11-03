@@ -55,8 +55,10 @@ type Scope struct {
 	NewOID string `json:"new_oid,omitempty"`
 	// HeadRef and HeadOID bind the live source the candidate was verified
 	// against (conditional).
-	HeadRef string `json:"head_ref,omitempty"`
-	HeadOID string `json:"head_oid,omitempty"`
+	// HeadRepositoryID binds an explicit human PR source; zero retains the existing same-repository scope.
+	HeadRepositoryID int64  `json:"head_repository_id,omitempty"`
+	HeadRef          string `json:"head_ref,omitempty"`
+	HeadOID          string `json:"head_oid,omitempty"`
 	// PRNumber binds the native PR identity (conditional merge, or the
 	// correction PR of a conditional publish).
 	PRNumber int64 `json:"pr_number,omitempty"`
@@ -99,7 +101,8 @@ type Scope struct {
 	AuthorityID2 int64  `json:"authority_id2,omitempty"`
 	// CompletionRef, CompletionOldOID, CompletionNewOID and
 	// CompletionPhase bind the single derived PR-ref write of a
-	// conditional PR creation. The internal ref is allocated at the
+	// conditional PR creation. Human merge uses CompletionPhase alone for its
+	// durable one-shot native finishing and push-event claims. The internal ref is allocated at the
 	// primary commit, so these persist after it and before derived Git
 	// writes; hooks admit exactly this tuple as bounded completion.
 	CompletionRef    string `json:"completion_ref,omitempty"`

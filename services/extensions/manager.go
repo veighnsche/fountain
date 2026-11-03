@@ -696,7 +696,7 @@ func needsNativeCallback(capabilities []string) bool {
 		case sdk.CapabilityActorRead, sdk.CapabilityRepositoryRead,
 			sdk.CapabilityOwnedRepositoriesSearch, sdk.CapabilityOrganizationOwnership,
 			sdk.CapabilityPublicKeysRead, sdk.CapabilityBackgroundOperations,
-			sdk.CapabilityExtensionLifecycle:
+			sdk.CapabilityExtensionLifecycle, sdk.CapabilityHumanComments, sdk.CapabilityHumanEdits:
 			return true
 		}
 	}

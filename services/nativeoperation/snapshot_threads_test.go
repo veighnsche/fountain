@@ -76,6 +76,9 @@ func legacyThreadDigest(t *testing.T) string {
 
 func threadLocationFor(path string, line int64) (string, string) {
 	side := sdk.ThreadSideNew
+	if line == 0 {
+		side = ""
+	}
 	unsigned := line
 	if line < 0 {
 		side, unsigned = sdk.ThreadSideOld, -line
@@ -92,11 +95,12 @@ func expectedThreadDigest(t *testing.T, comments ...*issues_model.Comment) strin
 	lines := make([]string, 0, len(comments))
 	for _, comment := range comments {
 		lines = append(lines, sdk.ResolveConversationLine(sdk.ResolveConversationMember{
-			ID:            comment.ID,
-			Body:          comment.Content,
-			ContentVer:    int64(comment.ContentVersion),
-			Location:      location,
-			ResolverState: sdk.ThreadResolverState(comment.ResolveDoerID),
+			OriginalAnchor: threadOriginalAnchor(comment.OriginalAnchor),
+			ID:             comment.ID,
+			Body:           comment.Content,
+			ContentVer:     int64(comment.ContentVersion),
+			Location:       location,
+			ResolverState:  sdk.ThreadResolverState(comment.ResolveDoerID),
 		}))
 	}
 	digest, err := sdk.ResolveConversationDigest(lines)
@@ -213,7 +217,10 @@ func TestSnapshotReadThreadsHidesPendingContent(t *testing.T) {
 	author := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 4})
 
 	review := insertThreadReview(t, issue.ID, 4, issues_model.ReviewTypePending)
-	insertThreadComment(t, issue, author, review.ID, "secret.go", 1, snapshotBranch2, "pending remark")
+	pending := insertThreadComment(t, issue, author, review.ID, "secret.go", 0, snapshotBranch2, "pending remark")
+	pending.OriginalAnchor = &issues_model.CodeCommentAnchor{Base: snapshotMaster, Head: snapshotBranch2, Path: "secret.go", Side: "old", Scope: "file"}
+	_, err := db.GetEngine(ctx).ID(pending.ID).Cols("original_anchor").Update(pending)
+	require.NoError(t, err)
 
 	req := snapshotProofRequest("1", "2", []string{sdk.SnapshotFamilyReviewThreads})
 	req.PullNumber = "3"
@@ -231,6 +238,9 @@ func TestSnapshotReadThreadsHidesPendingContent(t *testing.T) {
 	require.NotNil(t, hidden, "exactly the pending thread hides")
 	require.Empty(t, hidden.Digest, "hidden threads carry no digest")
 	require.Empty(t, hidden.Members)
+	require.Nil(t, hidden.OriginalAnchor)
+	require.Empty(t, hidden.Path)
+	require.Empty(t, hidden.Side)
 
 	// The pending author observes its own conversation completely.
 	ownReq := snapshotProofRequest("1", "4", []string{sdk.SnapshotFamilyReviewThreads})
@@ -242,6 +252,13 @@ func TestSnapshotReadThreadsHidesPendingContent(t *testing.T) {
 	for _, item := range own.Threads.Items {
 		require.True(t, item.Visible)
 		require.NotEmpty(t, item.Digest)
+		if item.RootID == snapshotIDString(pending.ID) {
+			require.Equal(t, threadOriginalAnchor(pending.OriginalAnchor), item.OriginalAnchor)
+			require.Len(t, item.Members, 1)
+			require.Equal(t, item.OriginalAnchor, item.Members[0].OriginalAnchor)
+			require.Zero(t, item.Line)
+			require.Empty(t, item.Side)
+		}
 	}
 }
 

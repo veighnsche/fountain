@@ -10,6 +10,7 @@ import (
 	"forgejo.org/models"
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
+	nativeoperation_model "forgejo.org/models/nativeoperation"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
@@ -18,6 +19,34 @@ import (
 	"forgejo.org/modules/timeutil"
 	notify_service "forgejo.org/services/notify"
 )
+
+// ErrManualMergeCommit preserves the ordinary route's invalid-commit response.
+var ErrManualMergeCommit = errors.New("Wrong commit ID")
+
+// ReadManualMergeCommit is the native read-only commit selection rule shared by
+// ordinary manual marking and conditional preparation. The selected full object
+// must resolve to a commit already reachable from the current target branch.
+// It requires neither a source repository nor a live PR head, and writes no ref.
+func ReadManualMergeCommit(baseGitRepo *git.Repository, objectFormatName, baseBranch, commitID string) (*git.Commit, error) {
+	if baseGitRepo == nil || len(commitID) != git.ObjectFormatFromName(objectFormatName).FullLength() {
+		return nil, ErrManualMergeCommit
+	}
+	commit, err := baseGitRepo.GetCommit(commitID)
+	if err != nil {
+		if git.IsErrNotExist(err) {
+			return nil, ErrManualMergeCommit
+		}
+		return nil, err
+	}
+	ok, err := baseGitRepo.IsCommitInBranch(commit.ID.String(), baseBranch)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrManualMergeCommit
+	}
+	return commit, nil
+}
 
 // MergedManually mark pr as merged manually
 func MergedManually(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, baseGitRepo *git.Repository, commitID string) error {
@@ -33,7 +62,54 @@ func doMergedManually(ctx context.Context, pr *issues_model.PullRequest, doer *u
 	pullWorkingPool.CheckIn(fmt.Sprint(pr.ID))
 	defer pullWorkingPool.CheckOut(fmt.Sprint(pr.ID))
 
-	if err := db.WithTx(ctx, func(ctx context.Context) error {
+	marked, err := ApplyManualMergeMetadata(ctx, pr.ID, doer, baseGitRepo, commitID)
+	if err != nil {
+		return err
+	}
+	*pr = *marked
+	return FinishManualMerge(ctx, pr, doer)
+}
+
+// FinishManualMerge shares the ordinary manual writer's notification and
+// cross-reference actions with receipt-driven completion. The caller owns its
+// single dispatch; no merge push, branch sync or push event belongs here.
+func FinishManualMerge(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User) error {
+	if err := nativeoperation_model.RequireHeldOwnership(ctx); err != nil {
+		return err
+	}
+	if err := pr.LoadIssue(ctx); err != nil {
+		return err
+	}
+	if err := pr.LoadBaseRepo(ctx); err != nil {
+		return err
+	}
+	pr.Issue.Repo = pr.BaseRepo
+	notify_service.MergePullRequest(ctx, doer, pr)
+	log.Info("manuallyMerged[%d]: Marked as manually merged into %s/%s by commit id: %s", pr.ID, pr.BaseRepo.Name, pr.BaseBranch, pr.MergedCommitID)
+	return handleCloseCrossReferences(ctx, pr, doer)
+}
+
+// ApplyManualMergeMetadata is the shared native SQL owner, without dispatch or
+// ref writes. It reloads/locks the actual PR and uses SetMerged for its exact
+// native status, issue closure, merge history and counters in one transaction.
+func ApplyManualMergeMetadata(ctx context.Context, pullID int64, doer *user_model.User, baseGitRepo *git.Repository, commitID string) (marked *issues_model.PullRequest, err error) {
+	if pullID < 1 || doer == nil || doer.ID < 1 || baseGitRepo == nil {
+		return nil, ErrManualMergeCommit
+	}
+	err = db.WithTx(ctx, func(ctx context.Context) error {
+		if err := nativeoperation_model.RequireHeldOwnership(ctx); err != nil {
+			return err
+		}
+		if _, err := db.GetEngine(ctx).Exec("UPDATE `pull_request` SET `issue_id`=`issue_id` WHERE `id`=?", pullID); err != nil {
+			return err
+		}
+		pr, err := issues_model.GetPullRequestByID(ctx, pullID)
+		if err != nil {
+			return err
+		}
+		if pr.HasMerged {
+			return ErrHasMerged
+		}
 		if err := pr.LoadBaseRepo(ctx); err != nil {
 			return err
 		}
@@ -48,27 +124,11 @@ func doMergedManually(ctx context.Context, pr *issues_model.PullRequest, doer *u
 			return models.ErrInvalidMergeStyle{ID: pr.BaseRepo.ID, Style: repo_model.MergeStyleManuallyMerged}
 		}
 
-		objectFormat := git.ObjectFormatFromName(pr.BaseRepo.ObjectFormatName)
-		if len(commitID) != objectFormat.FullLength() {
-			return errors.New("Wrong commit ID")
-		}
-
-		commit, err := baseGitRepo.GetCommit(commitID)
+		commit, err := ReadManualMergeCommit(baseGitRepo, pr.BaseRepo.ObjectFormatName, pr.BaseBranch, commitID)
 		if err != nil {
-			if git.IsErrNotExist(err) {
-				return errors.New("Wrong commit ID")
-			}
 			return err
 		}
 		commitID = commit.ID.String()
-
-		ok, err := baseGitRepo.IsCommitInBranch(commitID, pr.BaseBranch)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return errors.New("Wrong commit ID")
-		}
 
 		pr.MergedCommitID = commitID
 		pr.MergedUnix = timeutil.TimeStamp(commit.Author.When.Unix())
@@ -82,15 +142,13 @@ func doMergedManually(ctx context.Context, pr *issues_model.PullRequest, doer *u
 		} else if !merged {
 			return errors.New("SetMerged failed")
 		}
+		marked = pr
 		return nil
-	}); err != nil {
-		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	notify_service.MergePullRequest(baseGitRepo.Ctx, doer, pr)
-	log.Info("manuallyMerged[%d]: Marked as manually merged into %s/%s by commit id: %s", pr.ID, pr.BaseRepo.Name, pr.BaseBranch, commitID)
-
-	return handleCloseCrossReferences(ctx, pr, doer)
+	return marked, nil
 }
 
 // manuallyMerged checks if a pull request got manually merged

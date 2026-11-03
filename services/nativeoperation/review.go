@@ -381,6 +381,7 @@ func (s *Service) executeReviewSubmit(ctx context.Context, op *nativeoperation_m
 	if err != nil {
 		return refuse(mapExactReviewRefusal(err))
 	}
+	target.DiffBaseOID = mergeBase
 	var modelComments []issues_model.ExactReviewComment
 	if len(submit.Comments) > 0 {
 		anchors := make([]inlineAnchor, 0, len(submit.Comments))

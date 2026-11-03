@@ -132,10 +132,10 @@ func parseReviewFileDiff(diff []byte) reviewDiffLines {
 			continue
 		}
 		switch {
-		case line == "" || strings.HasPrefix(line, " "):
+		case strings.HasPrefix(line, " "):
 			// Context lines follow native rules: anchorable on
-			// either side. An empty diff line is a blank context
-			// line, not a hunk boundary.
+			// either side. Git prefixes blank context with a space;
+			// a bare empty line after the final newline is not content.
 			parsed.oldLines[oldLine] = true
 			parsed.newLines[newLine] = true
 			oldLine++

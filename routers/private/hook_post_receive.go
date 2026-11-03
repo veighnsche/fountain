@@ -11,10 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
-	pull_model "forgejo.org/models/pull"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/cache"
@@ -25,11 +23,11 @@ import (
 	"forgejo.org/modules/private"
 	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
-	timeutil "forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 	"forgejo.org/modules/web"
 	app_context "forgejo.org/services/context"
 	nativeoperation_service "forgejo.org/services/nativeoperation"
+	pull_service "forgejo.org/services/pull"
 	repo_service "forgejo.org/services/repository"
 )
 
@@ -391,10 +389,6 @@ func handlePullRequestMerging(ctx *app_context.PrivateContext, opts *private.Hoo
 		return
 	}
 
-	pr.MergedCommitID = updates[len(updates)-1].NewCommitID
-	pr.MergedUnix = timeutil.TimeStampNow()
-	pr.Merger = pusher
-	pr.MergerID = pusher.ID
 	// The merge completion writes ride the merge owner's bound execution
 	// like the other nested writers in this hook; the raw hook context
 	// carries no execution, so the fenced writers below would refuse a
@@ -405,16 +399,7 @@ func handlePullRequestMerging(ctx *app_context.PrivateContext, opts *private.Hoo
 		ctx.JSON(http.StatusInternalServerError, private.HookPostReceiveResult{Err: "Failed to bind merge completion"})
 		return
 	}
-	err = db.WithTx(reqCtx, func(reqCtx context.Context) error {
-		// Removing an auto merge pull and ignore if not exist
-		if err := pull_model.DeleteScheduledAutoMerge(reqCtx, pr.ID); err != nil && !db.IsErrNotExist(err) {
-			return fmt.Errorf("DeleteScheduledAutoMerge[%d]: %v", opts.PullRequestID, err)
-		}
-		if _, err := pr.SetMerged(reqCtx); err != nil {
-			return fmt.Errorf("SetMerged failed: %s/%s Error: %v", ownerName, repoName, err)
-		}
-		return nil
-	})
+	_, err = pull_service.ApplyMergeMetadata(reqCtx, pr.ID, pusher, updates[len(updates)-1].NewCommitID, pr.MergeBase)
 	if err != nil {
 		log.Error("Failed to update PR to merged: %v", err)
 		ctx.JSON(http.StatusInternalServerError, private.HookPostReceiveResult{Err: "Failed to update PR to merged"})

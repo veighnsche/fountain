@@ -113,6 +113,9 @@ func (s *Service) recordStaleRevision(ctx context.Context, op *nativeoperation_m
 	if err != nil && !errors.Is(err, nativeoperation_model.ErrDuplicateOperation) {
 		return sdk.OperationRecord{}, err
 	}
+	if errors.Is(err, nativeoperation_model.ErrDuplicateOperation) {
+		return s.reconcileExisting(recorded, &ValidIntent{Digest: op.IntentDigest})
+	}
 	return ToRecord(recorded), nil
 }
 

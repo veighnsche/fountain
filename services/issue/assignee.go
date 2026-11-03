@@ -103,12 +103,7 @@ func doReviewRequest(ctx context.Context, issue *issues_model.Issue, doer, revie
 		return nil, err
 	}
 
-	// don't notify if the user is requesting itself as reviewer
-	if comment != nil && doer.ID != reviewer.ID {
-		notify_service.PullRequestReviewRequest(ctx, doer, issue, reviewer, isAdd, comment)
-	}
-
-	return comment, err
+	return comment, CompleteReviewRequestChange(ctx, issue, doer, reviewer, nil, isAdd, comment)
 }
 
 // IsValidReviewRequest Check permission for ReviewRequest
@@ -261,7 +256,29 @@ func doTeamReviewRequest(ctx context.Context, issue *issues_model.Issue, doer *u
 		return nil, nil
 	}
 
-	return comment, teamReviewRequestNotify(ctx, issue, doer, reviewer, isAdd, comment)
+	return comment, CompleteReviewRequestChange(ctx, issue, doer, nil, reviewer, isAdd, comment)
+}
+
+// CompleteReviewRequestChange performs only the native post-primary notification
+// work. Ordinary writers and the admitted conditional journal share this owner;
+// offline recovery never repeats potentially delivered notifications.
+func CompleteReviewRequestChange(ctx context.Context, issue *issues_model.Issue, doer, reviewer *user_model.User, team *organization.Team, isAdd bool, comment *issues_model.Comment) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if comment == nil {
+		return nil
+	}
+	if reviewer != nil {
+		if doer.ID != reviewer.ID {
+			notify_service.PullRequestReviewRequest(ctx, doer, issue, reviewer, isAdd, comment)
+		}
+		return nil
+	}
+	if team != nil && isAdd {
+		return teamReviewRequestNotify(ctx, issue, doer, team, isAdd, comment)
+	}
+	return nil
 }
 
 func ReviewRequestNotify(ctx context.Context, issue *issues_model.Issue, doer *user_model.User, reviewNotifiers []*ReviewRequestNotifier) {

@@ -324,6 +324,18 @@ func (m *Manager) BootstrapServiceAdmission(peerUID uint32, requestedInstallatio
 	return token, installation, nil
 }
 
+// AdmittedInstallation resolves a live native callback's package instance.
+// Callers cannot select an installation UUID through a callback body.
+func (m *Manager) AdmittedInstallation(packageID, instanceID string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	item := m.running[packageID]
+	if item == nil || item.descriptor.InstanceID != instanceID || item.client.Exited() {
+		return "", false
+	}
+	return item.installation, item.installation != ""
+}
+
 // peerCredentialAddr carries kernel Unix peer credentials in RemoteAddr form
 // so private-socket handlers can enforce peer policy. An empty value marks a
 // connection whose credentials could not be read; handlers must reject it.

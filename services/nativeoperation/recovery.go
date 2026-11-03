@@ -135,6 +135,42 @@ func (s *Service) recoverConditional(ctx context.Context, assessment *RecoveryAs
 		return fenced(assessment, ReasonRecoveryMissingEvidence, "operation record is missing for the held owner")
 	}
 	switch op.Kind {
+	case nativeoperation_model.KindHumanPullCreate:
+		assessment.Family = "conditional-human-pull-create"
+		return s.recoverHumanPullCreate(ctx, assessment, reservation, scope, op)
+	case nativeoperation_model.KindHumanManualMerge:
+		assessment.Family = "conditional-human-manual-merge"
+		return s.recoverHumanManualMerge(ctx, assessment, reservation, scope, op)
+	case nativeoperation_model.KindHumanMerge:
+		assessment.Family = "conditional-human-merge"
+		return s.recoverHumanMerge(ctx, assessment, reservation, scope, op)
+	case nativeoperation_model.KindHumanReviewRequest:
+		assessment.Family = "conditional-human-review-request"
+		return s.recoverHumanReviewRequest(ctx, assessment, reservation, scope, op)
+	case nativeoperation_model.KindHumanThread:
+		assessment.Family = "conditional-human-thread"
+		return s.recoverHumanThread(ctx, assessment, reservation, scope, op)
+	case nativeoperation_model.KindHumanInline:
+		assessment.Family = "conditional-human-inline"
+		return s.recoverHumanInline(ctx, assessment, reservation, scope, op)
+	case nativeoperation_model.KindHumanReview:
+		assessment.Family = "conditional-human-review"
+		return s.recoverHumanReview(ctx, assessment, reservation, scope, op)
+	case nativeoperation_model.KindHumanState:
+		assessment.Family = "conditional-human-state"
+		return s.recoverHumanState(ctx, assessment, reservation, scope, op)
+	case nativeoperation_model.KindHumanLock:
+		assessment.Family = "conditional-human-lock"
+		return s.recoverHumanLock(ctx, assessment, reservation, scope, op)
+	case nativeoperation_model.KindHumanIssueCreate:
+		assessment.Family = "conditional-human-issue-create"
+		return s.recoverHumanIssueCreate(ctx, assessment, reservation, scope, op)
+	case nativeoperation_model.KindHumanEdit:
+		assessment.Family = "conditional-human-edit"
+		return s.recoverHumanEdit(ctx, assessment, reservation, scope, op)
+	case nativeoperation_model.KindHumanComment:
+		assessment.Family = "conditional-human-comment"
+		return s.recoverHumanComment(ctx, assessment, reservation, scope, op)
 	case nativeoperation_model.KindIssueGraph:
 		assessment.Family = "conditional-issue-graph"
 		return s.recoverConditionalIssueGraph(ctx, assessment, reservation, scope, op)

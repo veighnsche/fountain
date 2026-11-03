@@ -129,7 +129,59 @@ func TestThreadResolveCommitsReceiptAndReplays(t *testing.T) {
 	decision := resolveDecision(t, 2, 3)
 
 	head, base := resolveTips(t, svc)
-	root, _, digest := resolveThread(t, svc, head)
+	root, reply, digest := resolveThread(t, svc, head)
+	// Actual native rows at the same review/path/end coordinate must not
+	// broaden either the conditional snapshot digest or its resolution target.
+	a := &issues_model.CodeCommentAnchor{Base: base, Head: head, Path: root.TreePath, Side: "new", Scope: "lines", StartLine: root.Line, EndLine: root.Line}
+	for _, c := range []*issues_model.Comment{root, reply} {
+		c.OriginalAnchor = a.Copy()
+		_, err := db.GetEngine(ctx).ID(c.ID).Cols("original_anchor").Update(c)
+		require.NoError(t, err)
+	}
+	digest = expectedThreadDigest(t, root, reply)
+	issue, doer := threadFixture(t)
+	addContext := func(a *issues_model.CodeCommentAnchor, line int64, body string) *issues_model.Comment {
+		t.Helper()
+		commit := head
+		if a.Side == "old" {
+			commit = base
+		}
+		c, err := issues_model.CreateComment(ctx, &issues_model.CreateCommentOptions{Type: issues_model.CommentTypeCode, Doer: doer, Repo: issue.Repo, Issue: issue, ReviewID: root.ReviewID, TreePath: root.TreePath, LineNum: line, CommitSHA: commit, OriginalAnchor: a, Content: body})
+		require.NoError(t, err)
+		return c
+	}
+	otherPair := a.Copy()
+	otherPair.Base, otherPair.Head = head, base
+	sibling := addContext(otherPair, root.Line, "same location, other immutable trees")
+	rangeAnchor := a.Copy()
+	rangeAnchor.StartLine--
+	ranged := addContext(rangeAnchor, root.Line, "multiline context")
+	fileAnchor := a.Copy()
+	fileAnchor.Scope, fileAnchor.StartLine, fileAnchor.EndLine = "file", 0, 0
+	fileAnchor.Side = "old"
+	file := addContext(fileAnchor, 0, "file context")
+	req := snapshotProofRequest("1", "2", []string{sdk.SnapshotFamilyReviewThreads})
+	req.PullNumber = "3"
+	snapshot, err := svc.ReadSnapshot(ctx, snapshotAuthority(2, req), req)
+	require.NoError(t, err)
+	require.True(t, snapshot.Threads.Complete, "file/range evidence must remain complete without flattening")
+	found := false
+	foundContexts := map[string]*sdk.RepositoryInlineAnchor{}
+	for _, thread := range snapshot.Threads.Items {
+		if thread.RootID == snapshotIDString(root.ID) {
+			found = true
+			require.Equal(t, digest, thread.Digest)
+			require.Equal(t, 2, thread.MemberTotal)
+		}
+		foundContexts[thread.RootID] = thread.OriginalAnchor
+		if thread.RootID == snapshotIDString(file.ID) {
+			require.Equal(t, base, thread.OriginalCommit)
+			require.False(t, thread.Outdated, "old-side commit is not original-head drift")
+		}
+	}
+	require.True(t, found)
+	require.Equal(t, threadOriginalAnchor(rangeAnchor), foundContexts[snapshotIDString(ranged.ID)])
+	require.Equal(t, threadOriginalAnchor(fileAnchor), foundContexts[snapshotIDString(file.ID)])
 
 	intent := resolveIntent(t, "thread-resolve-ok", 2, resolvePayload(head, base, digest, root.ID))
 	record, err := svc.Submit(ctx, decision, operationTestInstallation, intent)
@@ -171,19 +223,48 @@ func TestThreadResolveCommitsReceiptAndReplays(t *testing.T) {
 	require.Equal(t, strings.ToLower(current), stableReceipt.ConversationDigest)
 	restable := unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: root.ID})
 	require.Equal(t, int64(2), restable.ResolveDoerID, "re-resolution changes no ownership")
+	for _, target := range []*issues_model.Comment{sibling, ranged, file} {
+		live := unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: target.ID})
+		require.Zero(t, live.ResolveDoerID, "same legacy coordinate does not transfer resolution")
+	}
+	for _, target := range []*issues_model.Comment{ranged, file} {
+		live := unittest.AssertExistsAndLoadBean(t, &issues_model.Comment{ID: target.ID})
+		bound := expectedThreadDigest(t, live)
+		opposite := "old"
+		if live.OriginalAnchor.Side == "old" {
+			opposite = "new"
+		}
+		for i, changed := range []*issues_model.CodeCommentAnchor{
+			{Base: head, Head: base, Path: target.TreePath, Side: "new", Scope: "file"},
+			{Base: base, Head: head, Path: target.TreePath, Side: opposite, Scope: "file"},
+			{Base: base, Head: head, Path: "other.go", Side: "new", Scope: "file"},
+			{Base: base, Head: head, Path: target.TreePath, Side: "new", Scope: "lines", StartLine: 1, EndLine: 3},
+		} {
+			_, err := db.GetEngine(ctx).ID(target.ID).Cols("original_anchor").Update(&issues_model.Comment{OriginalAnchor: changed})
+			require.NoError(t, err)
+			refused, err := svc.Submit(ctx, decision, operationTestInstallation, resolveIntent(t, "changed-context-"+snapshotIDString(target.ID)+"-"+snapshotIDString(int64(i+1)), 2, resolvePayload(head, base, bound, target.ID)))
+			require.NoError(t, err)
+			require.Equal(t, nativeoperation_model.EffectNotCommitted, refused.EffectState)
+			require.Equal(t, nativeoperation_model.ReasonStaleConversation, refused.ReasonCode)
+		}
+		_, err := db.GetEngine(ctx).ID(target.ID).Cols("original_anchor").Update(target)
+		require.NoError(t, err)
+		committed, err := svc.Submit(ctx, decision, operationTestInstallation, resolveIntent(t, "full-context-"+snapshotIDString(target.ID), 2, resolvePayload(head, base, bound, target.ID)))
+		require.NoError(t, err)
+		require.Equal(t, nativeoperation_model.EffectCommitted, committed.EffectState, committed.ReasonCode)
+	}
+	t.Log("PASS: native conditional snapshots and journaled file/range resolution bind full per-member original context; changed trees/path/side/scope/range refuse and sibling conversations stay separate")
 }
 
 // threadMembersForDigest reloads one conversation in native order for an
 // independent digest recomputation.
 func threadMembersForDigest(ctx context.Context, t *testing.T, root *issues_model.Comment) []*issues_model.Comment {
 	t.Helper()
-	var members []*issues_model.Comment
-	require.NoError(t, db.GetEngine(ctx).Where("issue_id = ?", root.IssueID).
-		And("review_id = ?", root.ReviewID).
-		And("tree_path = ?", root.TreePath).
-		And("line = ?", root.Line).
-		Asc("created_unix").Asc("id").
-		Find(&members))
+	issue, err := issues_model.GetIssueByID(ctx, root.IssueID)
+	require.NoError(t, err)
+	comments, _, err := issues_model.FetchThreadComments(ctx, issue)
+	require.NoError(t, err)
+	members := issues_model.FindCodeThread(issues_model.GroupCodeThreads(comments), root.ID)
 	require.NotEmpty(t, members)
 	return members
 }

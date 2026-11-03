@@ -24,8 +24,8 @@ import (
 // Paged native thread evidence and actor-bound merge-eligibility reads
 // (D06/D08, FW17).
 //
-// Threads group native code-review conversations by (review, path, signed
-// line) through the shared model grouping, so snapshot roots and resolve
+// Threads partition native location buckets by immutable original context
+// through the shared model grouping, so snapshot roots and resolve
 // bindings derive the same native root. Outdated unresolved threads are
 // retained with Outdated set; hidden or truncated evidence reports
 // Complete=false so the consumer blocks rather than authorizing on partial
@@ -173,24 +173,11 @@ func (l *snapshotLoader) threads(ctx context.Context, index, number string) (*sd
 }
 
 // threadSnapshot converts one grouped conversation. It reports ok=false
-// for threads whose anchor cannot be represented (a zero line carries no
-// diff side); the caller drops the thread and marks the page incomplete
+// for threads with malformed recorded coordinates/context; the caller marks the page incomplete
 // rather than guessing an anchor. Hidden threads redact to the root
 // locator with no digest.
 func (l *snapshotLoader) threadSnapshot(issue *issues_model.Issue, thread issues_model.CodeThread, headTip string, truncated bool) (issues_model.ThreadSnapshot, bool) {
 	root := thread.Root()
-	var side string
-	var unsigned int64
-	switch {
-	case root.Line < 0:
-		side = "old"
-		unsigned = -root.Line
-	case root.Line > 0:
-		side = "new"
-		unsigned = root.Line
-	default:
-		return issues_model.ThreadSnapshot{}, false
-	}
 	visible := true
 	for _, member := range thread {
 		if member == nil {
@@ -208,6 +195,10 @@ func (l *snapshotLoader) threadSnapshot(issue *issues_model.Issue, thread issues
 		}
 		return converted, true
 	}
+	side, unsigned, ok := threadRecordedLocation(thread)
+	if !ok {
+		return issues_model.ThreadSnapshot{}, false
+	}
 	location := sdk.RenderThreadLocation(root.TreePath, side, unsigned)
 	lines := make([]string, 0, len(thread))
 	members := make([]issues_model.ThreadMemberSnapshot, 0, len(thread))
@@ -221,11 +212,12 @@ func (l *snapshotLoader) threadSnapshot(issue *issues_model.Issue, thread issues
 		}
 		members = append(members, converted)
 		lines = append(lines, sdk.ResolveConversationLine(sdk.ResolveConversationMember{
-			ID:            member.ID,
-			Body:          member.Content,
-			ContentVer:    int64(member.ContentVersion),
-			Location:      location,
-			ResolverState: sdk.ThreadResolverState(member.ResolveDoerID),
+			OriginalAnchor: threadOriginalAnchor(member.OriginalAnchor),
+			ID:             member.ID,
+			Body:           member.Content,
+			ContentVer:     int64(member.ContentVersion),
+			Location:       location,
+			ResolverState:  sdk.ThreadResolverState(member.ResolveDoerID),
 		}))
 	}
 	digest, err := sdk.ResolveConversationDigest(lines)
@@ -233,8 +225,14 @@ func (l *snapshotLoader) threadSnapshot(issue *issues_model.Issue, thread issues
 		return issues_model.ThreadSnapshot{}, false
 	}
 	outdated := root.Invalidated || headTip == ""
-	if !outdated && root.CommitSHA != "" {
-		outdated = !strings.EqualFold(root.CommitSHA, headTip)
+	if !outdated {
+		if root.OriginalAnchor != nil {
+			// An old-side file records the base commit in CommitSHA. That
+			// does not make its original diff outdated at the same head.
+			outdated = !strings.EqualFold(root.OriginalAnchor.Head, headTip)
+		} else if root.CommitSHA != "" {
+			outdated = !strings.EqualFold(root.CommitSHA, headTip)
+		}
 	}
 	complete := !truncated
 	converted, err := issues_model.NewThreadSnapshot(root, issue.ID, root.ReviewID, root.TreePath, side, unsigned,
@@ -248,6 +246,7 @@ func (l *snapshotLoader) threadSnapshot(issue *issues_model.Issue, thread issues
 
 func (l *snapshotLoader) threadDTO(item issues_model.ThreadSnapshot) sdk.SnapshotThread {
 	out := sdk.SnapshotThread{
+		OriginalAnchor: threadOriginalAnchor(item.OriginalAnchor),
 		RootID:         snapshotIDString(item.RootID),
 		IssueID:        snapshotIDString(item.IssueID),
 		ReviewID:       snapshotIDString(item.ReviewID),
@@ -267,6 +266,8 @@ func (l *snapshotLoader) threadDTO(item issues_model.ThreadSnapshot) sdk.Snapsho
 	}
 	for _, member := range item.Members {
 		out.Members = append(out.Members, sdk.SnapshotThreadMember{
+			OriginalAnchor: threadOriginalAnchor(member.OriginalAnchor),
+			Resolved:       member.Resolved,
 			ID:             snapshotIDString(member.CommentID),
 			IssueID:        snapshotIDString(member.IssueID),
 			ContentDigest:  member.ContentDigest,

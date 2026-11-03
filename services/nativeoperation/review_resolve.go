@@ -231,10 +231,40 @@ func (s *Service) executeThreadResolve(ctx context.Context, op *nativeoperation_
 // comment the grouping cannot represent.
 var errResolveTarget = errors.New("thread-resolve target is not a conversation root")
 
+// Recorded native coordinates remain separate from each member's immutable
+// original selection. Zero has no recorded side; the full anchor carries the
+// side of a file comment. Missing retained context stays missing.
+func threadRecordedLocation(thread issues_model.CodeThread) (side string, line int64, ok bool) {
+	root := thread.Root()
+	if root == nil || root.TreePath == "" {
+		return "", 0, false
+	}
+	for _, member := range thread {
+		if a := member.OriginalAnchor; a != nil && a.Validate() != nil {
+			return "", 0, false
+		}
+	}
+	switch {
+	case root.Line < 0:
+		return "old", -root.Line, -root.Line > 0
+	case root.Line > 0:
+		return "new", root.Line, true
+	default:
+		return "", 0, true
+	}
+}
+
+func threadOriginalAnchor(a *issues_model.CodeCommentAnchor) *sdk.RepositoryInlineAnchor {
+	if a == nil {
+		return nil
+	}
+	return &sdk.RepositoryInlineAnchor{Base: a.Base, Head: a.Head, Path: a.Path, Side: a.Side, Scope: a.Scope, StartLine: a.StartLine, EndLine: a.EndLine}
+}
+
 // liveConversationDigest re-derives the native root and the complete
-// conversation digest from live state through the shared grouping, using
-// the root anchor for every member line exactly as the snapshot loader
-// does. Any divergence from the snapshot digest refuses the resolution.
+// conversation digest from live state through the shared grouping, using the
+// root's recorded coordinates and each member's own original selection exactly
+// as the snapshot loader does. Any divergence refuses the stale resolution.
 func liveConversationDigest(ctx context.Context, issue *issues_model.Issue, named *issues_model.Comment) (string, *issues_model.Comment, error) {
 	comments, _, err := issues_model.FetchThreadComments(ctx, issue)
 	if err != nil {
@@ -245,14 +275,8 @@ func liveConversationDigest(ctx context.Context, issue *issues_model.Issue, name
 		return "", nil, errResolveTarget
 	}
 	root := thread.Root()
-	var side string
-	var unsigned int64
-	switch {
-	case root.Line < 0:
-		side, unsigned = "old", -root.Line
-	case root.Line > 0:
-		side, unsigned = "new", root.Line
-	default:
+	side, unsigned, ok := threadRecordedLocation(thread)
+	if !ok {
 		return "", nil, errResolveTarget
 	}
 	location := sdk.RenderThreadLocation(root.TreePath, side, unsigned)
@@ -262,11 +286,12 @@ func liveConversationDigest(ctx context.Context, issue *issues_model.Issue, name
 			continue
 		}
 		lines = append(lines, sdk.ResolveConversationLine(sdk.ResolveConversationMember{
-			ID:            member.ID,
-			Body:          member.Content,
-			ContentVer:    int64(member.ContentVersion),
-			Location:      location,
-			ResolverState: sdk.ThreadResolverState(member.ResolveDoerID),
+			OriginalAnchor: threadOriginalAnchor(member.OriginalAnchor),
+			ID:             member.ID,
+			Body:           member.Content,
+			ContentVer:     int64(member.ContentVersion),
+			Location:       location,
+			ResolverState:  sdk.ThreadResolverState(member.ResolveDoerID),
 		}))
 	}
 	digest, err := sdk.ResolveConversationDigest(lines)

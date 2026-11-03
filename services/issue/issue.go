@@ -104,19 +104,27 @@ func doChangeTitle(ctx context.Context, issue *issues_model.Issue, doer *user_mo
 		return err
 	}
 
+	// Keep the ordinary route's existing logged completion-error behavior.
+	_ = CompleteTitleChange(ctx, issue, doer, oldTitle)
+	return nil
+}
+
+// CompleteTitleChange runs the ordinary post-primary title effects. Conditional
+// native edits call it only after their SQL title change and receipt commit.
+func CompleteTitleChange(ctx context.Context, issue *issues_model.Issue, doer *user_model.User, oldTitle string) error {
 	var reviewNotifiers []*ReviewRequestNotifier
-	if issue.IsPull && issues_model.HasWorkInProgressPrefix(oldTitle) && !issues_model.HasWorkInProgressPrefix(title) {
-		var err error
-		reviewNotifiers, err = PullRequestCodeOwnersReview(ctx, issue, issue.PullRequest)
-		if err != nil {
-			log.Error("PullRequestCodeOwnersReview: %v", err)
+	var completionErr error
+	if issue.IsPull && issues_model.HasWorkInProgressPrefix(oldTitle) && !issues_model.HasWorkInProgressPrefix(issue.Title) {
+		reviewNotifiers, completionErr = PullRequestCodeOwnersReview(ctx, issue, issue.PullRequest)
+		if completionErr != nil {
+			log.Error("PullRequestCodeOwnersReview: %v", completionErr)
 		}
 	}
 
 	notify_service.IssueChangeTitle(ctx, doer, issue, oldTitle)
 	ReviewRequestNotify(ctx, issue, issue.Poster, reviewNotifiers)
 
-	return nil
+	return completionErr
 }
 
 // ChangeIssueRef changes the branch of this issue, as the given user.

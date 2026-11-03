@@ -19,7 +19,6 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
-	"forgejo.org/modules/cache"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/graceful"
@@ -29,7 +28,6 @@ import (
 	"forgejo.org/modules/process"
 	"forgejo.org/modules/queue"
 	repo_module "forgejo.org/modules/repository"
-	"forgejo.org/modules/timeutil"
 	"forgejo.org/modules/util"
 	webhook_module "forgejo.org/modules/webhook"
 	actions_service "forgejo.org/services/actions"
@@ -239,8 +237,6 @@ func checkBranchName(ctx context.Context, repo *repo_model.Repository, name stri
 	return err
 }
 
-var syncBranchLock = cache.MutexMap{}
-
 // SyncBranchesToDB sync the branch information in the database.
 // It will check whether the branches of the repository have never been synced before.
 // If so, it will sync all branches of the repository.
@@ -260,108 +256,8 @@ func SyncBranchesToDB(ctx context.Context, repoID, pusherID int64, branchNames [
 			RepositoryID: repoID,
 		},
 		func(ctx context.Context) error {
-			return syncBranchesToDB(ctx, repoID, pusherID, branchNames, getBranchCommit)
+			return repo_module.SyncBranchesToDB(ctx, repoID, pusherID, branchNames, getBranchCommit)
 		})
-}
-
-// syncBranchesToDB runs the branch-sync database effects under the caller's
-// ownership.
-func syncBranchesToDB(ctx context.Context, repoID, pusherID int64, branchNames []string, getBranchCommit func(branchName string) (*git.Commit, error)) error {
-	// Implementation notes: hook post-receive will be executing this function in small batches (see `hookBatchSize`),
-	// not with all branches that are received at once. Also, concurrent execution will happen, even for the same
-	// branches, when pushes are executed quickly; the git repository is the source-of-truth for the current state as
-	// all in-memory data may be outdated by concurrent modifications.
-	return db.WithTx(ctx, func(ctx context.Context) error {
-		branches, err := git_model.GetBranches(ctx, repoID, branchNames, true)
-		if err != nil {
-			return fmt.Errorf("git_model.GetBranches: %v", err)
-		}
-
-		if len(branches) == 0 {
-			// if user haven't visit UI but directly push to a branch after upgrading from 1.20 -> 1.21,
-			// we cannot simply insert the branch but need to check we have branches or not
-			hasBranch, err := db.Exist[git_model.Branch](ctx, git_model.FindBranchOptions{
-				RepoID:          repoID,
-				IsDeletedBranch: optional.Some(false),
-			}.ToConds())
-			if err != nil {
-				return err
-			}
-			if !hasBranch {
-				if _, err = repo_module.SyncRepoBranches(ctx, repoID, pusherID); err != nil {
-					return fmt.Errorf("repo_module.SyncRepoBranches %d failed: %v", repoID, err)
-				}
-				return nil
-			}
-		}
-
-		branchMap := make(map[string]*git_model.Branch, len(branches))
-		for _, branch := range branches {
-			branchMap[branch.Name] = branch
-		}
-
-		for _, branchName := range branchNames {
-			err := syncSingleBranch(ctx, repoID, pusherID, branchName, getBranchCommit, branchMap)
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
-}
-
-// Sync branchName's state from the git repo to the DB.
-func syncSingleBranch(
-	ctx context.Context,
-	repoID, pusherID int64,
-	branchName string,
-	getBranchCommit func(branchName string) (*git.Commit, error),
-	branchMap map[string]*git_model.Branch,
-) error {
-	// Multiple invocations to syncSingleBranch can occur concurrently for the same branch if pushes occur in close
-	// succession to each other; by locking here, and by reading the git repo's state of the branch (rather than being
-	// provided the state from the post-receive hook), we guarantee that the branch table will reach the current state
-	// even with concurrent requests (excluding error states).
-	defer syncBranchLock.Lock(fmt.Sprintf("%d/%s", repoID, branchName))()
-
-	commit, err := getBranchCommit(branchName)
-	if git.IsErrNotExist(err) {
-		// Branch has been removed from the repo since this SyncBranchesToDB was invoked; no update is required here
-		// because when the branch was deleted then post-receive-hook would have updated the record directly via
-		// git_model.AddDeletedBranch.
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("get commit of %d:%s failed: %v", repoID, branchName, err)
-	}
-
-	branch, exist := branchMap[branchName]
-	if exist && branch.CommitID == commit.ID.String() && !branch.IsDeleted {
-		// Already up-to-date.
-		return nil
-	}
-
-	if exist {
-		if rowCount, err := git_model.UpdateBranch(ctx, repoID, pusherID, branchName, commit); err != nil {
-			return fmt.Errorf("git_model.UpdateBranch %d:%s failed: %v", repoID, branchName, err)
-		} else if rowCount != 1 {
-			return fmt.Errorf("git_model.UpdateBranch %d:%s failed: %d records updated", repoID, branchName, rowCount)
-		}
-		return nil
-	}
-
-	if err := db.Insert(ctx, &git_model.Branch{
-		RepoID:        repoID,
-		Name:          branchName,
-		CommitID:      commit.ID.String(),
-		CommitMessage: commit.Summary(),
-		PusherID:      pusherID,
-		CommitTime:    timeutil.TimeStamp(commit.Committer.When.Unix()),
-	}); err != nil {
-		return fmt.Errorf("inserting new branch %d:%s: %w", repoID, branchName, err)
-	}
-
-	return nil
 }
 
 // CreateNewBranchFromCommit creates a new repository branch

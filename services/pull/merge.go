@@ -279,11 +279,13 @@ func Merge(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.U
 	// claim. The ref writer's recovery rules remain specific to Git;
 	// interrupted multi-statement completion stays fenced for intervention.
 	return withCollabOwnershipWait(ctx, CollabPullResource(pr.ID, "refresh"), collabScope{RepositoryID: pr.BaseRepoID}, func(ctx context.Context) error {
-		return finishMerge(ctx, pr, doer, wasAutoMerged)
+		return FinishMerge(ctx, pr, doer, wasAutoMerged)
 	})
 }
 
-func finishMerge(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, wasAutoMerged bool) error {
+// FinishMerge is the shared native post-merge notification/cross-reference owner.
+// Callers own attribution, single dispatch and the surrounding mutation fence.
+func FinishMerge(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, wasAutoMerged bool) error {
 	// reload pull request because it has been updated by post receive hook
 	pr, err := issues_model.GetPullRequestByID(ctx, pr.ID)
 	if err != nil {
@@ -291,14 +293,14 @@ func finishMerge(ctx context.Context, pr *issues_model.PullRequest, doer *user_m
 	}
 
 	if err := pr.LoadIssue(ctx); err != nil {
-		log.Error("LoadIssue %-v: %v", pr, err)
+		return err
 	}
 
 	if err := pr.Issue.LoadRepo(ctx); err != nil {
-		log.Error("pr.Issue.LoadRepo %-v: %v", pr, err)
+		return err
 	}
 	if err := pr.Issue.Repo.LoadOwner(ctx); err != nil {
-		log.Error("LoadOwner for %-v: %v", pr, err)
+		return err
 	}
 
 	if wasAutoMerged {
@@ -336,7 +338,7 @@ func handleCloseCrossReferences(ctx context.Context, pr *issues_model.PullReques
 	refs, err := pr.ResolveCrossReferences(ctx)
 	if err != nil {
 		log.Error("ResolveCrossReferences: %v", err)
-		return nil
+		return err
 	}
 
 	for _, ref := range refs {
@@ -361,35 +363,18 @@ func handleCloseCrossReferences(ctx context.Context, pr *issues_model.PullReques
 
 // doMergeAndPush performs the merge operation without changing any pull information in database and pushes it up to the base repository
 func doMergeAndPush(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.User, mergeStyle repo_model.MergeStyle, expectedHeadCommitID, message string, pushTrigger repo_module.PushTrigger) (string, error) {
-	// Clone base repo.
-	mergeCtx, cancel, err := createTemporaryRepoForMerge(ctx, pr, doer, expectedHeadCommitID)
+	mergeCtx, cancel, err := prepareMergeCommits(ctx, pr, doer, mergeStyle, expectedHeadCommitID, "", message)
 	if err != nil {
 		return "", err
 	}
 	defer cancel()
 
-	// Merge commits.
-	switch mergeStyle {
-	case repo_model.MergeStyleMerge:
-		if err := doMergeStyleMerge(mergeCtx, message); err != nil {
-			return "", err
-		}
-	case repo_model.MergeStyleRebase, repo_model.MergeStyleRebaseMerge:
-		if err := doMergeStyleRebase(mergeCtx, mergeStyle, message); err != nil {
-			return "", err
-		}
-	case repo_model.MergeStyleSquash:
-		if err := doMergeStyleSquash(mergeCtx, message); err != nil {
-			return "", err
-		}
-	case repo_model.MergeStyleFastForwardOnly:
-		if err := doMergeStyleFastForwardOnly(mergeCtx); err != nil {
-			return "", err
-		}
-	default:
-		return "", models.ErrInvalidMergeStyle{ID: pr.BaseRepo.ID, Style: mergeStyle}
-	}
+	return pushMergeCommits(ctx, mergeCtx, pr, doer, pushTrigger, nil, nil)
+}
 
+// pushMergeCommits is the shared native LFS/environment/ref-push owner. An exact
+// staged caller supplies its immutable result and a final current-human guard.
+func pushMergeCommits(ctx context.Context, mergeCtx *mergeContext, pr *issues_model.PullRequest, doer *user_model.User, pushTrigger repo_module.PushTrigger, exact *PreparedMergeResult, beforePush func() error) (string, error) {
 	// OK we should cache our current head and origin/headbranch
 	mergeHeadSHA, err := git.GetFullCommitID(ctx, mergeCtx.tmpBasePath, "HEAD")
 	if err != nil {
@@ -403,12 +388,20 @@ func doMergeAndPush(ctx context.Context, pr *issues_model.PullRequest, doer *use
 	if err != nil {
 		return "", fmt.Errorf("Failed to get full commit id for the new merge: %w", err)
 	}
+	if exact != nil && (mergeCommitID != exact.CommitID || mergeBaseSHA != exact.BaseOID) {
+		return "", ErrExactMergeRefused{Reason: ExactMergeRefusedResultMismatch}
+	}
+	if beforePush != nil {
+		if err := beforePush(); err != nil {
+			return "", err
+		}
+	}
 
 	// Now it's questionable about where this should go - either after or before the push
 	// I think in the interests of data safety - failures to push to the lfs should prevent
 	// the merge as you can always remerge.
 	if setting.LFS.StartServer {
-		if err := LFSPush(ctx, mergeCtx.tmpBasePath, mergeHeadSHA, mergeBaseSHA, pr); err != nil {
+		if err := LFSPush(ctx, mergeCtx.tmpBasePath, mergeHeadSHA, mergeBaseSHA, pr, beforePush); err != nil {
 			return "", err
 		}
 	}
@@ -439,7 +432,19 @@ func doMergeAndPush(ctx context.Context, pr *issues_model.PullRequest, doer *use
 	// path into this final native Git child; agents and extensions never
 	// receive it. Ordinary merges pass no execution context.
 	mergeCtx.env = nativeoperation.AppendExecEnv(mergeCtx.env, nativeoperation.FromContext(ctx))
-	pushCmd := git.NewCommand(ctx, "push", "origin").AddDynamicArguments(baseBranch + ":" + git.BranchPrefix + pr.BaseBranch)
+	source := baseBranch
+	if exact != nil {
+		// Use the captured commit itself, never a mutable temporary branch, and
+		// keep native hooks active even if the host has an internal-push env var.
+		source = exact.CommitID
+		mergeCtx.env = append(mergeCtx.env, repo_module.EnvIsInternal+"=false")
+	}
+	if beforePush != nil {
+		if err := beforePush(); err != nil {
+			return "", err
+		}
+	}
+	pushCmd := git.NewCommand(ctx, "push", "origin").AddDynamicArguments(source + ":" + git.BranchPrefix + pr.BaseBranch)
 
 	// Push back to upstream.
 	// This cause an api call to "/api/internal/hook/post-receive/...",

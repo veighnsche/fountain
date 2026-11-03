@@ -4,7 +4,10 @@ package nativeoperation
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
+	"strings"
 	"testing"
 	"time"
 
@@ -18,9 +21,87 @@ import (
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	execcontext "forgejo.org/modules/nativeoperation"
+	"forgejo.org/modules/setting"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestIssueIntakeUsesHumanGrantWithoutFactoryEnrollment(t *testing.T) {
+	unittest.PrepareTestEnv(t)
+	useIsolatedAppData(t)
+	oldSecret := setting.SecretKey
+	setting.SecretKey = "isolated-native-intake-integration-secret"
+	t.Cleanup(func() { setting.SecretKey = oldSecret })
+	ctx := t.Context()
+	svc := NewService()
+	digest := sha256.Sum256([]byte("Please add a login screen"))
+	grant, err := MintIssueIntakeGrant(ctx, sdk.IssueIntakeClaims{Installation: operationTestInstallation, Actor: "2", Repository: "1", Source: strings.Repeat("a", 32), Digest: hex.EncodeToString(digest[:])})
+	require.NoError(t, err)
+	before, err := db.GetEngine(ctx).Where("repo_id=?", 1).Count(new(issues_model.Issue))
+	require.NoError(t, err)
+	request := sdk.IssueIntakeMutation{Grant: grant.Token, Action: "create", Slot: 0, Title: "Login request", Body: "Please add a login screen. Acceptance is pending refinement."}
+	created, err := svc.SubmitIssueIntake(ctx, operationTestInstallation, request)
+	require.NoError(t, err)
+	require.Positive(t, created.Index)
+	issue, err := issues_model.GetIssueByID(ctx, created.IssueID)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), issue.PosterID)
+	replay, err := svc.SubmitIssueIntake(ctx, operationTestInstallation, request)
+	require.NoError(t, err)
+	require.Equal(t, created, replay)
+	after, err := db.GetEngine(ctx).Where("repo_id=?", 1).Count(new(issues_model.Issue))
+	require.NoError(t, err)
+	require.Equal(t, before+1, after)
+	bindings, err := db.GetEngine(ctx).Where("actor_id=? AND repository_id=?", 2, 1).Count(new(extensionauth_model.ActorBinding))
+	require.NoError(t, err)
+	require.Zero(t, bindings, "intake must not enroll a Factory bot")
+	_, err = svc.SubmitIssueIntake(ctx, "foreign-installation", request)
+	require.ErrorIs(t, err, ErrAuthorityLost)
+	forged := request
+	forged.Grant += "tampered"
+	_, err = svc.SubmitIssueIntake(ctx, operationTestInstallation, forged)
+	require.ErrorIs(t, err, ErrAuthorityLost)
+	conflict := request
+	conflict.Title = "Different request"
+	_, err = svc.SubmitIssueIntake(ctx, operationTestInstallation, conflict)
+	require.ErrorIs(t, err, ErrInvalidIntent)
+	refine := sdk.IssueIntakeMutation{Grant: grant.Token, Action: "refine", Slot: 0, Step: 0, Title: "Login screen", Body: "Valid credentials open the app. Invalid credentials display an error.", ExpectedTitle: created.Title, ExpectedBodyDigest: created.BodyDigest}
+	refined, err := svc.SubmitIssueIntake(ctx, operationTestInstallation, refine)
+	require.NoError(t, err)
+	require.Equal(t, created.Index, refined.Index)
+	issue, err = issues_model.GetIssueByID(ctx, created.IssueID)
+	require.NoError(t, err)
+	require.Equal(t, refine.Body, issue.Content)
+	history, err := issues_model.HasIssueContentHistory(ctx, issue.ID, 0)
+	require.NoError(t, err)
+	require.True(t, history)
+	actor, err := user_model.GetUserByID(ctx, 2)
+	require.NoError(t, err)
+	require.NoError(t, issues_model.ChangeIssueContent(ctx, issue, actor, "Human-edited acceptance", issue.ContentVersion))
+	refine.Step = 1
+	refine.ExpectedTitle = refined.Title
+	refine.ExpectedBodyDigest = refined.BodyDigest
+	_, err = svc.SubmitIssueIntake(ctx, operationTestInstallation, refine)
+	require.Error(t, err)
+	issue, err = issues_model.GetIssueByID(ctx, created.IssueID)
+	require.NoError(t, err)
+	require.Equal(t, "Human-edited acceptance", issue.Content)
+	refine.Slot = 1
+	_, err = svc.SubmitIssueIntake(ctx, operationTestInstallation, refine)
+	require.Error(t, err, "uncreated slots cannot choose an arbitrary existing issue")
+	request.Slot = 16
+	_, err = svc.SubmitIssueIntake(ctx, operationTestInstallation, request)
+	require.ErrorIs(t, err, ErrInvalidIntent)
+	request.Slot = 1
+	svc.now = func() int64 { return grant.Claims.Expires + 1 }
+	_, err = svc.SubmitIssueIntake(ctx, operationTestInstallation, request)
+	require.ErrorIs(t, err, ErrAuthorityLost)
+	svc.now = nil
+	_, err = db.GetEngine(ctx).Exec("UPDATE `user` SET is_active=? WHERE id=?", false, 2)
+	require.NoError(t, err)
+	_, err = svc.SubmitIssueIntake(ctx, operationTestInstallation, request)
+	require.ErrorIs(t, err, ErrAuthorityLost)
+}
 
 func graphPayload() sdk.IssueGraphPayload {
 	return sdk.IssueGraphPayload{
