@@ -442,6 +442,7 @@ type ExactReviewTarget struct {
 	CommitID       string
 	CurrentHeadOID string
 	CurrentBaseOID string
+	DiffBaseOID    string // Actual old-side merge base; distinct from BaseOID's branch tip.
 }
 
 // checkExactReviewTarget verifies the bound PR identity, source, target and
@@ -638,6 +639,9 @@ func SubmitExactReviewInline(ctx context.Context, doer *user_model.User, issue *
 	if err := ValidateExactReviewComments(comments); err != nil {
 		return nil, nil, nil, err
 	}
+	if len(comments) > 0 && (!validFullOID(want.DiffBaseOID) || want.DiffBaseOID != strings.ToLower(want.DiffBaseOID)) {
+		return nil, nil, nil, ErrExactReviewRefused{Reason: "original diff base unavailable"}
+	}
 	if err := issue.LoadPullRequest(ctx); err != nil {
 		return nil, nil, nil, err
 	}
@@ -728,16 +732,17 @@ func SubmitExactReviewInline(ctx context.Context, doer *user_model.User, issue *
 	inline := make([]*Comment, 0, len(comments))
 	for _, comment := range comments {
 		code, err := CreateComment(ctx, &CreateCommentOptions{
-			Type:      CommentTypeCode,
-			Doer:      doer,
-			Content:   exactReviewCommentContent(comment),
-			Issue:     issue,
-			Repo:      issue.Repo,
-			ReviewID:  review.ID,
-			TreePath:  comment.Path,
-			LineNum:   exactReviewCommentSignedLine(comment),
-			CommitSHA: want.CommitID,
-			Patch:     comment.Patch,
+			Type:           CommentTypeCode,
+			Doer:           doer,
+			Content:        exactReviewCommentContent(comment),
+			Issue:          issue,
+			Repo:           issue.Repo,
+			ReviewID:       review.ID,
+			TreePath:       comment.Path,
+			OriginalAnchor: &CodeCommentAnchor{Base: want.DiffBaseOID, Head: strings.ToLower(want.HeadOID), Path: comment.Path, Side: comment.Side, Scope: "lines", StartLine: comment.Line, EndLine: comment.Line},
+			LineNum:        exactReviewCommentSignedLine(comment),
+			CommitSHA:      want.CommitID,
+			Patch:          comment.Patch,
 		})
 		if err != nil {
 			return nil, nil, nil, err

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,15 +50,63 @@ func useDisposablePostgres(t *testing.T) *xorm.Engine {
 	return engine
 }
 
+// The existing real PostgreSQL ordering roots can exercise the human merge's
+// stricter generation/scope lock without replacing their cancellation races.
+// Native SDK/Git/policy binding is qualified in the actual source integration.
+func postgresAdmission(t *testing.T, ctx context.Context, id string) (string, func(context.Context) (*nativeoperation_model.Operation, bool, error)) {
+	t.Helper()
+	start, err := nativeoperation_model.ReadReservation(ctx)
+	require.NoError(t, err)
+	owner := "cond:" + testInstallation + "/" + id
+	op := testOperation(id, start.Revision)
+	human := os.Getenv("FORGEJO_TEST_PG_HUMAN_MERGE") == "1"
+	if human {
+		op.Kind, op.TokenID, op.CredentialFingerprint = nativeoperation_model.KindHumanMerge, 0, ""
+		op.AuthRevision, op.NotAfter = "native-human-request", time.Now().Unix()+60
+	}
+	held, err := nativeoperation_model.ClaimConditional(ctx, op, owner, `{}`, "v")
+	require.NoError(t, err)
+	if !human {
+		return owner, func(ctx context.Context) (*nativeoperation_model.Operation, bool, error) {
+			return nativeoperation_model.RecordAdmissionAttempt(ctx, testInstallation, id, owner, true, "")
+		}
+	}
+	const scope = `{"prepared_scope":"native-human-merge"}` // Opaque at this model boundary.
+	// A concurrent second binder must lose the original-scope CAS, even when it
+	// names the same computed scope. It cannot replace the winning generation.
+	gate := make(chan struct{})
+	var bindWG sync.WaitGroup
+	bindErrors := make([]error, 2)
+	for i := range bindErrors {
+		bindWG.Go(func() {
+			<-gate
+			bindErrors[i] = nativeoperation_model.BindHumanMergeScope(ctx, op, owner, held.Generation, `{}`, scope, time.Now().Unix())
+		})
+	}
+	close(gate)
+	bindWG.Wait()
+	winners := 0
+	for _, err := range bindErrors {
+		if err == nil {
+			winners++
+		} else {
+			require.ErrorIs(t, err, nativeoperation_model.ErrWrongOwner)
+		}
+	}
+	require.Equal(t, 1, winners)
+	_, yes, err := nativeoperation_model.RecordHumanMergeAdmission(ctx, op, owner, held.Generation+1, scope, time.Now().Unix(), true, "")
+	require.ErrorIs(t, err, nativeoperation_model.ErrWrongOwner)
+	require.False(t, yes)
+	return owner, func(ctx context.Context) (*nativeoperation_model.Operation, bool, error) {
+		return nativeoperation_model.RecordHumanMergeAdmission(ctx, op, owner, held.Generation, scope, time.Now().Unix(), true, "")
+	}
+}
+
 func TestCancellationWinsBlockedAdmissionOnPostgres(t *testing.T) {
 	engine := useDisposablePostgres(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	start, err := nativeoperation_model.ReadReservation(ctx)
-	require.NoError(t, err)
-	owner := "cond:" + testInstallation + "/op-pg-cancel-admission"
-	_, err = nativeoperation_model.ClaimConditional(ctx, testOperation("op-pg-cancel-admission", start.Revision), owner, `{}`, "v")
-	require.NoError(t, err)
+	_, admit := postgresAdmission(t, ctx, "op-pg-cancel-admission")
 
 	// Keep cancellation uncommitted while admission reads the older pending
 	// row. Its UPDATE then waits on this transaction's row lock. Committing
@@ -75,7 +124,7 @@ func TestCancellationWinsBlockedAdmissionOnPostgres(t *testing.T) {
 	}
 	finished := make(chan result, 1)
 	go func() {
-		op, admitted, err := nativeoperation_model.RecordAdmissionAttempt(ctx, testInstallation, "op-pg-cancel-admission", owner, true, "")
+		op, admitted, err := admit(ctx)
 		finished <- result{op, admitted, err}
 	}()
 	require.Eventually(t, func() bool {
@@ -100,16 +149,139 @@ func TestCancellationWinsBlockedAdmissionOnPostgres(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, stored.Revoked)
 	require.False(t, stored.Admitted)
+	if os.Getenv("FORGEJO_TEST_PG_HUMAN_MERGE_EFFECT") == "1" {
+		first, err := nativeoperation_model.ReadReservation(ctx)
+		require.NoError(t, err)
+		require.NoError(t, nativeoperation_model.ReleaseOwner(ctx, first.Owner))
+		owner, _ := postgresAdmission(t, ctx, "op-pg-effect-cancel-order")
+		want, err := nativeoperation_model.LookupOperation(ctx, testInstallation, "op-pg-effect-cancel-order")
+		require.NoError(t, err)
+		held, err := nativeoperation_model.ReadReservation(ctx)
+		require.NoError(t, err)
+		cancelled, cancelCommit, err := db.TxContext(ctx)
+		require.NoError(t, err)
+		defer cancelCommit.Close()
+		_, err = nativeoperation_model.RevokeOperation(cancelled, testInstallation, want.OperationID)
+		require.NoError(t, err)
+		type effectResult struct {
+			op  *nativeoperation_model.Operation
+			err error
+		}
+		effects := make(chan effectResult, 1)
+		go func() {
+			op, err := nativeoperation_model.RecordHumanMergeEffect(ctx, want, owner, held.Generation, held.Scope, func(_ context.Context, current *nativeoperation_model.Operation) (nativeoperation_model.TerminalOutcome, error) {
+				if !current.Revoked || current.Admitted {
+					return nativeoperation_model.TerminalOutcome{}, fmt.Errorf("effect observed stale cancellation")
+				}
+				return nativeoperation_model.TerminalOutcome{EffectState: nativeoperation_model.EffectNotCommitted, Reason: nativeoperation_model.ReasonCancelledBeforeAdmission, Cancellation: nativeoperation_model.CancellationCancelled}, nil
+			})
+			effects <- effectResult{op, err}
+		}()
+		require.Eventually(t, func() bool {
+			var waiting struct{ Count int64 }
+			has, err := engine.SQL(`SELECT count(*) AS count FROM pg_stat_activity
+				WHERE datname = current_database() AND pid <> pg_backend_pid()
+				AND wait_event_type = 'Lock' AND query ILIKE '%UPDATE%operation%reason%'`).Get(&waiting)
+			return err == nil && has && waiting.Count == 1
+		}, 10*time.Second, 10*time.Millisecond, "effect must wait on the actual cancellation row lock")
+		require.NoError(t, cancelCommit.Commit())
+		select {
+		case got := <-effects:
+			require.NoError(t, got.err)
+			require.Equal(t, nativeoperation_model.EffectNotCommitted, got.op.EffectState)
+			require.Equal(t, nativeoperation_model.CancellationCancelled, got.op.Cancellation)
+			require.Empty(t, got.op.Receipt)
+		case <-ctx.Done():
+			t.Fatal("effect did not settle after cancellation committed")
+		}
+		stillHeld, err := nativeoperation_model.ReadReservation(ctx)
+		require.NoError(t, err)
+		require.Equal(t, owner, stillHeld.Owner)
+		if os.Getenv("FORGEJO_TEST_PG_HUMAN_MERGE_NONCOMMIT") == "1" {
+			// Opaque model evidence: the actual native source root proves the
+			// closed writer and unchanged Git ref. This root owns SQL ordering.
+			verify := func(context.Context, *nativeoperation_model.Operation) error { return nil }
+			_, err := nativeoperation_model.ReleaseHumanMergeNotCommitted(ctx, want, owner, held.Generation, held.Scope, nil)
+			require.ErrorIs(t, err, nativeoperation_model.ErrAdmissionLost)
+			_, err = nativeoperation_model.ReleaseHumanMergeNotCommitted(ctx, want, owner, held.Generation+1, held.Scope, verify)
+			require.ErrorIs(t, err, nativeoperation_model.ErrWrongOwner)
+			_, err = nativeoperation_model.ReleaseHumanMergeNotCommitted(ctx, want, owner, held.Generation, held.Scope+"changed", verify)
+			require.ErrorIs(t, err, nativeoperation_model.ErrWrongOwner)
+			_, err = nativeoperation_model.ReleaseHumanMergeNotCommitted(ctx, want, owner, held.Generation, held.Scope, func(context.Context, *nativeoperation_model.Operation) error {
+				return fmt.Errorf("fixture native evidence refused")
+			})
+			require.Error(t, err)
+			for _, row := range []*nativeoperation_model.Operation{
+				{EffectState: nativeoperation_model.EffectPending},
+				{EffectState: nativeoperation_model.EffectIndeterminate},
+				{EffectState: nativeoperation_model.EffectCommitted},
+				{EffectState: nativeoperation_model.EffectNotCommitted, Admitted: true},
+				{EffectState: nativeoperation_model.EffectNotCommitted, Receipt: "unexpected"},
+				{EffectState: nativeoperation_model.EffectNotCommitted, Completion: nativeoperation_model.CompletionPending},
+			} {
+				_, err := db.GetEngine(ctx).ID(want.ID).Cols("effect_state", "admitted", "receipt", "completion").Update(row)
+				require.NoError(t, err)
+				_, err = nativeoperation_model.ReleaseHumanMergeNotCommitted(ctx, want, owner, held.Generation, held.Scope, verify)
+				require.ErrorIs(t, err, nativeoperation_model.ErrAdmissionLost)
+			}
+			_, err = db.GetEngine(ctx).ID(want.ID).Cols("effect_state", "admitted", "receipt", "completion").Update(&nativeoperation_model.Operation{EffectState: nativeoperation_model.EffectNotCommitted})
+			require.NoError(t, err)
+			before, err := nativeoperation_model.LookupOperation(ctx, testInstallation, want.OperationID)
+			require.NoError(t, err)
+			_, err = db.GetEngine(ctx).Exec("CREATE FUNCTION refuse_noncommit_release() RETURNS TRIGGER AS $$ BEGIN IF NEW.owner='' THEN RAISE EXCEPTION 'fixture noncommit release failure'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql")
+			require.NoError(t, err)
+			_, err = db.GetEngine(ctx).Exec("CREATE TRIGGER fail_noncommit_release BEFORE UPDATE OF owner ON reservation FOR EACH ROW EXECUTE FUNCTION refuse_noncommit_release()")
+			require.NoError(t, err)
+			_, err = nativeoperation_model.ReleaseHumanMergeNotCommitted(ctx, want, owner, held.Generation, held.Scope, verify)
+			require.Error(t, err)
+			retained, err := nativeoperation_model.ReadReservation(ctx)
+			require.NoError(t, err)
+			require.Equal(t, owner, retained.Owner)
+			require.Equal(t, held.Scope, retained.Scope)
+			_, err = db.GetEngine(ctx).Exec("DROP TRIGGER fail_noncommit_release ON reservation")
+			require.NoError(t, err)
+			_, err = db.GetEngine(ctx).Exec("DROP FUNCTION refuse_noncommit_release()")
+			require.NoError(t, err)
+			gate := make(chan struct{})
+			results := make([]*nativeoperation_model.Operation, 8)
+			failures := make([]error, len(results))
+			var wg sync.WaitGroup
+			for i := range results {
+				wg.Go(func() {
+					<-gate
+					results[i], failures[i] = nativeoperation_model.ReleaseHumanMergeNotCommitted(ctx, want, owner, held.Generation, held.Scope, verify)
+				})
+			}
+			close(gate)
+			wg.Wait()
+			winners := 0
+			for i := range results {
+				if failures[i] == nil {
+					winners++
+					require.Equal(t, before, results[i])
+				} else {
+					require.ErrorIs(t, failures[i], nativeoperation_model.ErrWrongOwner)
+				}
+			}
+			require.Equal(t, 1, winners)
+			idle, err := nativeoperation_model.ReadReservation(ctx)
+			require.NoError(t, err)
+			require.Empty(t, idle.Owner)
+			require.Empty(t, idle.Scope)
+			require.Empty(t, idle.Verifier)
+			require.Equal(t, held.Revision, idle.Revision)
+			require.Equal(t, held.Generation, idle.Generation)
+			after, err := nativeoperation_model.LookupOperation(ctx, testInstallation, want.OperationID)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+		}
+	}
 }
 
 func TestCompetingAdmissionsOnPostgres(t *testing.T) {
 	useDisposablePostgres(t)
 	ctx := t.Context()
-	start, err := nativeoperation_model.ReadReservation(ctx)
-	require.NoError(t, err)
-	owner := "cond:" + testInstallation + "/op-pg-admission-race"
-	_, err = nativeoperation_model.ClaimConditional(ctx, testOperation("op-pg-admission-race", start.Revision), owner, `{}`, "v")
-	require.NoError(t, err)
+	_, admit := postgresAdmission(t, ctx, "op-pg-admission-race")
 	gate := make(chan struct{})
 	var wg sync.WaitGroup
 	admitted := make([]bool, 8)
@@ -117,7 +289,7 @@ func TestCompetingAdmissionsOnPostgres(t *testing.T) {
 	for i := range admitted {
 		wg.Go(func() {
 			<-gate
-			_, admitted[i], errors[i] = nativeoperation_model.RecordAdmissionAttempt(ctx, testInstallation, "op-pg-admission-race", owner, true, "")
+			_, admitted[i], errors[i] = admit(ctx)
 		})
 	}
 	close(gate)
@@ -133,17 +305,245 @@ func TestCompetingAdmissionsOnPostgres(t *testing.T) {
 	stored, err := nativeoperation_model.LookupOperation(ctx, testInstallation, "op-pg-admission-race")
 	require.NoError(t, err)
 	require.True(t, stored.Admitted)
+	if os.Getenv("FORGEJO_TEST_PG_HUMAN_MERGE_EFFECT") == "1" {
+		held, err := nativeoperation_model.ReadReservation(ctx)
+		require.NoError(t, err)
+		var observed atomic.Int64
+		results := make([]*nativeoperation_model.Operation, 8)
+		errors := make([]error, len(results))
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i := range results {
+			wg.Go(func() {
+				<-start
+				results[i], errors[i] = nativeoperation_model.RecordHumanMergeEffect(ctx, stored, held.Owner, held.Generation, held.Scope, func(context.Context, *nativeoperation_model.Operation) (nativeoperation_model.TerminalOutcome, error) {
+					observed.Add(1)
+					// The model owns locking/monotonicity; the SDK/Git owner validates
+					// actual receipt facts in the native source integration.
+					return nativeoperation_model.TerminalOutcome{EffectState: nativeoperation_model.EffectCommitted, Completion: nativeoperation_model.CompletionPending, Cancellation: nativeoperation_model.CancellationNone, Receipt: `{"model_fixture":"committed"}`}, nil
+				})
+			})
+		}
+		close(start)
+		wg.Wait()
+		require.EqualValues(t, 1, observed.Load())
+		for i, r := range results {
+			require.NoError(t, errors[i])
+			require.Equal(t, results[0].Receipt, r.Receipt)
+			require.Equal(t, nativeoperation_model.EffectCommitted, r.EffectState)
+			require.Equal(t, nativeoperation_model.CompletionPending, r.Completion)
+		}
+		_, err = nativeoperation_model.RecordHumanMergeEffect(ctx, stored, held.Owner, held.Generation+1, held.Scope, func(context.Context, *nativeoperation_model.Operation) (nativeoperation_model.TerminalOutcome, error) {
+			return nativeoperation_model.TerminalOutcome{}, fmt.Errorf("wrong generation reached observer")
+		})
+		require.ErrorIs(t, err, nativeoperation_model.ErrWrongOwner)
+		stillHeld, err := nativeoperation_model.ReadReservation(ctx)
+		require.NoError(t, err)
+		require.Equal(t, held.Owner, stillHeld.Owner)
+		if os.Getenv("FORGEJO_TEST_PG_HUMAN_MERGE_METADATA") == "1" {
+			// Opaque domain fixture: native PR/issue/history correctness is
+			// qualified in the real source root. This checks transaction/locking.
+			_, err := db.GetEngine(ctx).Exec("CREATE TABLE human_merge_metadata_fixture (id BIGINT PRIMARY KEY, applied BIGINT NOT NULL)")
+			require.NoError(t, err)
+			_, err = db.GetEngine(ctx).Exec("INSERT INTO human_merge_metadata_fixture (id, applied) VALUES (1, 0)")
+			require.NoError(t, err)
+			receipt := results[0].Receipt
+			apply := func(tx context.Context, _ *nativeoperation_model.Operation) (bool, error) {
+				r, err := db.GetEngine(tx).Exec("UPDATE human_merge_metadata_fixture SET applied=1 WHERE id=1 AND applied=0")
+				if err != nil {
+					return false, err
+				}
+				n, err := r.RowsAffected()
+				return n == 1, err
+			}
+			start := make(chan struct{})
+			changed := make([]bool, 8)
+			errors := make([]error, len(changed))
+			var wg sync.WaitGroup
+			for i := range changed {
+				wg.Go(func() {
+					<-start
+					changed[i], errors[i] = nativeoperation_model.ApplyHumanMergeMetadata(ctx, stored, held.Owner, held.Generation, held.Scope, receipt, apply)
+				})
+			}
+			close(start)
+			wg.Wait()
+			winners := 0
+			for i := range changed {
+				require.NoError(t, errors[i])
+				if changed[i] {
+					winners++
+				}
+			}
+			require.Equal(t, 1, winners)
+			didChange, err := nativeoperation_model.ApplyHumanMergeMetadata(ctx, stored, held.Owner, held.Generation+1, held.Scope, receipt, apply)
+			require.ErrorIs(t, err, nativeoperation_model.ErrWrongOwner)
+			require.False(t, didChange)
+			didChange, err = nativeoperation_model.ApplyHumanMergeMetadata(ctx, stored, held.Owner, held.Generation, held.Scope, receipt+"changed", apply)
+			require.ErrorIs(t, err, nativeoperation_model.ErrAdmissionLost)
+			require.False(t, didChange)
+			didChange, err = nativeoperation_model.ApplyHumanMergeMetadata(ctx, stored, held.Owner, held.Generation, held.Scope, receipt, func(tx context.Context, _ *nativeoperation_model.Operation) (bool, error) {
+				if _, err := db.GetEngine(tx).Exec("UPDATE human_merge_metadata_fixture SET applied=2 WHERE id=1"); err != nil {
+					return false, err
+				}
+				return true, fmt.Errorf("fixture metadata rollback")
+			})
+			require.Error(t, err)
+			require.False(t, didChange)
+			var state struct{ Applied int64 }
+			exists, err := db.GetEngine(ctx).Table("human_merge_metadata_fixture").Where("id=1").Get(&state)
+			require.NoError(t, err)
+			require.True(t, exists)
+			require.EqualValues(t, 1, state.Applied)
+			fresh, err := nativeoperation_model.LookupOperation(ctx, stored.InstallationID, stored.OperationID)
+			require.NoError(t, err)
+			require.Equal(t, receipt, fresh.Receipt)
+			require.Equal(t, nativeoperation_model.CompletionPending, fresh.Completion)
+			stillHeld, err := nativeoperation_model.ReadReservation(ctx)
+			require.NoError(t, err)
+			require.Equal(t, held.Owner, stillHeld.Owner)
+			if os.Getenv("FORGEJO_TEST_PG_HUMAN_MERGE_FINISH") == "1" {
+				const startedScope = `{"model_finish":"started"}`
+				const doneScope = `{"model_finish":"done"}`
+				gate := make(chan struct{})
+				errors := make([]error, 8)
+				var wg sync.WaitGroup
+				for i := range errors {
+					wg.Go(func() {
+						<-gate
+						errors[i] = nativeoperation_model.ClaimHumanMergeDispatch(ctx, stored, held.Owner, held.Generation, held.Scope, startedScope, receipt)
+					})
+				}
+				close(gate)
+				wg.Wait()
+				winners := 0
+				for _, err := range errors {
+					if err == nil {
+						winners++
+					} else {
+						require.ErrorIs(t, err, nativeoperation_model.ErrWrongOwner)
+					}
+				}
+				require.Equal(t, 1, winners)
+				_, err = nativeoperation_model.RecordHumanMergeDispatch(ctx, stored, held.Owner, held.Generation+1, startedScope, doneScope, receipt, true)
+				require.ErrorIs(t, err, nativeoperation_model.ErrWrongOwner)
+				_, err = nativeoperation_model.RecordHumanMergeDispatch(ctx, stored, held.Owner, held.Generation, startedScope, doneScope, receipt+"changed", true)
+				require.ErrorIs(t, err, nativeoperation_model.ErrAdmissionLost)
+				finished, err := nativeoperation_model.RecordHumanMergeDispatch(ctx, stored, held.Owner, held.Generation, startedScope, doneScope, receipt, true)
+				require.NoError(t, err)
+				require.Equal(t, nativeoperation_model.CompletionPending, finished.Completion)
+				require.Equal(t, receipt, finished.Receipt)
+				after, err := nativeoperation_model.ReadReservation(ctx)
+				require.NoError(t, err)
+				require.Equal(t, held.Owner, after.Owner)
+				require.Equal(t, doneScope, after.Scope)
+				require.ErrorIs(t, nativeoperation_model.ClaimHumanMergeDispatch(ctx, stored, held.Owner, held.Generation, held.Scope, startedScope, receipt), nativeoperation_model.ErrWrongOwner)
+				released := false
+				if os.Getenv("FORGEJO_TEST_PG_HUMAN_MERGE_COMPLETE") == "1" {
+					// The service proves the closed stage and native phase. This
+					// opaque model fixture proves the joined SQL release is atomic.
+					_, err := db.GetEngine(ctx).Exec("CREATE FUNCTION refuse_human_merge_release() RETURNS TRIGGER AS $$ BEGIN IF NEW.owner='' THEN RAISE EXCEPTION 'fixture human merge release failure'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql")
+					require.NoError(t, err)
+					_, err = db.GetEngine(ctx).Exec("CREATE TRIGGER fail_human_merge_release BEFORE UPDATE OF owner ON reservation FOR EACH ROW EXECUTE FUNCTION refuse_human_merge_release()")
+					require.NoError(t, err)
+					_, err = nativeoperation_model.CompleteHumanMerge(ctx, stored, held.Owner, held.Generation, doneScope, receipt)
+					require.Error(t, err)
+					pending, err := nativeoperation_model.LookupOperation(ctx, stored.InstallationID, stored.OperationID)
+					require.NoError(t, err)
+					require.Equal(t, nativeoperation_model.CompletionPending, pending.Completion)
+					require.Equal(t, receipt, pending.Receipt)
+					retained, err := nativeoperation_model.ReadReservation(ctx)
+					require.NoError(t, err)
+					require.Equal(t, held.Owner, retained.Owner)
+					require.Equal(t, held.Generation, retained.Generation)
+					require.Equal(t, doneScope, retained.Scope)
+					_, err = db.GetEngine(ctx).Exec("DROP TRIGGER fail_human_merge_release ON reservation")
+					require.NoError(t, err)
+					_, err = db.GetEngine(ctx).Exec("DROP FUNCTION refuse_human_merge_release()")
+					require.NoError(t, err)
+					_, err = nativeoperation_model.CompleteHumanMerge(ctx, stored, held.Owner, held.Generation+1, doneScope, receipt)
+					require.ErrorIs(t, err, nativeoperation_model.ErrWrongOwner)
+					_, err = nativeoperation_model.CompleteHumanMerge(ctx, stored, held.Owner, held.Generation, doneScope, receipt+"changed")
+					require.ErrorIs(t, err, nativeoperation_model.ErrAdmissionLost)
+					gate := make(chan struct{})
+					results := make([]*nativeoperation_model.Operation, 8)
+					failures := make([]error, len(results))
+					var wg sync.WaitGroup
+					for i := range results {
+						wg.Go(func() {
+							<-gate
+							results[i], failures[i] = nativeoperation_model.CompleteHumanMerge(ctx, stored, held.Owner, held.Generation, doneScope, receipt)
+						})
+					}
+					close(gate)
+					wg.Wait()
+					winners := 0
+					for i := range results {
+						if failures[i] == nil {
+							winners++
+							require.Equal(t, nativeoperation_model.CompletionComplete, results[i].Completion)
+							require.Equal(t, receipt, results[i].Receipt)
+						} else {
+							require.ErrorIs(t, failures[i], nativeoperation_model.ErrWrongOwner)
+						}
+					}
+					require.Equal(t, 1, winners)
+					idle, err := nativeoperation_model.ReadReservation(ctx)
+					require.NoError(t, err)
+					require.Empty(t, idle.Owner)
+					require.Empty(t, idle.OwnerKind)
+					require.Empty(t, idle.Scope)
+					require.Empty(t, idle.Verifier)
+					require.Equal(t, held.Revision, idle.Revision)
+					require.Equal(t, held.Generation, idle.Generation)
+					complete, err := nativeoperation_model.LookupOperation(ctx, stored.InstallationID, stored.OperationID)
+					require.NoError(t, err)
+					require.Equal(t, nativeoperation_model.CompletionComplete, complete.Completion)
+					require.Equal(t, receipt, complete.Receipt)
+					released = true
+				}
+				// A second isolated operation proves failure is durably claimed,
+				// needs intervention and cannot be overwritten by a later success.
+				if !released {
+					require.NoError(t, nativeoperation_model.ReleaseOwner(ctx, held.Owner))
+				}
+				owner, admit := postgresAdmission(t, ctx, "op-pg-finish-failure")
+				_, yes, err := admit(ctx)
+				require.NoError(t, err)
+				require.True(t, yes)
+				want, err := nativeoperation_model.LookupOperation(ctx, testInstallation, "op-pg-finish-failure")
+				require.NoError(t, err)
+				owned, err := nativeoperation_model.ReadReservation(ctx)
+				require.NoError(t, err)
+				_, err = nativeoperation_model.RecordHumanMergeEffect(ctx, want, owner, owned.Generation, owned.Scope, func(context.Context, *nativeoperation_model.Operation) (nativeoperation_model.TerminalOutcome, error) {
+					return nativeoperation_model.TerminalOutcome{EffectState: nativeoperation_model.EffectCommitted, Completion: nativeoperation_model.CompletionPending, Cancellation: nativeoperation_model.CancellationNone, Receipt: receipt}, nil
+				})
+				require.NoError(t, err)
+				require.NoError(t, nativeoperation_model.ClaimHumanMergeDispatch(ctx, want, owner, owned.Generation, owned.Scope, startedScope, receipt))
+				failed, err := nativeoperation_model.RecordHumanMergeDispatch(ctx, want, owner, owned.Generation, startedScope, doneScope, receipt, false)
+				require.NoError(t, err)
+				require.Equal(t, nativeoperation_model.CompletionNeedsIntervention, failed.Completion)
+				require.Equal(t, receipt, failed.Receipt)
+				_, err = nativeoperation_model.RecordHumanMergeDispatch(ctx, want, owner, owned.Generation, startedScope, doneScope, receipt, true)
+				require.ErrorIs(t, err, nativeoperation_model.ErrAdmissionLost)
+				retained, err := nativeoperation_model.ReadReservation(ctx)
+				require.NoError(t, err)
+				require.Equal(t, owner, retained.Owner)
+				require.Equal(t, startedScope, retained.Scope)
+				if os.Getenv("FORGEJO_TEST_PG_HUMAN_MERGE_COMPLETE") == "1" {
+					_, err := nativeoperation_model.CompleteHumanMerge(ctx, want, owner, owned.Generation, startedScope, receipt)
+					require.ErrorIs(t, err, nativeoperation_model.ErrAdmissionLost)
+				}
+			}
+		}
+	}
 }
 
 func TestAdmissionBeforeCancellationOnPostgres(t *testing.T) {
 	useDisposablePostgres(t)
 	ctx := t.Context()
-	start, err := nativeoperation_model.ReadReservation(ctx)
-	require.NoError(t, err)
-	owner := "cond:" + testInstallation + "/op-pg-admission-first"
-	_, err = nativeoperation_model.ClaimConditional(ctx, testOperation("op-pg-admission-first", start.Revision), owner, `{}`, "v")
-	require.NoError(t, err)
-	_, admitted, err := nativeoperation_model.RecordAdmissionAttempt(ctx, testInstallation, "op-pg-admission-first", owner, true, "")
+	owner, admit := postgresAdmission(t, ctx, "op-pg-admission-first")
+	_, admitted, err := admit(ctx)
 	require.NoError(t, err)
 	require.True(t, admitted)
 	revoked, err := nativeoperation_model.RevokeOperation(ctx, testInstallation, "op-pg-admission-first")

@@ -37,6 +37,7 @@ func exactTargetForIssue11() issues_model.ExactReviewTarget {
 		CommitID:       exactHeadOID,
 		CurrentHeadOID: exactHeadOID,
 		CurrentBaseOID: exactBaseOID,
+		DiffBaseOID:    exactBaseOID,
 	}
 }
 
@@ -54,6 +55,7 @@ func exactTargetForIssue3() issues_model.ExactReviewTarget {
 		CommitID:       exactHeadOID,
 		CurrentHeadOID: exactHeadOID,
 		CurrentBaseOID: exactBaseOID,
+		DiffBaseOID:    exactBaseOID,
 	}
 }
 

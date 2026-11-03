@@ -575,7 +575,10 @@ func (pr *PullRequest) SetMerged(ctx context.Context) (bool, error) {
 	pr.ConflictedFiles = []string{}
 
 	// We need to save all of the data used to compute this merge as it may have already been changed by TestPatch. FIXME: need to set some state to prevent TestPatch from running whilst we are merging.
-	if _, err := sess.Where("id = ?", pr.ID).Cols("has_merged, status, merge_base, merged_commit_id, merger_id, merged_unix, conflicted_files").Update(pr); err != nil {
+	// MergedUnix is chosen by the caller: ordinary pushes use their completion
+	// time, while manual marking uses the selected commit's author time. Its
+	// ORM updated tag must not replace that value during this explicit write.
+	if _, err := sess.NoAutoTime().Where("id = ?", pr.ID).Cols("has_merged, status, merge_base, merged_commit_id, merger_id, merged_unix, conflicted_files").Update(pr); err != nil {
 		return false, fmt.Errorf("Failed to update pr[%d]: %w", pr.ID, err)
 	}
 

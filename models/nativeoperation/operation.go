@@ -14,8 +14,9 @@ import (
 	"forgejo.org/modules/timeutil"
 )
 
-// Operation kinds mirror the SDK background kinds. Authorization for one kind
-// never grants another. Each supported kind executes through its own guarded native boundary.
+// Background operation kinds mirror the SDK. Human kinds are separate
+// and are not advertised for background enrollment. Authorization for one kind
+// never grants another; each executes through its own guarded native boundary.
 const (
 	KindIssueGraph      = "issue.graph.mutate"
 	KindRefPublish      = "git.ref.publish"
@@ -26,6 +27,19 @@ const (
 	KindLifecycleIssue  = "issue.lifecycle.apply"
 	KindLifecycleReview = "pull_request.review.request"
 	KindLifecycleNote   = "issue.comment.publish"
+	// Human comments use live request admission, never background enrollment.
+	KindHumanComment       = "discussion.comment.create"
+	KindHumanEdit          = "discussion.edit"
+	KindHumanIssueCreate   = "issue.create"
+	KindHumanLock          = "discussion.lock.apply"
+	KindHumanState         = "discussion.state.apply"
+	KindHumanReview        = "pull_request.human_review.apply"
+	KindHumanInline        = "pull_request.human_inline.create"
+	KindHumanThread        = "pull_request.human_thread.apply"
+	KindHumanReviewRequest = "pull_request.human_review_request.apply"
+	KindHumanMerge         = "pull_request.human_merge.apply"
+	KindHumanManualMerge   = "pull_request.human_manual_merge.apply"
+	KindHumanPullCreate    = "pull_request.human_create.apply"
 )
 
 // Effect states for an operation's primary native effect.
@@ -99,7 +113,7 @@ type Operation struct {
 	EffectState            string             `xorm:"VARCHAR(16) NOT NULL DEFAULT 'pending'"`
 	Reason                 string             `xorm:"VARCHAR(64) NOT NULL DEFAULT ''"`
 	Cancellation           string             `xorm:"VARCHAR(16) NOT NULL DEFAULT 'none'"`
-	Completion             string             `xorm:"VARCHAR(16) NOT NULL DEFAULT ''"`
+	Completion             string             `xorm:"VARCHAR(32) NOT NULL DEFAULT ''"`
 	Receipt                string             `xorm:"TEXT NOT NULL"`
 	CreatedUnix            timeutil.TimeStamp `xorm:"created NOT NULL"`
 	UpdatedUnix            timeutil.TimeStamp `xorm:"updated NOT NULL"`

@@ -285,9 +285,10 @@ type Comment struct {
 	CommitID        int64
 	Line            int64 // - previous line / + proposed line
 	TreePath        string
-	Content         string        `xorm:"LONGTEXT"`
-	ContentVersion  int           `xorm:"NOT NULL DEFAULT 0"`
-	RenderedContent template.HTML `xorm:"-"`
+	OriginalAnchor  *CodeCommentAnchor `xorm:"JSON TEXT"`
+	Content         string             `xorm:"LONGTEXT"`
+	ContentVersion  int                `xorm:"NOT NULL DEFAULT 0"`
+	RenderedContent template.HTML      `xorm:"-"`
 
 	// Path represents the 4 lines of code cemented by this comment
 	Patch       string `xorm:"-"`
@@ -896,6 +897,14 @@ func CreateComment(ctx context.Context, opts *CreateCommentOptions) (_ *Comment,
 	if err := nativeoperation_model.RequireHeldOwnership(ctx); err != nil {
 		return nil, err
 	}
+	if opts.OriginalAnchor != nil {
+		if opts.Type != CommentTypeCode {
+			return nil, errors.New("original anchor requires a code comment")
+		}
+		if err := opts.OriginalAnchor.Validate(); err != nil {
+			return nil, err
+		}
+	}
 	ctx, committer, err := db.TxContext(ctx)
 	if err != nil {
 		return nil, err
@@ -932,6 +941,7 @@ func CreateComment(ctx context.Context, opts *CreateCommentOptions) (_ *Comment,
 		NewRef:           opts.NewRef,
 		DependentIssueID: opts.DependentIssueID,
 		TreePath:         opts.TreePath,
+		OriginalAnchor:   opts.OriginalAnchor.Copy(),
 		ReviewID:         opts.ReviewID,
 		Patch:            opts.Patch,
 		RefRepoID:        opts.RefRepoID,
@@ -1102,6 +1112,7 @@ type CreateCommentOptions struct {
 	Patch            string
 	LineNum          int64
 	TreePath         string
+	OriginalAnchor   *CodeCommentAnchor
 	ReviewID         int64
 	Content          string
 	Attachments      []string // UUIDs of attachments
@@ -1242,7 +1253,7 @@ func UpdateComment(ctx context.Context, c *Comment, contentVersion int, doer *us
 		return err
 	}
 
-	sess := db.GetEngine(ctx).ID(c.ID).AllCols()
+	sess := db.GetEngine(ctx).ID(c.ID).AllCols().Omit("original_anchor")
 	if c.Issue.NoAutoTime {
 		// update the DataBase
 		sess = sess.NoAutoTime().SetExpr("updated_unix", c.Issue.UpdatedUnix)

@@ -38,4 +38,5 @@ func Test_addNativeOperation(t *testing.T) {
 	rows = nil
 	require.NoError(t, db.GetEngine(t.Context()).Table("reservation").Find(&rows))
 	require.Len(t, rows, 1)
+	require.NoError(t, widenNativeOperationCompletion(x))
 }

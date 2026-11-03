@@ -11,7 +11,7 @@ import (
 )
 
 // CodeThread is one native code-review conversation: code comments sharing
-// one (review, path, signed line) anchor in native (created_unix, id)
+// one immutable anchor within a (review, path, signed line) bucket in native (created_unix, id)
 // order with the anchored root first. Replies are members, never
 // resolution targets: the root carries the conversation identity and its
 // resolve-doer carries the resolution.
@@ -73,16 +73,18 @@ func FetchThreadComments(ctx context.Context, issue *Issue) (CommentList, map[in
 // signed line. The sign carries the diff side: negative lines anchor the
 // previous (merge-base) tree, positive lines the proposed (head) tree.
 type threadGroupKey struct {
+	issueID  int64
 	reviewID int64
 	treePath string
 	line     int64
 }
 
-// GroupCodeThreads groups code comments into conversations by (review,
-// path, signed line), ordered by ascending root (created_unix, id) with
-// members in native order. Comments without a code anchor or review
-// grouping never form threads and are skipped so grouping stays total
-// over anchored conversations.
+// GroupCodeThreads partitions native location buckets by the entire recorded
+// immutable anchor, including file side, range and original trees. A retained
+// nil-context reply joins a sole valid context only when that is unambiguous;
+// otherwise unknown context forms its own conversation. No context is invented
+// on the retained row. Malformed recorded anchors never absorb unknown replies.
+// Roots and members remain ordered by (created_unix, id).
 func GroupCodeThreads(comments CommentList) []CodeThread {
 	groups := make(map[threadGroupKey][]*Comment)
 	order := make([]threadGroupKey, 0, len(comments))
@@ -90,7 +92,7 @@ func GroupCodeThreads(comments CommentList) []CodeThread {
 		if comment == nil || comment.Type != CommentTypeCode || comment.ReviewID == 0 {
 			continue
 		}
-		key := threadGroupKey{reviewID: comment.ReviewID, treePath: comment.TreePath, line: comment.Line}
+		key := threadGroupKey{issueID: comment.IssueID, reviewID: comment.ReviewID, treePath: comment.TreePath, line: comment.Line}
 		if _, ok := groups[key]; !ok {
 			order = append(order, key)
 		}
@@ -98,14 +100,39 @@ func GroupCodeThreads(comments CommentList) []CodeThread {
 	}
 	threads := make([]CodeThread, 0, len(order))
 	for _, key := range order {
-		members := groups[key]
-		sort.Slice(members, func(i, j int) bool {
-			if members[i].CreatedUnix != members[j].CreatedUnix {
-				return members[i].CreatedUnix < members[j].CreatedUnix
+		// Presence is separate from the zero value: a malformed recorded
+		// anchor must not become indistinguishable from an unknown one.
+		type contextKey struct {
+			anchor CodeCommentAnchor
+			known  bool
+		}
+		contexts := make(map[contextKey]CodeThread)
+		var sole contextKey
+		for _, c := range groups[key] {
+			if c.OriginalAnchor != nil {
+				sole = contextKey{anchor: *c.OriginalAnchor, known: true}
+				contexts[sole] = nil
 			}
-			return members[i].ID < members[j].ID
-		})
-		threads = append(threads, CodeThread(members))
+		}
+		unambiguous := len(contexts) == 1 && sole.anchor.Validate() == nil
+		for _, c := range groups[key] {
+			var context contextKey
+			if c.OriginalAnchor != nil {
+				context = contextKey{anchor: *c.OriginalAnchor, known: true}
+			} else if unambiguous {
+				context = sole
+			}
+			contexts[context] = append(contexts[context], c)
+		}
+		for _, members := range contexts {
+			sort.Slice(members, func(i, j int) bool {
+				if members[i].CreatedUnix != members[j].CreatedUnix {
+					return members[i].CreatedUnix < members[j].CreatedUnix
+				}
+				return members[i].ID < members[j].ID
+			})
+			threads = append(threads, members)
+		}
 	}
 	sort.Slice(threads, func(i, j int) bool {
 		a, b := threads[i].Root(), threads[j].Root()

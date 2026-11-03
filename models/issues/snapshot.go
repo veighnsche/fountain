@@ -700,6 +700,8 @@ func validRepositoryIssuesCursor(cursor string) bool {
 
 // ThreadMemberSnapshot is one permission-checked conversation member.
 type ThreadMemberSnapshot struct {
+	OriginalAnchor *CodeCommentAnchor
+	Resolved       bool
 	CommentID      int64
 	IssueID        int64
 	ContentDigest  string
@@ -712,12 +714,14 @@ type ThreadMemberSnapshot struct {
 }
 
 // ThreadSnapshot is the permission-checked view of one native code-review
-// conversation. Location splits the root anchor into path, old|new side
-// and unsigned line. OriginalCommit is the root's recorded commit;
+// conversation. Location preserves native path/side/unsigned line (zero has
+// no recorded side); OriginalAnchor separately retains exact immutable context.
+// OriginalCommit is the root's recorded commit;
 // HeadCommit the current head tip bound at read time (empty when the head
 // ref is gone). Digest binds the ordered member lines; hidden threads
 // carry no digest, location, commits or members.
 type ThreadSnapshot struct {
+	OriginalAnchor *CodeCommentAnchor
 	RootID         int64
 	IssueID        int64
 	ReviewID       int64
@@ -774,12 +778,17 @@ func NewThreadMemberSnapshot(comment *Comment, visible bool, hiddenReason string
 	if comment.ContentVersion < 0 {
 		return ThreadMemberSnapshot{}, ErrSnapshotInvalid
 	}
+	if comment.OriginalAnchor != nil && comment.OriginalAnchor.Validate() != nil {
+		return ThreadMemberSnapshot{}, ErrSnapshotInvalid
+	}
 	created := int64(comment.CreatedUnix)
 	updated := int64(comment.UpdatedUnix)
 	if created <= 0 || updated < created {
 		return ThreadMemberSnapshot{}, ErrSnapshotInvalid
 	}
 	return ThreadMemberSnapshot{
+		OriginalAnchor: comment.OriginalAnchor.Copy(),
+		Resolved:       comment.ResolveDoerID != 0,
 		CommentID:      comment.ID,
 		IssueID:        comment.IssueID,
 		ContentDigest:  ContentDigest(comment.Content),
@@ -794,8 +803,9 @@ func NewThreadMemberSnapshot(comment *Comment, visible bool, hiddenReason string
 // NewThreadSnapshot converts one grouped conversation. root is the native
 // root (first in created/id order); digest binds the ordered member
 // lines. A hidden thread redacts to its root locator. Resolver
-// consistency binds Resolved to a set ResolverID. Outdated marks a root
-// whose original commit differs from the bound head tip.
+// consistency binds Resolved to a set ResolverID. Outdated retains native
+// invalidation and original-head drift, with recorded-commit fallback only
+// when original context is unknown.
 func NewThreadSnapshot(root *Comment, issueID, reviewID int64, path, side string, line int64, originalCommit, headCommit, digest string, members []ThreadMemberSnapshot, memberTotal int, resolverID int64, resolved, outdated, visible bool, hiddenReason string, complete bool) (ThreadSnapshot, error) {
 	if root == nil || root.ID <= 0 || issueID <= 0 || reviewID <= 0 {
 		return ThreadSnapshot{}, ErrSnapshotInvalid
@@ -816,7 +826,10 @@ func NewThreadSnapshot(root *Comment, issueID, reviewID int64, path, side string
 	if hiddenReason != "" {
 		return ThreadSnapshot{}, ErrSnapshotInvalid
 	}
-	if path == "" || (side != "old" && side != "new") || line <= 0 {
+	if path == "" || line < 0 || line == 0 && side != "" || line > 0 && side != "old" && side != "new" {
+		return ThreadSnapshot{}, ErrSnapshotInvalid
+	}
+	if root.OriginalAnchor != nil && root.OriginalAnchor.Validate() != nil {
 		return ThreadSnapshot{}, ErrSnapshotInvalid
 	}
 	if originalCommit != "" && !validFullOID(originalCommit) {
@@ -846,6 +859,7 @@ func NewThreadSnapshot(root *Comment, issueID, reviewID int64, path, side string
 		return ThreadSnapshot{}, ErrSnapshotInvalid
 	}
 	return ThreadSnapshot{
+		OriginalAnchor: root.OriginalAnchor.Copy(),
 		RootID:         root.ID,
 		IssueID:        issueID,
 		ReviewID:       reviewID,
