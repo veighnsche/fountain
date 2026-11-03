@@ -72,7 +72,7 @@ func backgroundMux(manager *extensions_service.Manager, browser http.Handler, in
 			}
 			serveBackgroundBootstrap(w, r, manager)
 			return
-		case extension.BackgroundSubmitPath, extension.BackgroundGetPath, extension.BackgroundCancelPath, extension.BackgroundRevisionPath, extension.BackgroundSnapshotPath, extension.BackgroundCreationsPath, extension.BackgroundOperationsPath:
+		case extension.BackgroundIssueIntakePath, extension.BackgroundSubmitPath, extension.BackgroundGetPath, extension.BackgroundCancelPath, extension.BackgroundRevisionPath, extension.BackgroundSnapshotPath, extension.BackgroundCreationsPath, extension.BackgroundOperationsPath:
 			serveBackgroundOperation(w, r, manager, instanceID, service, verifiers, operations)
 			return
 		case extension.LifecycleAuthorizePath:
@@ -220,6 +220,30 @@ func serveBackgroundOperation(w http.ResponseWriter, r *http.Request, manager *e
 		return
 	}
 	switch r.URL.Path {
+	case extension.BackgroundIssueIntakePath:
+		if _, declared := admission.Capabilities[extension.CapabilityIssueIntake]; !declared {
+			http.Error(w, "issue intake capability not declared", http.StatusForbidden)
+			return
+		}
+		var request extension.IssueIntakeMutation
+		if !decodeBackgroundRequest(w, r, &request) {
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		receipt, err := nativeoperation_service.Default().SubmitIssueIntake(ctx, admission.InstallationID, request)
+		if err != nil {
+			status := http.StatusConflict
+			if errors.Is(err, nativeoperation_service.ErrAuthorityLost) {
+				status = http.StatusForbidden
+			}
+			if nativeoperation_service.IsBusy(err) {
+				status = http.StatusServiceUnavailable
+			}
+			http.Error(w, "native issue intake refused", status)
+			return
+		}
+		writeBackgroundJSON(w, receipt)
 	case extension.BackgroundSubmitPath:
 		serveBackgroundSubmit(w, r, admission, verifiers.submit, operations)
 	case extension.BackgroundGetPath:

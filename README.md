@@ -133,6 +133,312 @@ decides what work to request and manages its own planning, execution, and policy
 See the [background SDK](sdk/background.go), [snapshot types](sdk/snapshot.go),
 and [supported-operation handshake](sdk/operations.go) for the concrete contracts.
 
+Human extensions can prepare an ordinary issue/PR comment with
+[`Authority.RepositoryCommentSnapshot`](sdk/native_comment_snapshot.go). The
+session-admitted callback returns exact parent/actor identities, current comment
+capability and a native revision observed idle on both sides of the read. It
+rechecks parent and human facts and refuses changed or busy state. Preparation
+records no comment or operation and grants no write authority. A journaled human
+comment consumer must claim that revision and recheck admission/permission at
+commit. The native [`SubmitHumanComment`](services/nativeoperation/human_comment.go)
+service now provides the conditional comment/receipt transaction, current human
+and parent checks, identical replay, native mention/notification completion and
+offline recovery without publishing a duplicate. Its trusted caller must supply
+live human/session/installation admission on every call and at commit.
+[`Authority.SubmitHumanComment`, `GetHumanComment` and `CancelHumanComment`](sdk/native_human_comment.go)
+now consume this service through the private callback. Packages must declare
+`native.repository.comments.write`; submit/cancel need a native POST admission.
+Use `HumanCommentOperationID` with native actor/repository IDs and persist that
+ID and immutable intent before dispatch. The host derives the installation from
+the live package instance. A lost reply requires lookup under the saved ID;
+`not_observed` does not prove that no earlier effect can arrive. Receipt lookup
+and cancellation retain current-human/instance checks after repository permission
+loss. Soda's shared application/HTTP comment consumer is implemented; installed
+UI and desktop gateway qualification remain later work. This kind is not advertised for background enrollment.
+The existing completion-note operation retains its merge/closed-issue contract.
+
+[`Authority.RepositoryEditSnapshot`](sdk/native_edit_snapshot.go) prepares human
+issue/PR title and description edits with exact original title, full-body digest,
+content version, parent IDs and separate title/body capabilities. The native
+[`SubmitHumanEdit`](services/nativeoperation/human_edit.go) producer accepts only
+explicitly supplied fields: omitted means unchanged, an empty body clears it.
+Titles are bounded to the native storage's 255-byte limit, without truncation;
+new bodies are bounded to 64 KiB of original UTF-8 Markdown. It rechecks live
+human admission and each requested field's native permission, then commits both
+fields, native history and receipt atomically through the existing journal.
+Replay retains that receipt; inhibited offline recovery never reapplies an edit
+or repeats uncertain completion. Native title notification/code-owner handling
+is shared with ordinary title changes. The request/receipt and exact intent codec
+live in [`sdk/native_human_edit.go`](sdk/native_human_edit.go). This human kind
+has no background enrollment. `Authority.SubmitHumanEdit`, `GetHumanEdit` and
+`CancelHumanEdit` now consume this service through the private callback. Packages
+declare `native.repository.discussions.edit`; submit/cancel require native POST
+admission and the installation captured before dispatch. `HumanEditOperationID`
+binds the command to its native human/repository. The host rechecks the live
+installation at commit, and lookup reports the live namespace even for absence;
+a replacement installation cannot reconcile an earlier installation's outcome.
+Own-operation lookup/cancel retain current-human admission after repository
+permission loss. Soda's canonical edit journal/adapter/application/HTTP consumer
+is implemented; installed editor and desktop gateway qualification remain later
+work. Preparation itself grants no write authority.
+
+[`Authority.RepositoryIssueCreateSnapshot`](sdk/native_issue_create_snapshot.go)
+prepares ordinary human issue creation with the exact current actor/repository,
+internal-issue capability and an idle native revision. It follows native reader,
+archive and owner-block rules, rechecks both sides of the read and allocates no
+issue/index or operation. It works without an existing issue or code unit at this
+private metadata boundary. Full issue-only extension admission remains separate.
+The native [`SubmitHumanIssueCreate`](services/nativeoperation/human_issue_create.go)
+producer now creates a plain issue through the existing conditional journal,
+with live human/reader/archive/block checks and one SQL transaction for index,
+issue and receipt. Replay returns the recorded issue; offline recovery never
+recreates it or repeats uncertain notifications. It is excluded from background
+enrollment. The typed SDK now supplies `SubmitHumanIssueCreate`,
+`GetHumanIssueCreate` and `CancelHumanIssueCreate` through the private callback,
+requiring `native.repository.issues.create`, scoped actor/repository operation
+IDs and captured installation equality for submit/cancel. Live native human,
+instance and request admission is checked at commit and before returning results.
+Own-operation lookup/cancel remains available after repository permission loss;
+lookup reports the current installation even for absence. The shared Factory
+application now retains validated creation outcomes against its saved capture;
+its admitted shared HTTP consumer is implemented, with installed UI and desktop
+gateway qualification still subsequent work. Preparation grants no
+creation, automation or spending authority.
+
+[`Authority.RepositoryLockSnapshot`](sdk/native_lock_snapshot.go) observes the
+current issue/PR comment-lock state, exact subject/wrapper IDs and separate
+lock/unlock capabilities under an idle native revision. It follows native
+subject-read, writer-or-Issues/PR and archive rules; authorship alone does not
+grant locking. Fresh reads bracket state/permission/current-human facts and
+reject changed observations. It performs no lock mutation or operation claim.
+The native [`SubmitHumanLock`](services/nativeoperation/human_lock.go) producer
+now uses live human admission and the existing conditional journal. Current lock
+state and configured reasons are rechecked; native lock state, history and the
+receipt commit atomically. Recovery verifies the exact state/history and never
+reapplies the mutation. There is no separate notification step, so a proved
+committed primary can finish/release offline. This kind is excluded from
+background enrollment. The SDK now exposes `SubmitHumanLock`, `GetHumanLock`
+and `CancelHumanLock` through the private callback under
+`native.repository.discussions.lock`. Scoped actor/repository operation IDs and
+captured installation equality protect submit/cancel; lookup returns the live
+installation even for absence. Current instance, human/session and request
+admission are rechecked inside primary and before releasing results. This
+capability is now declared by the Factory product. Canonical lock capture and
+the Fountain adapter feed its shared Application and admitted HTTP consumer with
+durable validated outcomes and live admission on receipt recovery. The real
+frontend/Unix bridge also admits the scoped lock routes and bounded request
+envelope. Installed UI and desktop HTTPS qualification remain subsequent work.
+
+[`Authority.RepositoryStateSnapshot`](sdk/native_state_snapshot.go) prepares
+direct issue/PR close/reopen with exact native subject/wrapper IDs, closed and
+merged state, separate close/reopen facts and an idle native revision. It follows
+native EditIssue/EditPullRequest state permission and ChangeIssueStatus block/
+dependency rules, with enabled subject reads and archive checks. Author rights
+exclude imported poster identity; current owner/poster blocks deny both actions.
+Enabled open dependencies deny closing while reopening remains available.
+Comment locks do not gate this direct state API. Preparation is read-only and
+grants no authority. Native `SubmitHumanState` now uses live human admission and
+the existing conditional journal: status, native history and its typed receipt
+commit together. Native counts derive from issue state and invalidate after
+commit. Stopwatch/notification completion follows the primary; a failure or
+interrupted completion retains a committed receipt needing intervention. Offline
+recovery checks exact state/history and never repeats primary or uncertain
+completion. The SDK now exposes `SubmitHumanState`, `GetHumanState` and
+`CancelHumanState` through the private callback under
+`native.repository.discussions.state`. Actor/repository-scoped operation IDs
+and captured installation equality protect writes; lookup reports the live
+installation even for absence. Current human/session, instance and request
+admission are rechecked inside primary and before releasing results. The
+Factory production manifest now declares this capability. Canonical
+Factory state-command capture now retains exact intent/preparation in its
+existing immutable journal, with concurrent-winner replay and real PostgreSQL
+restart/recovery checks. Factory's `forgejo.HumanStates` adapter now consumes
+this SDK through the neutral human state writer port, preserving native receipt
+bytes and completion intervention separately from canonical identity/digest
+bindings. `Application.HumanStates` now delivers through that adapter and retains
+validated observations in Factory's existing command journal, preserving original
+receipts and unresolved completion through reply loss, concurrency and Store
+reopen. Shared HTTP now consumes that Application through admitted Fountain
+Product/frontend composition, with strict boolean input, safe scoped results,
+ordinary body bounds and unfinished completion retained across reply loss and
+reopen. Current native session is rechecked after delivery. Installed UI and
+desktop HTTPS qualification remain subsequent work.
+Combined comment posting and the web comment route's PR ref synchronization are
+separate operations.
+
+[`Authority.RepositoryReviewSnapshot`](sdk/native_review_snapshot.go) now prepares
+human PR review work with exact PR/issue identities, current base-branch and PR
+head commits, a Git-derived merge base and an idle native revision. It exposes
+only the current human's pending draft ID/commit, with separate comment, draft,
+approve and request-changes facts. Native code/PR reads, self-review, imported
+poster, owner/poster blocks and archive rules apply. Reviewable base-repository
+PR refs do not disclose private fork IDs/branch names or another user's draft.
+Two complete reads compare public preparation and private source/author facts;
+Git, draft, identity, permission, revision and current-session races refuse.
+Preparation creates no review/comment/operation and grants no write authority.
+[`SubmitPreparedHumanReview`](models/issues/review_human_primary.go) now provides
+the native SQL primary under an explicit held ownership generation. Drafts create
+or update only the human's own pending row, preserving original commit/inline
+context; final comment/approve/request-changes reuse native submission and
+approval/request bookkeeping, including fork PRs. Exact target/current Git proof,
+own draft identity and native live policy are checked before effects. The primary
+joins its caller's transaction, so review/history/bookkeeping and a later journal
+receipt can commit together. Actual native SQL and outer rollback checks pass.
+`Service.SubmitHumanReview` now composes that primary with live human admission,
+the native conditional reservation/journal and an atomic typed receipt. The shared
+SDK codec retains exact intent, body digest, native review/history identity,
+official/stale flags and a composite digest/count of all retained draft inline
+evidence. Drafts need no notification step; final reviews perform ordinary native
+mention/notification completion after commit, preserving intervention on failure.
+Offline SQL-evidence recovery never repeats primary or uncertain completion;
+unadmitted pending transactions recover no effect and mismatched evidence stays
+fenced. Actual native delivery/replay/refusal/rollback and returned-writer recovery
+checks pass. Six actual owned-child SIGKILL/reap cases now qualify persistent
+database/Git reopen before and after draft creation, draft update and final
+submission. Exact receipt/row/history/inline/anchor mismatches stay fenced;
+restoring original evidence permits recovery. Draft updates preserve original
+commit/stale state, while uncertain final completion remains intervention without
+replaying primary or mentions/notifications.
+The SDK now supplies scoped human review submit/get/cancel over the live private
+callback with captured installation equality, current native human/session and
+exact intent/receipt validation. The catalog recognizes
+`native.repository.reviews.write`; the production Factory source manifest now
+declares it for the shared admitted HTTP consumer. Actual private-channel checks qualify native draft/final
+reviews, escaped 64 KiB prose, lost replies, Git/permission/session refusal,
+completion intervention without replay and genuine manager/installation
+replacement. SQL proves eight final reviews/history entries without duplicates
+or retried mention work. Factory now owns durable canonical review capture and
+an admitted review adapter with separate canonical/native bindings. Real
+PostgreSQL and private callback checks retain original inline context and recover
+lost replies after Store reopen. The shared Application now retains review
+outcomes monotonically, qualifying concurrent submission, scoped cleanup and
+intervention across reopen. Shared HTTP now joins the same admitted Product and
+Application through the frontend/private Unix path, with strict prose/event input,
+safe result projection, both reply-loss recoveries and post-commit current-session
+refusal. New inline creation, installed review UI and desktop HTTPS remain
+subsequent work.
+
+`Authority.RepositoryInlineSnapshot` now prepares an exact immutable inline
+selection with current PR/Git/draft/policy facts, literal path, old/new side and
+file or line range. Two complete private/public source and Git proofs bracketed
+by idle native revision refuse live races. The reusable native proof validates
+actual tree entry and diff membership, retaining entry identity and diff digest
+without exposing source text or private fork/draft details. File-level large,
+binary and gitlink context uses bounded metadata; lines need complete textual
+hunk coverage within a 4 MiB proof bound. EOF phantom lines and hunk gaps refuse;
+genuine blank context remains anchorable. Actual SDK/private callback checks
+qualify these cases, permissions/session/draft/Git races and absence of read
+effects. This grants no write authority.
+`CreatePreparedHumanInlineComment` now supplies an ownership-required SQL primary
+with shared current review/actor/repository/draft validation and exact captured
+versus trusted-current Git/anchor proof. It stores full original file/side/range
+context, preserves own older draft summary/commit/inline data, and supports draft
+append or immediate native review finalization with preserved summary. Actual
+native SQL, outer rollback, comment/history INSERT failure and review-primary
+regression checks pass. Native thread grouping and private human reads now
+distinguish entire immutable file/side/range/tree contexts sharing a legacy
+coordinate. Unambiguous retained replies stay grouped without inventing original
+context; ambiguous unknown replies remain separate. Prose paging rechecks whole
+group membership, including off-page context and root-order changes. The older
+location-only native reply form refuses ambiguous conversations and preserves
+unknown commit/patch metadata. Real SQL/Git/Unix SDK and native root-resolution
+checks cover these boundaries. Automation snapshots now retain full immutable
+file/side/range/tree context per root and member, separate from recorded native
+coordinates. Complete conversation digests include each original anchor (null
+when unknown) and member resolver state. Native conditional file/range resolution
+uses that exact evidence. Factory delivery translates it to neutral records and
+recomputes the complete digest from authenticated bodies before using the material.
+Changed original context refuses resolution; the native and canonical digest
+encoders agree for unknown, file and range contexts.
+The native human inline journal now composes current request admission, fresh
+held Git/anchor proof, prepared SQL and an exact bounded receipt. Draft appends
+preserve the own summary/older commit and original comments; immediate publication
+consumes that own draft through native review history and completion. Exact replay
+does not append another comment or retry uncertain notifications. Offline recovery
+matches the receipt, inline/review/history and complete retained comment evidence,
+including original context, content version, resolver state and timestamps.
+Real native SQL/Git checks cover rollback, replay, cancellation, partial completion
+and stopped-writer evidence recovery. Eight owned-worker SIGKILL/reap and persistent
+reopen cases now qualify new drafts, retained draft appends and immediate publication
+with and without an existing draft, before/after primary SQL. Exact receipt and
+original context survive, changed evidence stays fenced, and recovery/replay adds
+no duplicate inline/history or uncertain mention completion.
+`Authority.SubmitHumanInline`, `GetHumanInline` and `CancelHumanInline` now expose
+the producer on the admitted private callback under the existing human-review
+capability. Actor/repository-scoped IDs own both submissions and early cancellation
+tombstones. Submit/cancel assert the captured installation; lookup reports the live
+installation even for absence. Current human/request/manager admission is checked
+before effects and after completion, with fresh native policy inside primary SQL.
+SDK validation binds exact intent/receipt and immutable context. Actual manager/
+Unix/SQL/Git checks cover large prose, file/range drafts and immediate publication,
+lost replies, changed admission, partial completion and genuine package replacement
+without adopting another installation's journal. Canonical capture, provider
+adapter, Application/HTTP and installed UI consumers remain subsequent work.
+
+`Authority.RepositoryThreadSnapshot` now prepares resolve/unresolve for an exact
+native thread root. It reuses native immutable-context grouping, PR/Git reads and
+`CanMarkConversation`, with separate resolve/unresolve policy and archive refusal.
+Complete conversation and metadata digests pin prose/version/order, original
+anchors, exact resolver identity and native review/author/time/commit facts.
+Retained unknown original context stays null; foreign pending reviews stay hidden.
+At most 1,000 selected members and 2 MiB aggregate prose/retained patches are proved; larger
+conversations refuse instead of returning partial evidence. Two full observations,
+idle revision checks and a final live-human check fence concurrent changes.
+Actual SQL/Git/private SDK checks qualify full file/side/range/tree separation,
+legacy context, draft privacy, policy, bounds and live races without read effects.
+This preparation grants no authority. `ApplyPreparedHumanThread` now supplies an
+ownership-required native resolve/unresolve primary. It binds the trusted current
+actor and captured revision, repeats native policy/Git/conversation proofs in a
+joined transaction and uses native root-only `MarkConversation`. Predicted exact
+read-back preserves existing resolvers on no-op resolution and retains unknown
+anchors, original prose/patch/author facts and review/draft metadata. Actual SQL/
+Git checks qualify stale/admission refusal, no-op preservation, outer/SQL failure
+and unexpected-data rollback. `SubmitHumanThread` now joins root resolution and
+its exact before/after receipt in the existing installation-bound native journal.
+It orders cancellation and expiry against admission, preserves no-op receipts,
+and withholds results when current human admission changes. Offline recovery
+checks exact saved intent, receipt, scope and complete native post-state before
+finishing bookkeeping; it never reapplies the mutation. Twelve owned-worker
+SIGKILL/reap and persistent-reopen cases now qualify resolve/unresolve, both
+no-ops, retained unknown context and own older drafts, before/after primary SQL.
+Exact receipts and complete native rows survive; altered evidence remains fenced,
+and recovery/replay never repeats the mutation. `Authority.SubmitHumanThread`,
+`GetHumanThread` and `CancelHumanThread` now expose the producer on the admitted
+private callback under the existing human-review capability. Actor/repository
+operation IDs own early cancellation tombstones; submit/cancel assert the saved
+installation while lookup reports the live installation even for absence.
+SDK result validation binds exact intent/receipt and full or unknown context.
+Actual manager/Unix/SQL/Git checks cover resolve/unresolve/no-ops, lost replies,
+session changes and genuine package replacement without journal adoption.
+Canonical capture/provider adapter, Application/HTTP and installed UI consumers
+remain subsequent work.
+
+`Authority.RepositoryManualMergeSnapshot` prepares a full commit already reachable
+from the target branch. Declare `native.repository.merges.write` to call
+`SubmitHumanManualMerge`, `GetHumanManualMerge` and `CancelHumanManualMerge` on the
+admitted private callback. This capability is separate from human reviews and
+does not replace current native merge permission. Submit/cancel assert the saved
+installation; lookup reports the live installation even for absence. Capture the
+command before dispatch and reuse it unchanged. Retries return journaled truth
+without repeating metadata or notifications; partial completion remains visible.
+Manual marking changes native PR metadata/history and leaves Git untouched.
+SDK validation binds actor/repository/operation/digest and canonical receipt;
+submit also binds the selected preparation. Actual manager/Unix/SQL/Git checks
+cover lost replies, session withdrawal, malformed results and genuine package
+replacement without adopting its predecessor's journal. Canonical application,
+HTTP and installed UI consumers remain subsequent work.
+
+`Authority.RepositoryMergeSnapshot` prepares ordinary merge, rebase,
+rebase-merge, squash or fast-forward-only. `SubmitHumanMerge`, `GetHumanMerge`
+and `CancelHumanMerge` use the same declared merge capability and live human
+admission. The repository service supplies the existing native push owner:
+one captured command stages, passes the generated prepared hooks, pushes and
+completes native bookkeeping once. Receipts bind the method, target/head/base,
+computed result/tree/parents and command digest; completion remains separate
+from the primary ref effect. Actual managed SDK/Git checks cover all methods,
+private forks, hook-time refusal, lost replies and installation replacement.
+Identical retry never launches another push or notification.
+
 ## Build and try Fountain
 
 Build from this repository's maintained branch. Install Git, GNU Make, a C

@@ -77,8 +77,8 @@ func Register(m *web.Route, signedIn, admin any) {
 			m.Get(prefix+"/"+route+"/*", guard, NativeSession, pageSubroute(scope, route))
 		}
 	}
-	m.Get("/{username}/{reponame}/workspace", signedIn, NativeSession, context.RepoAssignment, context.UnitTypes(), Navigation, repositoryWorkspace)
-	m.Get("/{username}/{reponame}/workspace/*", signedIn, NativeSession, context.RepoAssignment, context.UnitTypes(), Navigation, repositorySubroute)
+	m.Get("/{username}/{reponame}/feed", signedIn, NativeSession, context.RepoAssignment, context.UnitTypes(), Navigation, repositoryFeed)
+	m.Get("/{username}/{reponame}/feed/*", signedIn, NativeSession, context.RepoAssignment, context.UnitTypes(), Navigation, repositorySubroute)
 	m.Get("/-/native/session", NativeSession, signedIn, SessionCheck)
 	m.Methods("GET,HEAD", "/-/native/assets/{extension}/*", NativeSession, signedIn, Assets)
 	m.Methods("GET,HEAD,POST,PUT,PATCH,DELETE", "/-/native/panels/{extension}/{page}/api/*", NativeSession, signedIn, api("panel", true))
@@ -144,11 +144,6 @@ func Navigation(ctx *context.Context) {
 				continue
 			}
 			pages[p.Scope] = append(pages[p.Scope], Link{ID: p.ID, Title: p.Title, ExtensionID: descriptor.Manifest.ID, Permission: p.Permission, URL: base + "/" + p.Route})
-			if p.Scope == "global" && p.Route == "workspace" && ctx.Repo != nil && ctx.Repo.Repository != nil && ctx.Repo.CanRead(unit.TypeCode) {
-				if _, _, _, exists := findRoute(ctx, "repository", "workspace"); !exists {
-					pages["repository"] = append(pages["repository"], Link{ID: p.ID, Title: p.Title, ExtensionID: descriptor.Manifest.ID, Permission: "read", URL: ctx.Repo.RepoLink + "/workspace"})
-				}
-			}
 		}
 	}
 	if preferred {
@@ -245,39 +240,6 @@ func matchDirectPattern(path, pattern string) bool {
 	return true
 }
 
-// workspaceDirectPath reports whether path is a workspace root (global or
-// repository) or matches one of the declared generic direct patterns
-// published by the host. Declared patterns match at the application root
-// after the configured sub-URL and in their repository form
-// "/{owner}/{repo}/workspace/...", mirroring the registered routes
-// (NFX-C07; the global owner's routes never claim the repository
-// namespace).
-func workspaceDirectPath(path, appSubURL string, patterns []string) bool {
-	if strings.HasSuffix(path, "/workspace") {
-		return true
-	}
-	rest, ok := strings.CutPrefix(path, appSubURL)
-	if !ok || !strings.HasPrefix(rest, "/") {
-		return false
-	}
-	for _, pattern := range patterns {
-		if matchDirectPattern(rest, pattern) {
-			return true
-		}
-	}
-	segments := strings.FieldsFunc(rest, func(r rune) bool { return r == '/' })
-	if len(segments) < 4 || segments[2] != "workspace" {
-		return false
-	}
-	candidate := "/workspace/" + strings.Join(segments[3:], "/")
-	for _, pattern := range patterns {
-		if matchDirectPattern(candidate, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
 // pageSubroute serves a declared subordinate route of a native page with
 // identical admission to its page root: the native session and scope
 // guards run first, then the suffix must match a manifest declaration.
@@ -304,16 +266,12 @@ func pageSubroute(scope, route string) func(*context.Context) {
 
 func repositorySubroute(ctx *context.Context) {
 	if !ctx.Repo.CanRead(unit.TypeCode) {
-		ctx.NotFound("Workspace", nil)
+		ctx.NotFound("Feed", nil)
 		return
 	}
-	// Unlike the workspace root, declared subroutes under a repository
-	// path resolve only to a repository-scoped page: the global owner's
-	// content routes stay at the application root and never claim the
-	// repository namespace.
-	d, transport, p, ok := findRoute(ctx, "repository", "workspace")
+	d, transport, p, ok := findRoute(ctx, "repository", "feed")
 	if !ok {
-		ctx.NotFound("Workspace", nil)
+		ctx.NotFound("Feed", nil)
 		return
 	}
 	sub, _, matched := p.MatchSubroute(ctx.Params("*"))
@@ -345,22 +303,18 @@ func findRoute(ctx *context.Context, scope, route string) (extensions_service.De
 	return extensions_service.Descriptor{}, nil, extension.Page{}, false
 }
 
-func repositoryWorkspace(ctx *context.Context) {
+// repositoryFeed serves the repository-scoped feed.
+func repositoryFeed(ctx *context.Context) {
 	if !ctx.Repo.CanRead(unit.TypeCode) {
-		ctx.NotFound("Workspace", nil)
+		ctx.NotFound("Feed", nil)
 		return
 	}
-	d, transport, p, ok := findRoute(ctx, "repository", "workspace")
+	d, transport, p, ok := findRoute(ctx, "repository", "feed")
 	if !ok {
-		d, transport, p, ok = findRoute(ctx, "global", "workspace")
-	}
-	if !ok {
-		ctx.NotFound("Workspace", nil)
+		ctx.NotFound("Feed", nil)
 		return
 	}
 	ctx.Data["ExtensionRepositoryID"] = strconv.FormatInt(ctx.Repo.Repository.ID, 10)
-	// Observed repository metadata chooses the display only. A global contribution
-	// retains its global authority; each product API still checks its target.
 	renderPage(ctx, d, transport, p)
 }
 
@@ -408,7 +362,7 @@ func renderPage(ctx *context.Context, d extensions_service.Descriptor, transport
 	ctx.Resp.Header().Set(extension.SessionGenerationHeader, generation)
 	ctx.Data["PageIsExtension"] = true
 	// A shared owner presents this page through its retained panel. An
-	// independent page (including a repository feed at /workspace) owns
+	// independent page (including a repository feed at /feed) owns
 	// its own mount and must not expose the workspace panels below it.
 	ctx.Data["PageIsWorkspacePage"] = p.Owner != ""
 	ctx.Data["ExtensionPageURL"] = setting.AppSubURL + ctx.Req.URL.EscapedPath()
