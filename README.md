@@ -14,7 +14,7 @@ its application logic, interface, and data. Installing an extension does not
 require rebuilding the host.
 
 The extension interfaces are under active development. The maintained branch is
-[`codex/fountain-extensions`](https://github.com/veighnsche/forgejo-ext/tree/codex/fountain-extensions).
+[`main`](https://github.com/veighnsche/fountain/tree/main).
 Use a matching host and SDK source revision when building an integration.
 
 ## What Fountain adds
@@ -449,7 +449,7 @@ compiler, Go, and Node.js with npm; the repository records its toolchain inputs 
 platform prerequisites.
 
 ```sh
-git clone --branch codex/fountain-extensions https://github.com/veighnsche/forgejo-ext.git fountain
+git clone --branch main https://github.com/veighnsche/fountain.git fountain
 cd fountain
 npm ci
 TAGS="bindata timetzdata sqlite sqlite_unlock_notify" make build

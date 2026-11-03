@@ -55,7 +55,7 @@ if [[ $engine == docker && ${GITHUB_ACTIONS:-} == true ]]; then
 fi
 "${build[@]}" --platform linux/amd64 \
   --build-arg "RELEASE_VERSION=$version" --build-arg "SOURCE_REVISION=$commit" \
-  --build-arg "SOURCE_URL=https://github.com/${GITHUB_REPOSITORY:-veighnsche/forgejo-ext}" \
+  --build-arg "SOURCE_URL=https://github.com/${GITHUB_REPOSITORY:-veighnsche/fountain}" \
   --iidfile "$out/image-id" -t "fountain-release:$version" .
 image=$(cat "$out/image-id")
 bash tools/fountain-image-test.sh "$image" "$version" "$commit" "$out"
