@@ -6,6 +6,7 @@ package extensions
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -96,18 +97,22 @@ func ValidateThreadResolvePayload(repositoryID int64, payload ThreadResolvePaylo
 // first. Field order and encoding match the Soda factory twin byte for
 // byte; both sides must reproduce ResolveConversationLine exactly.
 type ResolveConversationMember struct {
-	Body          string
-	Location      string
-	ResolverState string
-	ID            int64
-	ContentVer    int64
+	OriginalAnchor *RepositoryInlineAnchor
+	Body           string
+	Location       string
+	ResolverState  string
+	ID             int64
+	ContentVer     int64
 }
 
 // ResolveConversationLine renders one member in the canonical digest
-// encoding shared with the Soda factory twin.
+// encoding shared with the Soda factory twin, followed by NUL and canonical
+// original-anchor JSON (null for unknown context). Every member binds its own
+// recorded selection rather than inheriting guessed context from the root.
 func ResolveConversationLine(m ResolveConversationMember) string {
+	anchor, _ := json.Marshal(m.OriginalAnchor)
 	return strconv.FormatInt(m.ID, 10) + "\x00" + m.Body + "\x00" +
-		strconv.FormatInt(m.ContentVer, 10) + "\x00" + m.Location + "\x00" + m.ResolverState
+		strconv.FormatInt(m.ContentVer, 10) + "\x00" + m.Location + "\x00" + m.ResolverState + "\x00" + string(anchor)
 }
 
 // ResolveConversationDigest binds the expected complete conversation:

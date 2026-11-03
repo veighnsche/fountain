@@ -24,8 +24,18 @@ const (
 	CapabilityContributionAuthorize   = "native.contribution.authorize"
 	CapabilityServiceBridge           = "native.service.bridge"
 	CapabilityBackgroundOperations    = "native.background.operations"
-	CapabilityExtensionLifecycle      = "native.extension.lifecycle"
-	PolicyForgejoUsername             = "forgejo.username"
+	CapabilityIssueIntake             = "native.repository.issues.intake"
+	CapabilityHumanComments           = "native.repository.comments.write"
+	CapabilityHumanEdits              = "native.repository.discussions.edit"
+	CapabilityHumanStates             = "native.repository.discussions.state"
+	// Human review summaries and inline creation share current human admission.
+	CapabilityHumanReviews       = "native.repository.reviews.write"
+	CapabilityHumanMerges        = "native.repository.merges.write"
+	CapabilityHumanLocks         = "native.repository.discussions.lock"
+	CapabilityHumanIssueCreate   = "native.repository.issues.create"
+	CapabilityHumanPullCreate    = "native.repository.pulls.create"
+	CapabilityExtensionLifecycle = "native.extension.lifecycle"
+	PolicyForgejoUsername        = "forgejo.username"
 
 	// BrowserContractVersion is the canonical browser mount contract
 	// implemented by the host and published in sdk/browser. The host
@@ -45,6 +55,8 @@ type Repository struct {
 	Owner      string `json:"owner"`
 	Name       string `json:"name"`
 	Permission string `json:"permission"`
+	// Configured navigation fact only, not proof that this ref exists or a write grant.
+	DefaultBranch string `json:"default_branch,omitempty"`
 }
 
 type Contribution struct {

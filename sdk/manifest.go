@@ -343,8 +343,10 @@ func NativePageRoutes(scope string) []string {
 		return []string{"workspace", "feed", "applications", "tailnet"}
 	case "user":
 		return []string{"workspace", "identity"}
-	case "admin", "repository":
+	case "admin":
 		return []string{"workspace"}
+	case "repository":
+		return []string{"feed"}
 	}
 	return nil
 }

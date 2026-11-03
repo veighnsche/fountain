@@ -51,7 +51,7 @@ func TestResolveConversationDigestMatchesFactoryVector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if digest != "ac7ab3e7cf25a41981ae75395c5ee3d7a2106d9fe515bcf68de9ffa1d23824c6" {
+	if digest != "b0430a8696a7edc088d1da167b5246d947512ac989efda0fd4c3d3106d211e17" {
 		t.Fatalf("resolve digest diverged from factory twin: %s", digest)
 	}
 	if _, err := ResolveConversationDigest(nil); err == nil {

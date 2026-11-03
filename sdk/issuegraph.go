@@ -16,9 +16,10 @@ import (
 // host interprets no accepted-intent, split, consolidation or spending policy.
 // Those belong to the extension. All changes commit together or none do.
 type IssueGraphPayload struct {
-	Creates      []IssueGraphCreate     `json:"creates,omitempty"`
-	Edits        []IssueGraphEdit       `json:"edits,omitempty"`
-	Dependencies []IssueGraphDependency `json:"dependencies,omitempty"`
+	Intake       *IssueIntakeAuthorization `json:"intake,omitempty"`
+	Creates      []IssueGraphCreate        `json:"creates,omitempty"`
+	Edits        []IssueGraphEdit          `json:"edits,omitempty"`
+	Dependencies []IssueGraphDependency    `json:"dependencies,omitempty"`
 }
 
 type IssueGraphCreate struct {
@@ -64,6 +65,11 @@ const MaxIssueGraphPayloadBytes = 48 << 10
 var ErrInvalidIssueGraphPayload = errors.New("invalid issue graph payload")
 
 func ValidateIssueGraphPayload(p IssueGraphPayload) error {
+	if a := p.Intake; a != nil {
+		if !ValidIssueIntakeRequest(IssueIntakeAuthorizationRequest{Source: a.Claims.Source, Revision: a.Claims.Revision, Digest: a.Claims.Digest}) || a.Claims.Installation == "" || !decimalID(a.Claims.Actor) || !decimalID(a.Claims.Repository) || a.Claims.Expires <= 0 || !intakeDigest.MatchString(a.RequestHash) || a.Slot < 0 || a.Slot >= 16 || a.Step < 0 || a.Step >= 32 || len(p.Creates)+len(p.Edits) != 1 || len(p.Dependencies) != 0 {
+			return ErrInvalidIssueGraphPayload
+		}
+	}
 	n := len(p.Creates) + len(p.Edits) + len(p.Dependencies)
 	if n == 0 || n > MaxIssueGraphChanges {
 		return ErrInvalidIssueGraphPayload

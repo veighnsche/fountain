@@ -480,44 +480,49 @@ func ThreadResolverState(resolveDoerID int64) string {
 // ContentDigest. A hidden member keeps only its locator ID with
 // Visible=false so the consumer blocks without leaking pending content.
 type SnapshotThreadMember struct {
-	ID             string `json:"id"`
-	IssueID        string `json:"issue_id"`
-	ContentDigest  string `json:"content_digest,omitempty"`
-	ContentVersion int    `json:"content_version,omitempty"`
-	CreatedUnix    int64  `json:"created_unix,omitempty"`
-	UpdatedUnix    int64  `json:"updated_unix,omitempty"`
-	Visible        bool   `json:"visible"`
-	HiddenReason   string `json:"hidden_reason,omitempty"`
-	Complete       bool   `json:"complete"`
+	OriginalAnchor *RepositoryInlineAnchor `json:"original_anchor"`
+	Resolved       bool                    `json:"resolved"`
+	ID             string                  `json:"id"`
+	IssueID        string                  `json:"issue_id"`
+	ContentDigest  string                  `json:"content_digest,omitempty"`
+	ContentVersion int                     `json:"content_version,omitempty"`
+	CreatedUnix    int64                   `json:"created_unix,omitempty"`
+	UpdatedUnix    int64                   `json:"updated_unix,omitempty"`
+	Visible        bool                    `json:"visible"`
+	HiddenReason   string                  `json:"hidden_reason,omitempty"`
+	Complete       bool                    `json:"complete"`
 }
 
 // SnapshotThread is the permission-checked view of one native code-review
 // conversation: the anchored root comment, its location, the original and
 // current commits, the resolver and the complete conversation digest. The
-// root is the first comment in native (created_unix, id) order within the
-// (issue, review, path, signed-line) grouping; replies are members, never
-// resolution targets. Outdated unresolved threads are retained: Outdated
-// marks a root whose original commit no longer matches the current head.
-// Digest binds the ordered member lines per ResolveConversationDigest; a
-// hidden thread carries no digest at all.
+// root is the first comment in native (created_unix, id) order within an
+// immutable-context partition of a native location bucket; replies are members, never
+// resolution targets. Outdated retains native invalidation and original-head
+// drift; absent original context falls back to the recorded native commit.
+// Path/Side/Line are recorded native coordinates (zero has no recorded side).
+// OriginalAnchor and each member's OriginalAnchor retain the exact original
+// selection, or nil for unknown context. Digest binds those ordered member
+// contexts and resolver states; a hidden thread carries no context or digest.
 type SnapshotThread struct {
-	RootID         string                 `json:"root_id"`
-	IssueID        string                 `json:"issue_id"`
-	ReviewID       string                 `json:"review_id"`
-	Path           string                 `json:"path,omitempty"`
-	Side           string                 `json:"side,omitempty"`
-	Line           int64                  `json:"line,omitempty"`
-	OriginalCommit string                 `json:"original_commit,omitempty"`
-	HeadCommit     string                 `json:"head_commit,omitempty"`
-	Outdated       bool                   `json:"outdated,omitempty"`
-	ResolverID     string                 `json:"resolver_id,omitempty"`
-	Resolved       bool                   `json:"resolved,omitempty"`
-	Digest         string                 `json:"digest,omitempty"`
-	Members        []SnapshotThreadMember `json:"members"`
-	MemberTotal    int                    `json:"member_total"`
-	Visible        bool                   `json:"visible"`
-	HiddenReason   string                 `json:"hidden_reason,omitempty"`
-	Complete       bool                   `json:"complete"`
+	OriginalAnchor *RepositoryInlineAnchor `json:"original_anchor"`
+	RootID         string                  `json:"root_id"`
+	IssueID        string                  `json:"issue_id"`
+	ReviewID       string                  `json:"review_id"`
+	Path           string                  `json:"path,omitempty"`
+	Side           string                  `json:"side,omitempty"`
+	Line           int64                   `json:"line,omitempty"`
+	OriginalCommit string                  `json:"original_commit,omitempty"`
+	HeadCommit     string                  `json:"head_commit,omitempty"`
+	Outdated       bool                    `json:"outdated,omitempty"`
+	ResolverID     string                  `json:"resolver_id,omitempty"`
+	Resolved       bool                    `json:"resolved,omitempty"`
+	Digest         string                  `json:"digest,omitempty"`
+	Members        []SnapshotThreadMember  `json:"members"`
+	MemberTotal    int                     `json:"member_total"`
+	Visible        bool                    `json:"visible"`
+	HiddenReason   string                  `json:"hidden_reason,omitempty"`
+	Complete       bool                    `json:"complete"`
 }
 
 // SnapshotThreadPage carries one bounded conversation list with

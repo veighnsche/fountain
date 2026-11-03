@@ -26,37 +26,138 @@ const maxCallbackResponseBytes = 1 << 20
 var ErrRepositoryNotVisible = errors.New("repository is not visible")
 
 const (
-	OperationCurrentActor      = "actor.current"
-	OperationRepository        = "repository.get"
-	OperationRepositorySource  = "repository.source"
-	OperationOwnedRepositories = "repositories.owned.search"
-	OperationOrganizationOwner = "organization.owned"
-	OperationPublicSSHKeys     = "user.public_keys"
+	OperationCurrentActor              = "actor.current"
+	OperationRepository                = "repository.get"
+	OperationRepositorySource          = "repository.source"
+	OperationRepositoryIssues          = "repository.issues"
+	OperationRepositoryComments        = "repository.comments"
+	OperationRepositoryCommentSnapshot = "repository.comment_snapshot"
+	OperationRepositoryPulls           = "repository.pulls"
+	OperationRepositoryPullFiles       = "repository.pull_files"
+	OperationRepositoryReviews         = "repository.reviews"
+	OperationRepositoryThreads         = "repository.threads"
+	OperationRepositoryChecks          = "repository.checks"
+	OperationReadableRepositories      = "repositories.readable"
+	OperationRepositoryCapabilities    = "repository.capabilities"
+	OperationOwnedRepositories         = "repositories.owned.search"
+	OperationOrganizationOwner         = "organization.owned"
+	OperationPublicSSHKeys             = "user.public_keys"
 )
 
 // CallbackRequest is sent only on the private host socket.
 // The host resolves the actor from the admission, never from this body.
 type CallbackRequest struct {
-	Operation    string    `json:"operation"`
-	RepositoryID string    `json:"repository_id,omitempty"`
-	Query        string    `json:"query,omitempty"`
-	Cursor       string    `json:"cursor,omitempty"`
-	Limit        int       `json:"limit,omitempty"`
-	Organization string    `json:"organization,omitempty"`
-	SourceCommit string    `json:"source_commit,omitempty"`
-	SourcePaths  []string  `json:"source_paths,omitempty"`
-	SourceActors []string  `json:"source_actors,omitempty"`
-	Authority    Authority `json:"authority"`
+	HumanPullCreate             *HumanPullCreateRequest                 `json:"human_pull_create,omitempty"`
+	PullCreateOperationID       string                                  `json:"pull_create_operation_id,omitempty"`
+	PullCreateInstallationID    string                                  `json:"pull_create_installation_id,omitempty"`
+	HumanMerge                  *HumanMergeRequest                      `json:"human_merge,omitempty"`
+	MergeOperationID            string                                  `json:"merge_operation_id,omitempty"`
+	MergeInstallationID         string                                  `json:"merge_installation_id,omitempty"`
+	HumanManualMerge            *HumanManualMergeRequest                `json:"human_manual_merge,omitempty"`
+	ManualMergeOperationID      string                                  `json:"manual_merge_operation_id,omitempty"`
+	ManualMergeInstallationID   string                                  `json:"manual_merge_installation_id,omitempty"`
+	HumanReviewRequest          *HumanReviewRequestChange               `json:"human_review_request,omitempty"`
+	ReviewRequestOperationID    string                                  `json:"review_request_operation_id,omitempty"`
+	ReviewRequestInstallationID string                                  `json:"review_request_installation_id,omitempty"`
+	ReviewRequestSnapshot       *RepositoryReviewRequestSnapshotRequest `json:"review_request_snapshot,omitempty"`
+	HumanThread                 *HumanThreadRequest                     `json:"human_thread,omitempty"`
+	ThreadOperationID           string                                  `json:"thread_operation_id,omitempty"`
+	ThreadInstallationID        string                                  `json:"thread_installation_id,omitempty"`
+	ThreadSnapshot              *RepositoryThreadSnapshotRequest        `json:"thread_snapshot,omitempty"`
+	HumanInline                 *HumanInlineRequest                     `json:"human_inline,omitempty"`
+	InlineOperationID           string                                  `json:"inline_operation_id,omitempty"`
+	InlineInstallationID        string                                  `json:"inline_installation_id,omitempty"`
+	InlineSnapshot              *RepositoryInlineSnapshotRequest        `json:"inline_snapshot,omitempty"`
+	HumanReview                 *HumanReviewRequest                     `json:"human_review,omitempty"`
+	ReviewOperationID           string                                  `json:"review_operation_id,omitempty"`
+	ReviewInstallationID        string                                  `json:"review_installation_id,omitempty"`
+	PullCreateSnapshot          *RepositoryPullCreateSnapshotRequest    `json:"pull_create_snapshot,omitempty"`
+	MergeSnapshot               *RepositoryMergeSnapshotRequest         `json:"merge_snapshot,omitempty"`
+	ManualMergeSnapshot         *RepositoryManualMergeSnapshotRequest   `json:"manual_merge_snapshot,omitempty"`
+	ReviewSnapshot              *RepositoryReviewSnapshotRequest        `json:"review_snapshot,omitempty"`
+	HumanState                  *HumanStateRequest                      `json:"human_state,omitempty"`
+	StateOperationID            string                                  `json:"state_operation_id,omitempty"`
+	StateInstallationID         string                                  `json:"state_installation_id,omitempty"`
+	StateSnapshot               *RepositoryStateSnapshotRequest         `json:"state_snapshot,omitempty"`
+	LockSnapshot                *RepositoryLockSnapshotRequest          `json:"lock_snapshot,omitempty"`
+	HumanLock                   *HumanLockRequest                       `json:"human_lock,omitempty"`
+	LockOperationID             string                                  `json:"lock_operation_id,omitempty"`
+	LockInstallationID          string                                  `json:"lock_installation_id,omitempty"`
+	HumanIssueCreate            *HumanIssueCreateRequest                `json:"human_issue_create,omitempty"`
+	IssueCreateOperationID      string                                  `json:"issue_create_operation_id,omitempty"`
+	IssueCreateInstallationID   string                                  `json:"issue_create_installation_id,omitempty"`
+	HumanEdit                   *HumanEditRequest                       `json:"human_edit,omitempty"`
+	EditOperationID             string                                  `json:"edit_operation_id,omitempty"`
+	EditInstallationID          string                                  `json:"edit_installation_id,omitempty"`
+	EditSnapshot                *RepositoryEditSnapshotRequest          `json:"edit_snapshot,omitempty"`
+	HumanComment                *HumanCommentRequest                    `json:"human_comment,omitempty"`
+	CommentOperationID          string                                  `json:"comment_operation_id,omitempty"`
+	CommentInstallationID       string                                  `json:"comment_installation_id,omitempty"`
+	CommentSnapshot             *RepositoryCommentSnapshotRequest       `json:"comment_snapshot,omitempty"`
+	Capabilities                *RepositoryCapabilitiesRequest          `json:"capabilities,omitempty"`
+	Catalog                     *RepositoryCatalogRequest               `json:"catalog,omitempty"`
+	Checks                      *RepositoryChecksRequest                `json:"checks,omitempty"`
+	Threads                     *RepositoryThreadsRequest               `json:"threads,omitempty"`
+	Reviews                     *RepositoryReviewsRequest               `json:"reviews,omitempty"`
+	PullFiles                   *RepositoryPullFilesRequest             `json:"pull_files,omitempty"`
+	Pulls                       *RepositoryPullsRequest                 `json:"pulls,omitempty"`
+	Comments                    *RepositoryCommentsRequest              `json:"comments,omitempty"`
+	IssueState                  string                                  `json:"issue_state,omitempty"`
+	CompleteIssueBodies         bool                                    `json:"complete_issue_bodies,omitempty"`
+	IssueIntake                 *IssueIntakeAuthorizationRequest        `json:"issue_intake,omitempty"`
+	Operation                   string                                  `json:"operation"`
+	RepositoryID                string                                  `json:"repository_id,omitempty"`
+	Query                       string                                  `json:"query,omitempty"`
+	Cursor                      string                                  `json:"cursor,omitempty"`
+	Limit                       int                                     `json:"limit,omitempty"`
+	Organization                string                                  `json:"organization,omitempty"`
+	SourceCommit                string                                  `json:"source_commit,omitempty"`
+	SourcePaths                 []string                                `json:"source_paths,omitempty"`
+	SourceActors                []string                                `json:"source_actors,omitempty"`
+	Authority                   Authority                               `json:"authority"`
 }
 
 type CallbackResponse struct {
-	Actor      *Actor            `json:"actor,omitempty"`
-	Repository *Repository       `json:"repository,omitempty"`
-	Source     *RepositorySource `json:"source,omitempty"`
-	Page       *RepositoryPage   `json:"page,omitempty"`
-	Owner      *bool             `json:"owner,omitempty"`
-	PublicKeys []PublicKey       `json:"public_keys"`
-	ErrorCode  string            `json:"error_code,omitempty"`
+	HumanPullCreate       *OperationLookup                 `json:"human_pull_create,omitempty"`
+	HumanMerge            *OperationLookup                 `json:"human_merge,omitempty"`
+	HumanManualMerge      *OperationLookup                 `json:"human_manual_merge,omitempty"`
+	HumanReviewRequest    *OperationLookup                 `json:"human_review_request,omitempty"`
+	ReviewRequestSnapshot *RepositoryReviewRequestSnapshot `json:"review_request_snapshot,omitempty"`
+	HumanThread           *OperationLookup                 `json:"human_thread,omitempty"`
+	ThreadSnapshot        *RepositoryThreadSnapshot        `json:"thread_snapshot,omitempty"`
+	HumanInline           *OperationLookup                 `json:"human_inline,omitempty"`
+	InlineSnapshot        *RepositoryInlineSnapshot        `json:"inline_snapshot,omitempty"`
+	HumanReview           *OperationLookup                 `json:"human_review,omitempty"`
+	PullCreateSnapshot    *RepositoryPullCreateSnapshot    `json:"pull_create_snapshot,omitempty"`
+	MergeSnapshot         *RepositoryMergeSnapshot         `json:"merge_snapshot,omitempty"`
+	ManualMergeSnapshot   *RepositoryManualMergeSnapshot   `json:"manual_merge_snapshot,omitempty"`
+	ReviewSnapshot        *RepositoryReviewSnapshot        `json:"review_snapshot,omitempty"`
+	HumanState            *OperationLookup                 `json:"human_state,omitempty"`
+	StateSnapshot         *RepositoryStateSnapshot         `json:"state_snapshot,omitempty"`
+	LockSnapshot          *RepositoryLockSnapshot          `json:"lock_snapshot,omitempty"`
+	HumanLock             *OperationLookup                 `json:"human_lock,omitempty"`
+	HumanIssueCreate      *OperationLookup                 `json:"human_issue_create,omitempty"`
+	IssueCreateSnapshot   *RepositoryIssueCreateSnapshot   `json:"issue_create_snapshot,omitempty"`
+	HumanEdit             *OperationLookup                 `json:"human_edit,omitempty"`
+	EditSnapshot          *RepositoryEditSnapshot          `json:"edit_snapshot,omitempty"`
+	HumanComment          *OperationLookup                 `json:"human_comment,omitempty"`
+	CommentSnapshot       *RepositoryCommentSnapshot       `json:"comment_snapshot,omitempty"`
+	Capabilities          *RepositoryCapabilities          `json:"capabilities,omitempty"`
+	Checks                *RepositoryChecks                `json:"checks,omitempty"`
+	Threads               *RepositoryThreadPage            `json:"threads,omitempty"`
+	Reviews               *RepositoryReviewPage            `json:"reviews,omitempty"`
+	PullFiles             *RepositoryPullFiles             `json:"pull_files,omitempty"`
+	Pulls                 *RepositoryPullPage              `json:"pulls,omitempty"`
+	Comments              *RepositoryCommentPage           `json:"comments,omitempty"`
+	IssueIntake           *IssueIntakeGrant                `json:"issue_intake,omitempty"`
+	Actor                 *Actor                           `json:"actor,omitempty"`
+	Repository            *Repository                      `json:"repository,omitempty"`
+	Source                *RepositorySource                `json:"source,omitempty"`
+	Issues                *RepositoryIssuePage             `json:"issues,omitempty"`
+	Page                  *RepositoryPage                  `json:"page,omitempty"`
+	Owner                 *bool                            `json:"owner,omitempty"`
+	PublicKeys            []PublicKey                      `json:"public_keys"`
+	ErrorCode             string                           `json:"error_code,omitempty"`
 }
 
 // RequestContext accepts authority only from the private extension listener.
@@ -240,10 +341,356 @@ func (c *nativeClient) call(ctx context.Context, request CallbackRequest) (Callb
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
+		if request.Operation == OperationHumanMergeSubmit || request.Operation == OperationHumanMergeGet || request.Operation == OperationHumanMergeCancel {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrHumanMergeQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrHumanMergeAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrHumanMergeConflict
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrHumanMergeUnavailable
+			}
+		}
+		if request.Operation == OperationHumanPullCreateSubmit || request.Operation == OperationHumanPullCreateGet || request.Operation == OperationHumanPullCreateCancel {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrHumanPullCreateQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrHumanPullCreateAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrHumanPullCreateConflict
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrHumanPullCreateUnavailable
+			}
+		}
+		if request.Operation == OperationHumanManualMergeSubmit || request.Operation == OperationHumanManualMergeGet || request.Operation == OperationHumanManualMergeCancel {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrHumanManualMergeQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrHumanManualMergeAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrHumanManualMergeConflict
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrHumanManualMergeUnavailable
+			}
+		}
+		if request.Operation == OperationHumanReviewRequestSubmit || request.Operation == OperationHumanReviewRequestGet || request.Operation == OperationHumanReviewRequestCancel {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrHumanReviewRequestQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrHumanReviewRequestAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrHumanReviewRequestConflict
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrHumanReviewRequestUnavailable
+			}
+		}
+		if request.Operation == OperationHumanThreadSubmit || request.Operation == OperationHumanThreadGet || request.Operation == OperationHumanThreadCancel {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrHumanThreadQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrHumanThreadAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrHumanThreadConflict
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrHumanThreadUnavailable
+			}
+		}
+		if request.Operation == OperationHumanInlineSubmit || request.Operation == OperationHumanInlineGet || request.Operation == OperationHumanInlineCancel {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrHumanInlineQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrHumanInlineAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrHumanInlineConflict
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrHumanInlineUnavailable
+			}
+		}
+		if request.Operation == OperationRepositoryReviewRequestSnapshot {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrReviewRequestSnapshotQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrReviewRequestSnapshotAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrReviewRequestSnapshotChanged
+			case http.StatusRequestEntityTooLarge:
+				return CallbackResponse{}, ErrReviewRequestSnapshotTooLarge
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrReviewRequestSnapshotUnavailable
+			}
+		}
+		if request.Operation == OperationRepositoryThreadSnapshot {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrThreadSnapshotQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrThreadSnapshotAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrThreadSnapshotChanged
+			case http.StatusUnprocessableEntity:
+				return CallbackResponse{}, ErrThreadSnapshotTarget
+			case http.StatusRequestEntityTooLarge:
+				return CallbackResponse{}, ErrThreadSnapshotTooLarge
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrThreadSnapshotUnavailable
+			}
+		}
+		if request.Operation == OperationRepositoryInlineSnapshot {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrInlineSnapshotQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrInlineSnapshotAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrInlineSnapshotChanged
+			case http.StatusUnprocessableEntity:
+				return CallbackResponse{}, ErrInlineSnapshotAnchor
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrInlineSnapshotUnavailable
+			}
+		}
+		if request.Operation == OperationRepositoryManualMergeSnapshot {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrManualMergeSnapshotQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrManualMergeSnapshotAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrManualMergeSnapshotChanged
+			case http.StatusUnprocessableEntity:
+				return CallbackResponse{}, ErrManualMergeSnapshotCommit
+			default:
+				return CallbackResponse{}, ErrManualMergeSnapshotUnavailable
+			}
+		}
+		if request.Operation == OperationRepositoryMergeSnapshot {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrMergeSnapshotQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrMergeSnapshotAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrMergeSnapshotChanged
+			default:
+				return CallbackResponse{}, ErrMergeSnapshotUnavailable
+			}
+		}
+		if request.Operation == OperationRepositoryPullCreateSnapshot {
+			switch response.StatusCode {
+			case http.StatusBadRequest, http.StatusUnprocessableEntity:
+				return CallbackResponse{}, ErrPullCreateSnapshotQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrPullCreateSnapshotAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrPullCreateSnapshotChanged
+			default:
+				return CallbackResponse{}, ErrPullCreateSnapshotUnavailable
+			}
+		}
+		if request.Operation == OperationRepositoryReviewSnapshot && response.StatusCode == http.StatusConflict {
+			return CallbackResponse{}, ErrReviewSnapshotChanged
+		}
+		if request.Operation == OperationRepositoryReviewSnapshot && response.StatusCode == http.StatusNotFound {
+			return CallbackResponse{}, ErrRepositoryNotVisible
+		}
+		if request.Operation == OperationRepositoryStateSnapshot && response.StatusCode == http.StatusConflict {
+			return CallbackResponse{}, ErrStateSnapshotChanged
+		}
+		if request.Operation == OperationRepositoryStateSnapshot && response.StatusCode == http.StatusNotFound {
+			return CallbackResponse{}, ErrRepositoryNotVisible
+		}
+		if request.Operation == OperationRepositoryLockSnapshot && response.StatusCode == http.StatusConflict {
+			return CallbackResponse{}, ErrLockSnapshotChanged
+		}
+		if request.Operation == OperationRepositoryLockSnapshot && response.StatusCode == http.StatusNotFound {
+			return CallbackResponse{}, ErrRepositoryNotVisible
+		}
+		if request.Operation == OperationHumanReviewSubmit || request.Operation == OperationHumanReviewGet || request.Operation == OperationHumanReviewCancel {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrHumanReviewQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrHumanReviewAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrHumanReviewConflict
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrHumanReviewUnavailable
+			}
+		}
+		if request.Operation == OperationHumanStateSubmit || request.Operation == OperationHumanStateGet || request.Operation == OperationHumanStateCancel {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrHumanStateQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrHumanStateAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrHumanStateConflict
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrHumanStateUnavailable
+			}
+		}
+		if request.Operation == OperationHumanLockSubmit || request.Operation == OperationHumanLockGet || request.Operation == OperationHumanLockCancel {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrHumanLockQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrHumanLockAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrHumanLockConflict
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrHumanLockUnavailable
+			}
+		}
+		if request.Operation == OperationHumanIssueCreateSubmit || request.Operation == OperationHumanIssueCreateGet || request.Operation == OperationHumanIssueCreateCancel {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrHumanIssueCreateQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrHumanIssueCreateAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrHumanIssueCreateConflict
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrHumanIssueCreateUnavailable
+			}
+		}
+		if request.Operation == OperationRepositoryIssueCreateSnapshot && response.StatusCode == http.StatusConflict {
+			return CallbackResponse{}, ErrIssueCreateSnapshotChanged
+		}
+		if request.Operation == OperationRepositoryIssueCreateSnapshot && response.StatusCode == http.StatusNotFound {
+			return CallbackResponse{}, ErrRepositoryNotVisible
+		}
+		if request.Operation == OperationHumanEditSubmit || request.Operation == OperationHumanEditGet || request.Operation == OperationHumanEditCancel {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrHumanEditQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrHumanEditAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrHumanEditConflict
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrHumanEditUnavailable
+			}
+		}
+		if request.Operation == OperationHumanCommentSubmit || request.Operation == OperationHumanCommentGet || request.Operation == OperationHumanCommentCancel {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrHumanCommentQuery
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return CallbackResponse{}, ErrHumanCommentAdmission
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrHumanCommentConflict
+			case http.StatusServiceUnavailable:
+				return CallbackResponse{}, ErrHumanCommentUnavailable
+			}
+		}
+		if request.Operation == OperationRepositoryEditSnapshot && response.StatusCode == http.StatusConflict {
+			return CallbackResponse{}, ErrEditSnapshotChanged
+		}
+		if request.Operation == OperationRepositoryEditSnapshot && response.StatusCode == http.StatusNotFound {
+			return CallbackResponse{}, ErrRepositoryNotVisible
+		}
+		if request.Operation == OperationRepositoryCommentSnapshot && response.StatusCode == http.StatusConflict {
+			return CallbackResponse{}, ErrCommentSnapshotChanged
+		}
+		if request.Operation == OperationRepositoryCommentSnapshot && response.StatusCode == http.StatusNotFound {
+			return CallbackResponse{}, ErrRepositoryNotVisible
+		}
+		if request.Operation == OperationRepositoryCapabilities {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrRepositoryCapabilitiesQuery
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrRepositoryCapabilitiesChanged
+			case http.StatusNotFound:
+				return CallbackResponse{}, ErrRepositoryNotVisible
+			}
+		}
+		if request.Operation == OperationReadableRepositories {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrRepositoryCatalogQuery
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrRepositoryCatalogChanged
+			}
+		}
+		if request.Operation == OperationRepositoryChecks {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrChecksQuery
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrChecksChanged
+			case http.StatusRequestEntityTooLarge:
+				return CallbackResponse{}, ErrChecksTooLarge
+			}
+		}
+		if request.Operation == OperationRepositoryThreads {
+			switch response.StatusCode {
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrThreadQuery
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrThreadChanged
+			case http.StatusRequestEntityTooLarge:
+				return CallbackResponse{}, ErrThreadsTooLarge
+			}
+		}
+		if request.Operation == OperationRepositoryPullFiles {
+			switch response.StatusCode {
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrPullFilesChanged
+			case http.StatusRequestEntityTooLarge:
+				return CallbackResponse{}, ErrPullFilesTooLarge
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrPullFilesQuery
+			}
+		}
 		// The callback uses 404 for both a missing repository and one the actor
 		// cannot read. A 403 instead means the extension's callback admission or
 		// capability was rejected, so keep it an ordinary authority error.
-		if (request.Operation == OperationRepository || request.Operation == OperationRepositorySource) && response.StatusCode == http.StatusNotFound {
+		if (request.Operation == OperationRepository || request.Operation == OperationRepositorySource || request.Operation == OperationRepositoryIssues || request.Operation == OperationRepositoryComments || request.Operation == OperationRepositoryPulls || request.Operation == OperationRepositoryPullFiles || request.Operation == OperationRepositoryReviews || request.Operation == OperationRepositoryThreads || request.Operation == OperationRepositoryChecks) && response.StatusCode == http.StatusNotFound {
 			return CallbackResponse{}, ErrRepositoryNotVisible
 		}
 		return CallbackResponse{}, fmt.Errorf("native callback returned HTTP %d", response.StatusCode)
@@ -283,7 +730,28 @@ func decodeCallbackResponse(body io.Reader, request CallbackRequest) (CallbackRe
 
 func validCallbackResult(result CallbackResponse, request CallbackRequest) bool {
 	fields := 0
-	for _, present := range []bool{result.Actor != nil, result.Repository != nil, result.Source != nil, result.Page != nil, result.Owner != nil, result.PublicKeys != nil} {
+	if result.HumanPullCreate != nil {
+		fields++
+	}
+	if result.HumanMerge != nil {
+		fields++
+	}
+	if result.HumanManualMerge != nil {
+		fields++
+	}
+	if result.HumanReviewRequest != nil {
+		fields++
+	}
+	if result.HumanThread != nil {
+		fields++
+	}
+	if result.HumanInline != nil {
+		fields++
+	}
+	if result.ManualMergeSnapshot != nil {
+		fields++
+	}
+	for _, present := range []bool{result.PullCreateSnapshot != nil, result.MergeSnapshot != nil, result.ReviewRequestSnapshot != nil, result.ThreadSnapshot != nil, result.InlineSnapshot != nil, result.HumanReview != nil, result.ReviewSnapshot != nil, result.HumanState != nil, result.StateSnapshot != nil, result.HumanLock != nil, result.LockSnapshot != nil, result.HumanIssueCreate != nil, result.IssueCreateSnapshot != nil, result.HumanEdit != nil, result.HumanComment != nil, result.CommentSnapshot != nil, result.EditSnapshot != nil, result.Capabilities != nil, result.Checks != nil, result.Threads != nil, result.Reviews != nil, result.PullFiles != nil, result.Pulls != nil, result.Comments != nil, result.Actor != nil, result.Repository != nil, result.Source != nil, result.Issues != nil, result.IssueIntake != nil, result.Page != nil, result.Owner != nil, result.PublicKeys != nil} {
 		if present {
 			fields++
 		}
@@ -292,12 +760,94 @@ func validCallbackResult(result CallbackResponse, request CallbackRequest) bool 
 		return false
 	}
 	switch request.Operation {
+	case OperationHumanMergeSubmit, OperationHumanMergeGet, OperationHumanMergeCancel:
+		return validHumanMergeResult(result.HumanMerge, request)
+	case OperationHumanPullCreateSubmit, OperationHumanPullCreateGet, OperationHumanPullCreateCancel:
+		return validHumanPullCreateResult(result.HumanPullCreate, request)
+	case OperationHumanManualMergeSubmit, OperationHumanManualMergeGet, OperationHumanManualMergeCancel:
+		return validHumanManualMergeResult(result.HumanManualMerge, request)
+	case OperationHumanReviewRequestSubmit, OperationHumanReviewRequestGet, OperationHumanReviewRequestCancel:
+		return validHumanReviewRequestResult(result.HumanReviewRequest, request)
+	case OperationHumanThreadSubmit, OperationHumanThreadGet, OperationHumanThreadCancel:
+		return validHumanThreadResult(result.HumanThread, request)
+	case OperationHumanInlineSubmit, OperationHumanInlineGet, OperationHumanInlineCancel:
+		return validHumanInlineResult(result.HumanInline, request)
+	case OperationRepositoryReviewRequestSnapshot:
+		return request.ReviewRequestSnapshot != nil && ValidRepositoryReviewRequestSnapshot(result.ReviewRequestSnapshot, request.RepositoryID, request.Authority.Actor.ID, *request.ReviewRequestSnapshot)
+	case OperationRepositoryThreadSnapshot:
+		return request.ThreadSnapshot != nil && ValidRepositoryThreadSnapshot(result.ThreadSnapshot, request.RepositoryID, request.Authority.Actor.ID, *request.ThreadSnapshot)
+	case OperationRepositoryInlineSnapshot:
+		return request.InlineSnapshot != nil && validRepositoryInlineSnapshot(result.InlineSnapshot, request.RepositoryID, request.Authority.Actor.ID, *request.InlineSnapshot)
+	case OperationRepositoryPullCreateSnapshot:
+		return request.PullCreateSnapshot != nil && ValidRepositoryPullCreateSnapshot(result.PullCreateSnapshot, request.RepositoryID, request.Authority.Actor.ID, *request.PullCreateSnapshot)
+	case OperationRepositoryMergeSnapshot:
+		return request.MergeSnapshot != nil && ValidRepositoryMergeSnapshot(result.MergeSnapshot, request.RepositoryID, request.Authority.Actor.ID, *request.MergeSnapshot)
+	case OperationRepositoryManualMergeSnapshot:
+		return request.ManualMergeSnapshot != nil && ValidRepositoryManualMergeSnapshot(result.ManualMergeSnapshot, request.RepositoryID, request.Authority.Actor.ID, *request.ManualMergeSnapshot)
+	case OperationRepositoryReviewSnapshot:
+		return request.ReviewSnapshot != nil && validRepositoryReviewSnapshot(result.ReviewSnapshot, request.RepositoryID, request.Authority.Actor.ID, *request.ReviewSnapshot)
+	case OperationRepositoryStateSnapshot:
+		return request.StateSnapshot != nil && validRepositoryStateSnapshot(result.StateSnapshot, request.RepositoryID, request.Authority.Actor.ID, *request.StateSnapshot)
+	case OperationRepositoryLockSnapshot:
+		return request.LockSnapshot != nil && validRepositoryLockSnapshot(result.LockSnapshot, request.RepositoryID, request.Authority.Actor.ID, *request.LockSnapshot)
+	case OperationHumanReviewSubmit, OperationHumanReviewGet, OperationHumanReviewCancel:
+		return validHumanReviewResult(result.HumanReview, request)
+	case OperationHumanStateSubmit, OperationHumanStateGet, OperationHumanStateCancel:
+		return validHumanStateResult(result.HumanState, request)
+	case OperationHumanLockSubmit, OperationHumanLockGet, OperationHumanLockCancel:
+		return validHumanLockResult(result.HumanLock, request)
+	case OperationHumanIssueCreateSubmit, OperationHumanIssueCreateGet, OperationHumanIssueCreateCancel:
+		return validHumanIssueCreateResult(result.HumanIssueCreate, request)
+	case OperationRepositoryIssueCreateSnapshot:
+		return validRepositoryIssueCreateSnapshot(result.IssueCreateSnapshot, request.RepositoryID, request.Authority.Actor.ID)
+	case OperationHumanEditSubmit, OperationHumanEditGet, OperationHumanEditCancel:
+		return validHumanEditResult(result.HumanEdit, request)
+	case OperationHumanCommentSubmit, OperationHumanCommentGet, OperationHumanCommentCancel:
+		return validHumanCommentResult(result.HumanComment, request)
+	case OperationRepositoryCapabilities:
+		return request.Capabilities != nil && validRepositoryCapabilities(result.Capabilities, request.RepositoryID, *request.Capabilities, request.Authority.Actor.ID)
+	case OperationReadableRepositories:
+		return request.Catalog != nil && validRepositoryCatalog(result.Page, *request.Catalog)
+	case OperationRepositoryChecks:
+		return request.Checks != nil && ValidRepositoryChecks(result.Checks, request.RepositoryID, *request.Checks)
+	case OperationRepositoryThreads:
+		return request.Threads != nil && ValidRepositoryThreadPage(result.Threads, request.RepositoryID, *request.Threads)
+	case OperationRepositoryReviews:
+		return request.Reviews != nil && ValidRepositoryReviewPage(result.Reviews, request.RepositoryID, *request.Reviews)
+	case OperationRepositoryPullFiles:
+		return request.PullFiles != nil && ValidRepositoryPullFiles(result.PullFiles, request.RepositoryID, *request.PullFiles)
+	case OperationRepositoryPulls:
+		return request.Pulls != nil && ValidRepositoryPullPage(result.Pulls, request.RepositoryID, *request.Pulls)
+	case OperationRepositoryComments:
+		return request.Comments != nil && ValidRepositoryCommentPage(result.Comments, request.RepositoryID, *request.Comments)
+	case OperationRepositoryEditSnapshot:
+		return request.EditSnapshot != nil && validRepositoryEditSnapshot(result.EditSnapshot, request.RepositoryID, request.Authority.Actor.ID, *request.EditSnapshot)
+	case OperationRepositoryCommentSnapshot:
+		return request.CommentSnapshot != nil && validRepositoryCommentSnapshot(result.CommentSnapshot, request.RepositoryID, request.Authority.Actor.ID, *request.CommentSnapshot)
+	case OperationIssueIntakeAuthorize:
+		return request.IssueIntake != nil && result.IssueIntake != nil && result.IssueIntake.Token != "" && result.IssueIntake.Claims.Repository == request.RepositoryID && result.IssueIntake.Claims.Source == request.IssueIntake.Source && result.IssueIntake.Claims.Revision == request.IssueIntake.Revision && result.IssueIntake.Claims.Actor == request.Authority.Actor.ID
+	case OperationRepositoryIssues:
+		if result.Issues == nil || result.Issues.RepositoryID != request.RepositoryID || result.Issues.Items == nil || len(result.Issues.Items) > request.Limit {
+			return false
+		}
+		for _, issue := range result.Issues.Items {
+			if !decimalID(issue.Index) || request.Query != "" && issue.Index != request.Query {
+				return false
+			}
+			if request.CompleteIssueBodies && (!decimalID(issue.ID) || !issue.BodyComplete || issue.Assignees == nil || issue.Labels == nil) {
+				return false
+			}
+		}
+		return result.Issues.NextCursor == "" || decimalID(result.Issues.NextCursor)
 	case OperationRepositorySource:
 		return ValidRepositorySource(result.Source, request)
 	case OperationCurrentActor:
 		return result.Actor != nil && decimalID(result.Actor.ID)
 	case OperationRepository:
 		if result.Repository == nil || !decimalID(result.Repository.ID) || result.Repository.ID != request.RepositoryID || result.Repository.Owner == "" || result.Repository.Name == "" {
+			return false
+		}
+		if len(result.Repository.DefaultBranch) > 1024 || strings.ContainsAny(result.Repository.DefaultBranch, "\x00\r\n") {
 			return false
 		}
 		switch result.Repository.Permission {
