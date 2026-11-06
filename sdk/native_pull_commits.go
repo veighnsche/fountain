@@ -44,7 +44,7 @@ func ValidRepositoryPullCommits(p *RepositoryPullCommits, repository string, q R
 	}
 	seen := map[string]bool{}
 	for _, item := range p.Items {
-		if !ValidPullDiffCommit(item.Commit) || seen[item.Commit] || len(item.Summary) > 65536 || !utf8.ValidString(item.Summary) || len(item.Author) > 1024 || !utf8.ValidString(item.Author) || item.AuthoredAt.IsZero() {
+		if !ValidPullDiffCommit(item.Commit) || seen[item.Commit] || len(item.Summary) > 4096 || !utf8.ValidString(item.Summary) || len(item.Author) > 1024 || !utf8.ValidString(item.Author) || item.AuthoredAt.IsZero() {
 			return false
 		}
 		seen[item.Commit] = true

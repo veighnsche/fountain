@@ -88,7 +88,7 @@ func resolveRepositoryPullCommits(ctx context.Context, admission *callbackAdmiss
 			return nil, http.StatusServiceUnavailable
 		}
 		summary, author := commit.Summary(), commit.Author.Name
-		if len(summary) > 65536 || !utf8.ValidString(summary) || len(author) > 1024 || !utf8.ValidString(author) {
+		if len(summary) > 4096 || !utf8.ValidString(summary) || len(author) > 1024 || !utf8.ValidString(author) {
 			return nil, http.StatusServiceUnavailable
 		}
 		page.Items = append(page.Items, extension.RepositoryPullCommit{Commit: oid, Summary: summary, Author: author, AuthoredAt: commit.Author.When})
