@@ -32,6 +32,7 @@ type RepositoryCapabilities struct {
 	Index        string                                `json:"index"`
 	ResourceID   string                                `json:"resource_id"`
 	Actions      map[string]RepositoryActionCapability `json:"actions"`
+	MergeMethods map[string]RepositoryActionCapability `json:"merge_methods,omitempty"`
 }
 
 var repositoryCapabilityActions = []string{"issues.read", "issue.create", "issue.edit", "issue.comment", "pulls.read", "pull.create", "pull.edit", "pull.comment", "pull.review", "pull.review.comment", "pull.review.approve", "pull.review.request_changes", "thread.resolve", "pull.merge", "checks.read", "checks.jobs.read"}
@@ -52,6 +53,25 @@ func validRepositoryCapabilities(p *RepositoryCapabilities, repo string, q Repos
 		case "allowed", "denied", "unsupported", "unavailable", "unknown":
 		default:
 			return false
+		}
+	}
+	if p.MergeMethods != nil {
+		if q.Subject != "pull" || len(p.MergeMethods) != 5 {
+			return false
+		}
+		for _, method := range []string{"merge", "squash", "rebase", "rebase-merge", "fast-forward-only"} {
+			fact, ok := p.MergeMethods[method]
+			if !ok || len(fact.Reason) > 256 {
+				return false
+			}
+			switch fact.State {
+			case "allowed", "denied", "unsupported", "unavailable", "unknown":
+			default:
+				return false
+			}
+			if fact.State == "allowed" && p.Actions["pull.merge"].State != "allowed" {
+				return false
+			}
 		}
 	}
 	return true

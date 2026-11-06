@@ -162,5 +162,23 @@ func readPullCapabilities(ctx context.Context, repo *repo_model.Repository, user
 			r.Actions[action] = capabilityFact("denied", "repository_archived")
 		}
 	}
+	r.MergeMethods = map[string]extension.RepositoryActionCapability{}
+	prUnit, unitErr := repo.GetUnit(ctx, unit.TypePullRequests)
+	for _, method := range []string{"merge", "squash", "rebase", "rebase-merge", "fast-forward-only"} {
+		fact := r.Actions["pull.merge"]
+		if unitErr != nil {
+			fact = capabilityFact("unavailable", "merge_policy_unavailable")
+		} else if !prUnit.PullRequestsConfig().IsMergeStyleAllowed(repo_model.MergeStyle(method)) {
+			fact = capabilityFact("unsupported", "merge_method_disabled")
+		} else if method == "fast-forward-only" && fact.State == "allowed" {
+			mergeBase, err := native.GetMergeBaseSimple(r.Base, r.Head)
+			if err != nil || !extension.ValidPullDiffCommit(mergeBase) {
+				fact = capabilityFact("unavailable", "merge_base_unavailable")
+			} else if mergeBase != r.Base {
+				fact = capabilityFact("denied", "not_fast_forward")
+			}
+		}
+		r.MergeMethods[method] = fact
+	}
 	return r, http.StatusOK
 }
