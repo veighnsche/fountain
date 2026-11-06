@@ -387,6 +387,10 @@ func callbackHandler(instanceID string, service bool) http.Handler {
 			http.Error(w, "unexpected pull files selector", http.StatusBadRequest)
 			return
 		}
+		if request.Operation != extension.OperationRepositoryPullCommits && request.PullCommits != nil {
+			http.Error(w, "unexpected pull commits selector", http.StatusBadRequest)
+			return
+		}
 		if request.Operation != extension.OperationRepositoryReviews && request.Reviews != nil {
 			http.Error(w, "unexpected review selector", http.StatusBadRequest)
 			return
@@ -702,6 +706,11 @@ func callbackHandler(instanceID string, service bool) http.Handler {
 				http.Error(w, "invalid pull files query", http.StatusBadRequest)
 				return
 			}
+		case extension.OperationRepositoryPullCommits:
+			if mustParsePositiveID(request.RepositoryID) == 0 || request.PullCommits == nil || !extension.ValidRepositoryPullCommitsRequest(*request.PullCommits) || request.Query != "" || request.Cursor != "" || request.Limit != 0 || request.Organization != "" {
+				http.Error(w, "invalid pull commits query", http.StatusBadRequest)
+				return
+			}
 		case extension.OperationRepositoryPulls:
 			if mustParsePositiveID(request.RepositoryID) == 0 || request.Pulls == nil || !extension.ValidRepositoryPullsRequest(*request.Pulls) || request.Query != "" || request.Cursor != "" || request.Limit != 0 || request.Organization != "" {
 				http.Error(w, "invalid pull query", http.StatusBadRequest)
@@ -981,6 +990,12 @@ func callbackHandler(instanceID string, service bool) http.Handler {
 				http.Error(w, "native pull files unavailable", status)
 				return
 			}
+		case extension.OperationRepositoryPullCommits:
+			response.PullCommits, status = resolveRepositoryPullCommits(callbackCtx, entry, request)
+			if status != http.StatusOK {
+				http.Error(w, "native pull commits unavailable", status)
+				return
+			}
 		case extension.OperationRepositoryPulls:
 			response.Pulls, status = resolveRepositoryPulls(callbackCtx, entry, request)
 			if status != http.StatusOK {
@@ -1194,7 +1209,7 @@ func callbackCapability(operation string) (string, bool) {
 		return extension.CapabilityActorRead, true
 	case extension.OperationRepositoryManualMergeSnapshot:
 		return extension.CapabilityRepositoryRead, true
-	case extension.OperationRepositoryPullCreateSnapshot, extension.OperationRepositoryMergeSnapshot, extension.OperationRepositoryReviewRequestSnapshot, extension.OperationRepositoryThreadSnapshot, extension.OperationRepositoryInlineSnapshot, extension.OperationRepositoryReviewSnapshot, extension.OperationRepositoryStateSnapshot, extension.OperationRepositoryLockSnapshot, extension.OperationRepositoryIssueCreateSnapshot, extension.OperationRepositoryEditSnapshot, extension.OperationRepositoryCommentSnapshot, extension.OperationRepositoryCapabilities, extension.OperationReadableRepositories, extension.OperationRepository, extension.OperationRepositorySource, extension.OperationRepositoryIssues, extension.OperationRepositoryComments, extension.OperationRepositoryPulls, extension.OperationRepositoryPullFiles, extension.OperationRepositoryReviews, extension.OperationRepositoryThreads, extension.OperationRepositoryChecks:
+	case extension.OperationRepositoryPullCreateSnapshot, extension.OperationRepositoryMergeSnapshot, extension.OperationRepositoryReviewRequestSnapshot, extension.OperationRepositoryThreadSnapshot, extension.OperationRepositoryInlineSnapshot, extension.OperationRepositoryReviewSnapshot, extension.OperationRepositoryStateSnapshot, extension.OperationRepositoryLockSnapshot, extension.OperationRepositoryIssueCreateSnapshot, extension.OperationRepositoryEditSnapshot, extension.OperationRepositoryCommentSnapshot, extension.OperationRepositoryCapabilities, extension.OperationReadableRepositories, extension.OperationRepository, extension.OperationRepositorySource, extension.OperationRepositoryIssues, extension.OperationRepositoryComments, extension.OperationRepositoryPulls, extension.OperationRepositoryPullFiles, extension.OperationRepositoryPullCommits, extension.OperationRepositoryReviews, extension.OperationRepositoryThreads, extension.OperationRepositoryChecks:
 		return extension.CapabilityRepositoryRead, true
 	case extension.OperationOwnedRepositories:
 		return extension.CapabilityOwnedRepositoriesSearch, true

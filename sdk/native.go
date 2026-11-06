@@ -34,6 +34,7 @@ const (
 	OperationRepositoryCommentSnapshot = "repository.comment_snapshot"
 	OperationRepositoryPulls           = "repository.pulls"
 	OperationRepositoryPullFiles       = "repository.pull_files"
+	OperationRepositoryPullCommits     = "repository.pull_commits"
 	OperationRepositoryReviews         = "repository.reviews"
 	OperationRepositoryThreads         = "repository.threads"
 	OperationRepositoryChecks          = "repository.checks"
@@ -100,6 +101,7 @@ type CallbackRequest struct {
 	Threads                     *RepositoryThreadsRequest               `json:"threads,omitempty"`
 	Reviews                     *RepositoryReviewsRequest               `json:"reviews,omitempty"`
 	PullFiles                   *RepositoryPullFilesRequest             `json:"pull_files,omitempty"`
+	PullCommits                 *RepositoryPullCommitsRequest           `json:"pull_commits,omitempty"`
 	Pulls                       *RepositoryPullsRequest                 `json:"pulls,omitempty"`
 	Comments                    *RepositoryCommentsRequest              `json:"comments,omitempty"`
 	IssueState                  string                                  `json:"issue_state,omitempty"`
@@ -147,6 +149,7 @@ type CallbackResponse struct {
 	Threads               *RepositoryThreadPage            `json:"threads,omitempty"`
 	Reviews               *RepositoryReviewPage            `json:"reviews,omitempty"`
 	PullFiles             *RepositoryPullFiles             `json:"pull_files,omitempty"`
+	PullCommits           *RepositoryPullCommits           `json:"pull_commits,omitempty"`
 	Pulls                 *RepositoryPullPage              `json:"pulls,omitempty"`
 	Comments              *RepositoryCommentPage           `json:"comments,omitempty"`
 	IssueIntake           *IssueIntakeGrant                `json:"issue_intake,omitempty"`
@@ -687,10 +690,18 @@ func (c *nativeClient) call(ctx context.Context, request CallbackRequest) (Callb
 				return CallbackResponse{}, ErrPullFilesQuery
 			}
 		}
+		if request.Operation == OperationRepositoryPullCommits {
+			switch response.StatusCode {
+			case http.StatusConflict:
+				return CallbackResponse{}, ErrPullCommitsChanged
+			case http.StatusBadRequest:
+				return CallbackResponse{}, ErrPullCommitsQuery
+			}
+		}
 		// The callback uses 404 for both a missing repository and one the actor
 		// cannot read. A 403 instead means the extension's callback admission or
 		// capability was rejected, so keep it an ordinary authority error.
-		if (request.Operation == OperationRepository || request.Operation == OperationRepositorySource || request.Operation == OperationRepositoryIssues || request.Operation == OperationRepositoryComments || request.Operation == OperationRepositoryPulls || request.Operation == OperationRepositoryPullFiles || request.Operation == OperationRepositoryReviews || request.Operation == OperationRepositoryThreads || request.Operation == OperationRepositoryChecks) && response.StatusCode == http.StatusNotFound {
+		if (request.Operation == OperationRepository || request.Operation == OperationRepositorySource || request.Operation == OperationRepositoryIssues || request.Operation == OperationRepositoryComments || request.Operation == OperationRepositoryPulls || request.Operation == OperationRepositoryPullFiles || request.Operation == OperationRepositoryPullCommits || request.Operation == OperationRepositoryReviews || request.Operation == OperationRepositoryThreads || request.Operation == OperationRepositoryChecks) && response.StatusCode == http.StatusNotFound {
 			return CallbackResponse{}, ErrRepositoryNotVisible
 		}
 		return CallbackResponse{}, fmt.Errorf("native callback returned HTTP %d", response.StatusCode)
@@ -751,7 +762,7 @@ func validCallbackResult(result CallbackResponse, request CallbackRequest) bool 
 	if result.ManualMergeSnapshot != nil {
 		fields++
 	}
-	for _, present := range []bool{result.PullCreateSnapshot != nil, result.MergeSnapshot != nil, result.ReviewRequestSnapshot != nil, result.ThreadSnapshot != nil, result.InlineSnapshot != nil, result.HumanReview != nil, result.ReviewSnapshot != nil, result.HumanState != nil, result.StateSnapshot != nil, result.HumanLock != nil, result.LockSnapshot != nil, result.HumanIssueCreate != nil, result.IssueCreateSnapshot != nil, result.HumanEdit != nil, result.HumanComment != nil, result.CommentSnapshot != nil, result.EditSnapshot != nil, result.Capabilities != nil, result.Checks != nil, result.Threads != nil, result.Reviews != nil, result.PullFiles != nil, result.Pulls != nil, result.Comments != nil, result.Actor != nil, result.Repository != nil, result.Source != nil, result.Issues != nil, result.IssueIntake != nil, result.Page != nil, result.Owner != nil, result.PublicKeys != nil} {
+	for _, present := range []bool{result.PullCreateSnapshot != nil, result.MergeSnapshot != nil, result.ReviewRequestSnapshot != nil, result.ThreadSnapshot != nil, result.InlineSnapshot != nil, result.HumanReview != nil, result.ReviewSnapshot != nil, result.HumanState != nil, result.StateSnapshot != nil, result.HumanLock != nil, result.LockSnapshot != nil, result.HumanIssueCreate != nil, result.IssueCreateSnapshot != nil, result.HumanEdit != nil, result.HumanComment != nil, result.CommentSnapshot != nil, result.EditSnapshot != nil, result.Capabilities != nil, result.Checks != nil, result.Threads != nil, result.Reviews != nil, result.PullFiles != nil, result.PullCommits != nil, result.Pulls != nil, result.Comments != nil, result.Actor != nil, result.Repository != nil, result.Source != nil, result.Issues != nil, result.IssueIntake != nil, result.Page != nil, result.Owner != nil, result.PublicKeys != nil} {
 		if present {
 			fields++
 		}
@@ -816,6 +827,8 @@ func validCallbackResult(result CallbackResponse, request CallbackRequest) bool 
 		return request.Reviews != nil && ValidRepositoryReviewPage(result.Reviews, request.RepositoryID, *request.Reviews)
 	case OperationRepositoryPullFiles:
 		return request.PullFiles != nil && ValidRepositoryPullFiles(result.PullFiles, request.RepositoryID, *request.PullFiles)
+	case OperationRepositoryPullCommits:
+		return request.PullCommits != nil && ValidRepositoryPullCommits(result.PullCommits, request.RepositoryID, *request.PullCommits)
 	case OperationRepositoryPulls:
 		return request.Pulls != nil && ValidRepositoryPullPage(result.Pulls, request.RepositoryID, *request.Pulls)
 	case OperationRepositoryComments:
