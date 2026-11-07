@@ -14,8 +14,9 @@ var _ auth.AuthenticationResult = &oAuth2JWTAuthenticationResult{}
 
 type oAuth2JWTAuthenticationResult struct {
 	*auth.BaseAuthenticationResult
-	user  *user_model.User
-	scope optional.Option[auth_model.AccessTokenScope]
+	grantID int64
+	user    *user_model.User
+	scope   optional.Option[auth_model.AccessTokenScope]
 }
 
 func (*oAuth2JWTAuthenticationResult) IsOAuth2JWTAuthentication() bool {
@@ -29,3 +30,6 @@ func (r *oAuth2JWTAuthenticationResult) User() *user_model.User {
 func (r *oAuth2JWTAuthenticationResult) Scope() optional.Option[auth_model.AccessTokenScope] {
 	return r.scope
 }
+
+// OAuth2GrantID identifies the authorization already validated for this request.
+func (r *oAuth2JWTAuthenticationResult) OAuth2GrantID() int64 { return r.grantID }

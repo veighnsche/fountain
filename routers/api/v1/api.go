@@ -278,6 +278,12 @@ func tokenRequiresWriteScopes(requiredScopeCategories ...auth_model.AccessTokenS
 	}
 }
 
+// Enrollment and withdrawal change only the caller's repository-read grant.
+func tokenRequiresReadScopes(categories ...auth_model.AccessTokenScopeCategory) func(*context.APIContext) {
+	apiv1_permissions_testhelpers.RecordSignature(apiv1_permissions.TokenRequiresScopes, categories)
+	return func(ctx *context.APIContext) { apiv1_permissions.TokenRequiresScopes(ctx, categories, auth_model.Read) }
+}
+
 // Middleware that dynamically checks either the organization or user scope, depending on the owner type of the
 // repository (requires `repoAssignment()` middleware to be used before this).
 func tokenRequiresRepoOwnerScope() func(*context.APIContext) {
@@ -795,6 +801,15 @@ func Routes() *web.Route {
 		m.Delete("/repos/{username}/{reponame}", repoAssignment, repoAccess(), tokenRequiresRepoOwnerScope(), reqOwner(), repo.Delete)
 
 		// Repos (requires repo scope)
+		m.Group("/repos/{username}/{reponame}/factory/desktop/grants", func() {
+			m.Post("", repo.EnrollDesktopGrant)
+			m.Group("/{grant}", func() {
+				m.Get("", repo.GetDesktopGrant)
+				m.Delete("", repo.RevokeDesktopGrant)
+				m.Get("/repository", repo.ReadDesktopRepository)
+			})
+		}, repoAssignment, repoAccess(), checkTokenPublicOnly(), reqToken(), reqRepoReader(unit.TypeCode), tokenRequiresReadScopes(auth_model.AccessTokenScopeCategoryRepository))
+
 		m.Group("/repos", func() {
 			m.Get("/search", repo.Search)
 

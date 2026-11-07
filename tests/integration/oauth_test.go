@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	extension "forgejo.org/extension-sdk"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	"forgejo.org/models/unittest"
@@ -1934,4 +1935,63 @@ func TestSignInOAuthCallbackSignInRetrieveError(t *testing.T) {
 	flashCookie := sess.GetCookie(app_context.CookieNameFlash)
 	assert.NotNil(t, flashCookie)
 	assert.Equal(t, "error%3DOAuth2%2BRetrieveError%253A%2Boauth2%253A%2Bcannot%2Bfetch%2Btoken%253A%2B404%2BNot%2BFound%250AResponse%253A%2Bcooked", flashCookie.Value)
+}
+
+// The desktop uses a public client and real S256 exchange. Enrollment metadata
+// cannot replace that authorization or activate execution/publication.
+func TestNativeDesktopEnrollment(t *testing.T) {
+	defer tests.PrepareTestEnv(t)()
+	defer test.MockVariableValue(&setting.OAuth2.EnableAdditionalGrantScopes, true)()
+	clientID := "ce5a1322-42a7-11ed-b878-0242ac120002"
+	redirect := "http://127.0.0.1/"
+	verifier := strings.Repeat("v", 43)
+	digest := sha256.Sum256([]byte(verifier))
+	scope := "read:repository"
+	values := url.Values{"client_id": {clientID}, "redirect_uri": {redirect}, "response_type": {"code"}, "scope": {scope}, "state": {"desktop-fixture"}, "code_challenge_method": {"S256"}, "code_challenge": {base64.RawURLEncoding.EncodeToString(digest[:])}}
+	session := loginUser(t, "user2")
+	session.MakeRequest(t, NewRequest(t, http.MethodGet, "/login/oauth/authorize?"+values.Encode()), http.StatusOK)
+	consent := session.MakeRequest(t, NewRequestWithValues(t, http.MethodPost, "/login/oauth/grant", map[string]string{"client_id": clientID, "redirect_uri": redirect, "state": "desktop-fixture", "granted": "true", "scope": scope}), http.StatusSeeOther)
+	location, err := consent.Result().Location()
+	require.NoError(t, err)
+	require.Equal(t, "desktop-fixture", location.Query().Get("state"))
+	code := location.Query().Get("code")
+	require.NotEmpty(t, code)
+	exchange := MakeRequest(t, NewRequestWithValues(t, http.MethodPost, "/login/oauth/access_token", map[string]string{"grant_type": "authorization_code", "client_id": clientID, "redirect_uri": redirect, "code": code, "code_verifier": verifier}), http.StatusOK)
+	var tokens struct {
+		AccessToken string `json:"access_token"`
+	}
+	DecodeJSON(t, exchange, &tokens)
+	require.NotEmpty(t, tokens.AccessToken)
+	base := "/api/v1/repos/user2/repo1/factory/desktop/grants"
+	input := extension.DesktopGrantEnrollment{CommandID: strings.Repeat("a", 32), RuntimeID: strings.Repeat("b", 32)}
+	enroll := func(status int) extension.DesktopGrant {
+		reply := MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, base, input).SetHeader("Authorization", "Bearer "+tokens.AccessToken), status)
+		var grant extension.DesktopGrant
+		DecodeJSON(t, reply, &grant)
+		require.Equal(t, "no-store", reply.Header().Get("Cache-Control"))
+		require.NotContains(t, reply.Body.String(), tokens.AccessToken)
+		return grant
+	}
+	grant := enroll(http.StatusCreated)
+	require.True(t, grant.Active)
+	require.Equal(t, input.CommandID, grant.ID)
+	require.Equal(t, input.RuntimeID, grant.RuntimeID)
+	require.Equal(t, clientID, grant.ApplicationID)
+	require.Equal(t, "user2", grant.Actor.Username)
+	require.Equal(t, []string{extension.DesktopRepositoryRead}, grant.Operations)
+	require.Equal(t, grant, enroll(http.StatusOK))
+	read := MakeRequest(t, NewRequest(t, http.MethodGet, base+"/"+grant.ID+"/repository").SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusOK)
+	var repository extension.Repository
+	DecodeJSON(t, read, &repository)
+	require.Equal(t, grant.Repository, repository)
+	withdrawn := MakeRequest(t, NewRequest(t, http.MethodDelete, base+"/"+grant.ID).SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusOK)
+	var retired extension.DesktopGrant
+	DecodeJSON(t, withdrawn, &retired)
+	require.False(t, retired.Active)
+	MakeRequest(t, NewRequest(t, http.MethodGet, base+"/"+grant.ID+"/repository").SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusForbidden)
+	require.False(t, enroll(http.StatusOK).Active)
+	readback := MakeRequest(t, NewRequest(t, http.MethodGet, base+"/"+grant.ID).SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusOK)
+	var retained extension.DesktopGrant
+	DecodeJSON(t, readback, &retained)
+	require.False(t, retained.Active)
 }
