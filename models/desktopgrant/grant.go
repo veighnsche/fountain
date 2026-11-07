@@ -24,6 +24,7 @@ type Grant struct {
 	OAuthGrantID int64              `xorm:"'oauth_grant_id' NOT NULL INDEX"`
 	RepositoryID int64              `xorm:"NOT NULL INDEX"`
 	RuntimeID    string             `xorm:"VARCHAR(32) NOT NULL"`
+	ProofSHA256  string             `xorm:"VARCHAR(64) NOT NULL DEFAULT ''"`
 	Revoked      bool               `xorm:"NOT NULL DEFAULT FALSE"`
 	CreatedUnix  timeutil.TimeStamp `xorm:"created"`
 }
@@ -45,7 +46,7 @@ func Get(ctx context.Context, id string) (*Grant, error) {
 }
 
 func sameScope(left, right *Grant) bool {
-	return left.ActorID == right.ActorID && left.OAuthGrantID == right.OAuthGrantID && left.RepositoryID == right.RepositoryID && left.RuntimeID == right.RuntimeID
+	return left.ActorID == right.ActorID && left.OAuthGrantID == right.OAuthGrantID && left.RepositoryID == right.RepositoryID && left.RuntimeID == right.RuntimeID && left.ProofSHA256 == right.ProofSHA256
 }
 
 // Enroll retains the original command identity, including after withdrawal.

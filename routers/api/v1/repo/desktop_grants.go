@@ -4,6 +4,9 @@
 package repo
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -19,6 +22,22 @@ import (
 )
 
 var desktopID = regexp.MustCompile(`^[a-f0-9]{32}$`)
+var desktopProof = regexp.MustCompile(`^[a-f0-9]{64}$`)
+
+// OAuth grants can be shared by several devices. Only this profile knows the
+// preimage; metadata and a shared account token cannot adopt its enrollment.
+func desktopProofAdmitted(ctx *context.APIContext, expected string) bool {
+	if expected == "" {
+		return true // Retained legacy enrollments authorize repository reads only.
+	}
+	proof := ctx.Req.Header.Get("X-Factory-Desktop-Proof")
+	digest := sha256.Sum256([]byte(proof))
+	if len(ctx.Req.Header.Values("X-Factory-Desktop-Proof")) != 1 || !desktopProof.MatchString(proof) || subtle.ConstantTimeCompare([]byte(hex.EncodeToString(digest[:])), []byte(expected)) != 1 {
+		ctx.Error(http.StatusForbidden, "desktop enrollment", errors.New("native profile proof required"))
+		return false
+	}
+	return true
+}
 
 // The authentication method validated this identity. Do not parse the token a
 // second time or accept account/application selectors from a desktop payload.
@@ -47,7 +66,7 @@ func desktopProjection(ctx *context.APIContext, grant *desktopgrant.Grant, app *
 	return extension.DesktopGrant{ID: grant.ID, RuntimeID: grant.RuntimeID, ApplicationID: app.ClientID,
 		Actor:      extension.Actor{ID: strconv.FormatInt(ctx.Doer().ID, 10), Username: ctx.Doer().Name, SiteAdmin: ctx.Doer().IsAdmin},
 		Repository: extension.Repository{ID: strconv.FormatInt(repository.ID, 10), Owner: ctx.Repo().Owner.Name, Name: repository.Name, DefaultBranch: repository.DefaultBranch, Permission: "read"},
-		Active:     !grant.Revoked, Operations: []string{extension.DesktopRepositoryRead}}
+		Active:     !grant.Revoked, Operations: []string{extension.DesktopRepositoryRead}, RuntimeBound: grant.ProofSHA256 != ""}
 }
 
 func EnrollDesktopGrant(ctx *context.APIContext) {
@@ -59,11 +78,14 @@ func EnrollDesktopGrant(ctx *context.APIContext) {
 	decoder := json.NewDecoder(http.MaxBytesReader(ctx.Resp, ctx.Req.Body, 4096))
 	decoder.DisallowUnknownFields()
 	var trailing any
-	if decoder.Decode(&request) != nil || decoder.Decode(&trailing) != io.EOF || !desktopID.MatchString(request.CommandID) || !desktopID.MatchString(request.RuntimeID) {
+	if decoder.Decode(&request) != nil || decoder.Decode(&trailing) != io.EOF || !desktopID.MatchString(request.CommandID) || !desktopID.MatchString(request.RuntimeID) || (request.ProofSHA256 != "" && !desktopProof.MatchString(request.ProofSHA256)) {
 		ctx.Error(http.StatusBadRequest, "desktop enrollment", errors.New("bounded command and runtime identities required"))
 		return
 	}
-	grant, created, err := desktopgrant.Enroll(ctx, &desktopgrant.Grant{ID: request.CommandID, ActorID: ctx.Doer().ID, OAuthGrantID: authorization.ID, RepositoryID: ctx.Repo().Repository.ID, RuntimeID: request.RuntimeID})
+	if !desktopProofAdmitted(ctx, request.ProofSHA256) {
+		return
+	}
+	grant, created, err := desktopgrant.Enroll(ctx, &desktopgrant.Grant{ID: request.CommandID, ActorID: ctx.Doer().ID, OAuthGrantID: authorization.ID, RepositoryID: ctx.Repo().Repository.ID, RuntimeID: request.RuntimeID, ProofSHA256: request.ProofSHA256})
 	if errors.Is(err, desktopgrant.ErrConflict) {
 		ctx.Error(http.StatusConflict, "desktop enrollment", err)
 		return
@@ -96,6 +118,9 @@ func currentDesktopGrant(ctx *context.APIContext) (*desktopgrant.Grant, *auth_mo
 	}
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "desktop enrollment", errors.New("enrollment storage unavailable"))
+		return nil, nil, false
+	}
+	if !desktopProofAdmitted(ctx, grant.ProofSHA256) {
 		return nil, nil, false
 	}
 	return grant, app, true

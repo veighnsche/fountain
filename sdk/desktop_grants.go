@@ -6,8 +6,9 @@ package extensions
 // DesktopGrantEnrollment selects one repository and native runtime. The host
 // supplies the account and OAuth application from authenticated request state.
 type DesktopGrantEnrollment struct {
-	CommandID string `json:"command_id"`
-	RuntimeID string `json:"runtime_id"`
+	CommandID   string `json:"command_id"`
+	RuntimeID   string `json:"runtime_id"`
+	ProofSHA256 string `json:"proof_sha256,omitempty"`
 }
 
 // DesktopGrant is enrollment metadata, never a bearer credential. Every use
@@ -21,6 +22,7 @@ type DesktopGrant struct {
 	Repository    Repository `json:"repository"`
 	Active        bool       `json:"active"`
 	Operations    []string   `json:"operations"`
+	RuntimeBound  bool       `json:"runtime_bound"`
 }
 
 const DesktopRepositoryRead = "repository.read"

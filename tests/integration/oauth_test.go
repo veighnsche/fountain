@@ -6,12 +6,17 @@ package integration
 import (
 	"bytes"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1994,4 +1999,37 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 	var retained extension.DesktopGrant
 	DecodeJSON(t, readback, &retained)
 	require.False(t, retained.Active)
+
+	// A shared OAuth grant cannot substitute for the native profile proof.
+	proof := strings.Repeat("c", 64)
+	proofDigest := sha256.Sum256([]byte(proof))
+	input.CommandID = strings.Repeat("d", 32)
+	input.ProofSHA256 = hex.EncodeToString(proofDigest[:])
+	MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, base, input).SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusForbidden)
+	bound := MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, base, input).SetHeader("Authorization", "Bearer "+tokens.AccessToken).SetHeader("X-Factory-Desktop-Proof", proof), http.StatusCreated)
+	var binding extension.DesktopGrant
+	DecodeJSON(t, bound, &binding)
+	require.True(t, binding.RuntimeBound)
+	for _, method := range []string{http.MethodGet, http.MethodDelete} {
+		MakeRequest(t, NewRequest(t, method, base+"/"+binding.ID).SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusForbidden)
+	}
+	MakeRequest(t, NewRequest(t, http.MethodGet, base+"/"+binding.ID+"/repository").SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusForbidden)
+	require.NotContains(t, bound.Body.String(), proof)
+
+	if checker := os.Getenv("FACTORY_FOUNTAIN_NATIVE_CHECK"); checker != "" {
+		root := os.Getenv("FACTORY_FOUNTAIN_NATIVE_ROOT")
+		require.True(t, filepath.IsAbs(root) && strings.HasPrefix(root, "/home/"))
+		keyPair, err := tls.LoadX509KeyPair(filepath.Join(root, "server.pem"), filepath.Join(root, "server.key"))
+		require.NoError(t, err)
+		server := httptest.NewUnstartedServer(testWebRoutes)
+		server.TLS = &tls.Config{Certificates: []tls.Certificate{keyPair}, MinVersion: tls.VersionTLS12}
+		server.StartTLS()
+		defer server.Close()
+		command := exec.CommandContext(t.Context(), checker, "--fountain-desktop-declared", filepath.Join(root, "profile"), server.URL, clientID)
+		command.Env = append(os.Environ(), "SSL_CERT_FILE="+filepath.Join(root, "ca.pem"))
+		command.Stdin = strings.NewReader(tokens.AccessToken)
+		output, err := command.CombinedOutput()
+		t.Log(string(output))
+		require.NoError(t, err)
+	}
 }
