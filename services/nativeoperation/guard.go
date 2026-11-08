@@ -5,15 +5,13 @@ package nativeoperation
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
 	"errors"
 	"fmt"
-	"os"
 
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	execcontext "forgejo.org/modules/nativeoperation"
+	"forgejo.org/services/nativeownership"
 )
 
 // Ordinary writer families with outer ownership. Each family records its
@@ -119,12 +117,6 @@ func conditionalOwner(installationID, operationID string) string {
 	return "cond:" + installationID + "/" + operationID
 }
 
-func ordinaryOwner(family, resource string) string {
-	nonce := make([]byte, 8)
-	_, _ = rand.Read(nonce)
-	return "ord:" + family + "/" + resource + "/" + hex.EncodeToString(nonce)
-}
-
 func encodeScope(scope Scope) (string, error) {
 	raw, err := json.Marshal(scope)
 	if err != nil {
@@ -165,41 +157,19 @@ func (s *Service) WithOrdinaryOwnership(ctx context.Context, family, resource st
 	if err != nil {
 		return err
 	}
-	path, secret, err := execcontext.WriteCapabilityFile(dir)
-	if err != nil {
-		return err
-	}
-	owner := ordinaryOwner(family, resource)
-	release := func() {
-		_ = os.Remove(path)
-	}
 	scope.Kind = nativeoperation_model.OwnerOrdinary
 	scope.Family = family
 	encoded, err := encodeScope(scope)
 	if err != nil {
-		release()
 		return err
 	}
-	claimed, err := nativeoperation_model.ClaimOrdinary(ctx, owner, encoded, execcontext.Verifier(secret))
-	if err != nil {
-		release()
-		if errors.Is(err, nativeoperation_model.ErrBusy) {
-			return fmt.Errorf("%w: ordinary writer %s is fenced", ErrBusy, family)
-		}
-		if errors.Is(err, nativeoperation_model.ErrInhibited) {
-			return fmt.Errorf("%w: ordinary writer %s refuses while offline recovery holds the domain", nativeoperation_model.ErrInhibited, family)
-		}
-		return err
+	entered := false
+	err = nativeownership.WithOrdinary(ctx, dir, family, resource, encoded, func(owned context.Context) error {
+		entered = true
+		return fn(owned)
+	})
+	if !entered && errors.Is(err, nativeoperation_model.ErrBusy) {
+		return fmt.Errorf("%w: ordinary writer %s is fenced", ErrBusy, family)
 	}
-	owned := execcontext.NewContext(ctx, &execcontext.Execution{Owner: owner, Generation: claimed.Generation, CapabilityPath: path})
-	fnErr := fn(owned)
-	if err := nativeoperation_model.ReleaseOwner(context.WithoutCancel(ctx), owner); err != nil {
-		release()
-		if fnErr != nil {
-			return fmt.Errorf("%w (and failed to release %s: %v)", fnErr, owner, err)
-		}
-		return fmt.Errorf("failed to release %s: %w", owner, err)
-	}
-	release()
-	return fnErr
+	return err
 }

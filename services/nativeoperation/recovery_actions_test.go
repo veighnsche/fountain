@@ -7,6 +7,8 @@ import (
 	"context"
 	"testing"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
@@ -87,11 +89,11 @@ func TestParseActionsResource(t *testing.T) {
 }
 
 func TestOrdinaryResource(t *testing.T) {
-	got, err := ordinaryResource("ord:actions-run/run/rerun/0123456789abcdef", FamilyActionsRun)
+	got, err := execcontext.OrdinaryResource("ord:actions-run/run/rerun/0123456789abcdef", FamilyActionsRun)
 	require.NoError(t, err)
 	require.Equal(t, "run/rerun", got)
 
-	got, err = ordinaryResource("ord:actions-run/status/abc/pending/2/a/b/0123456789abcdef", FamilyActionsRun)
+	got, err = execcontext.OrdinaryResource("ord:actions-run/status/abc/pending/2/a/b/0123456789abcdef", FamilyActionsRun)
 	require.NoError(t, err)
 	require.Equal(t, "status/abc/pending/2/a/b", got)
 
@@ -102,7 +104,7 @@ func TestOrdinaryResource(t *testing.T) {
 		"ord:authority/run/rerun/0123456789abcdef",
 		"cond:install/op",
 	} {
-		_, err := ordinaryResource(owner, FamilyActionsRun)
+		_, err := execcontext.OrdinaryResource(owner, FamilyActionsRun)
 		require.Error(t, err, owner)
 	}
 }

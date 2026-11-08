@@ -47,7 +47,7 @@ func NewPullRequest(ctx context.Context, repo *repo_model.Repository, issue *iss
 	// One collaboration writer owns the pull request creation before
 	// its effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabPullCreateResource(issue.ID), repo.ID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, nativeoperation.PullCreateResource(issue.ID), repo.ID, func(ctx context.Context) error {
 		return doNewPullRequest(ctx, repo, issue, labelIDs, uuids, pr, assigneeIDs)
 	})
 }
@@ -224,7 +224,7 @@ func ChangeTargetBranch(ctx context.Context, pr *issues_model.PullRequest, doer 
 	// One collaboration writer owns the retarget before its effects,
 	// advancing the native revision so old accepted-input observations
 	// go stale.
-	return withCollabOwnership(ctx, CollabPullResource(pr.ID, "retarget"), pr.BaseRepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, nativeoperation.PullResource(pr.ID, "retarget"), pr.BaseRepoID, func(ctx context.Context) error {
 		return doChangeTargetBranch(ctx, pr, doer, targetBranch)
 	})
 }
@@ -346,7 +346,7 @@ func TestPullRequest(ctx context.Context, doer *user_model.User, repoID, olderTh
 
 func testPullRequest(ctx context.Context, doer *user_model.User, repoID, olderThan int64, branch string, isSync bool, oldCommitID, newCommitID string) error {
 	// The deferred sweep owns its effects independently of the push.
-	return withCollabOwnershipScope(ctx, CollabBatchResource("pr-sweep"), collabScope{RepositoryID: repoID, HeadRef: git.BranchPrefix + branch}, func(ctx context.Context) error {
+	return withCollabOwnershipScope(ctx, nativeoperation.CollabBatchResource("pr-sweep"), collabScope{RepositoryID: repoID, HeadRef: git.BranchPrefix + branch}, func(ctx context.Context) error {
 		doTestPullRequest(ctx, doer, repoID, olderThan, branch, isSync, oldCommitID, newCommitID)
 		return nil
 	})
@@ -439,7 +439,7 @@ func ValidatePullRequest(ctx context.Context, pr *issues_model.PullRequest, newC
 	// carry the enclosing execution; the claim only binds standalone
 	// callers. A busy gate logs and skips like any other transient
 	// worker error; the next push re-triggers validation.
-	if err := withCollabOwnership(ctx, CollabPullResource(pr.ID, "refresh"), pr.BaseRepoID, func(ctx context.Context) error {
+	if err := withCollabOwnership(ctx, nativeoperation.PullResource(pr.ID, "refresh"), pr.BaseRepoID, func(ctx context.Context) error {
 		doValidatePullRequest(ctx, pr, newCommitID, oldCommitID, doer)
 		return nil
 	}); err != nil {
@@ -527,7 +527,7 @@ func PushToBaseRepo(ctx context.Context, pr *issues_model.PullRequest) (err erro
 	// Nested calls reuse the enclosing ownership instead of claiming
 	// again.
 	return withRefWriteOwnership(ctx,
-		refWriteResource(pr.BaseRepoID, refWritePRRef, pr.GetGitRefName()),
+		nativeoperation.RefWriteResource(pr.BaseRepoID, refWritePRRef, pr.GetGitRefName()),
 		refWriteScope{
 			RepositoryID: pr.BaseRepoID,
 			Ref:          pr.GetGitRefName(),
@@ -564,7 +564,7 @@ func UpdateRef(ctx context.Context, pr *issues_model.PullRequest) (err error) {
 	// advancing the revision so stale observations go stale. Nested
 	// calls reuse the enclosing ownership instead of claiming again.
 	return withRefWriteOwnership(ctx,
-		refWriteResource(pr.BaseRepoID, refWritePRRef, pr.GetGitRefName()),
+		nativeoperation.RefWriteResource(pr.BaseRepoID, refWritePRRef, pr.GetGitRefName()),
 		refWriteScope{
 			RepositoryID: pr.BaseRepoID,
 			Ref:          pr.GetGitRefName(),
@@ -605,7 +605,7 @@ func RetargetChildrenOnMerge(ctx context.Context, doer *user_model.User, pr *iss
 	// observations go stale. Merge completion normally carries the
 	// enclosing execution; standalone completion briefly waits for other
 	// deferred merge work to release its independent ownership.
-	return withCollabOwnershipWait(ctx, CollabBatchResource("pr-sweep"), collabScope{RepositoryID: pr.BaseRepoID}, func(ctx context.Context) error {
+	return withCollabOwnershipWait(ctx, nativeoperation.CollabBatchResource("pr-sweep"), collabScope{RepositoryID: pr.BaseRepoID}, func(ctx context.Context) error {
 		return doRetargetChildrenOnMerge(ctx, doer, pr)
 	})
 }
@@ -623,7 +623,7 @@ func RetargetBranchPulls(ctx context.Context, doer *user_model.User, repoID int6
 	// One collaboration writer owns the branch retarget sweep before
 	// its effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabBatchResource("pr-sweep"), repoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, nativeoperation.CollabBatchResource("pr-sweep"), repoID, func(ctx context.Context) error {
 		return doRetargetBranchPulls(ctx, doer, repoID, branch, targetBranch)
 	})
 }
@@ -662,7 +662,7 @@ func CloseBranchPulls(ctx context.Context, doer *user_model.User, repoID int64, 
 	// observations go stale. Push completion and branch deletion
 	// normally carry the enclosing execution; the claim only binds
 	// standalone callers.
-	return withCollabOwnership(ctx, CollabBatchResource("pr-sweep"), repoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, nativeoperation.CollabBatchResource("pr-sweep"), repoID, func(ctx context.Context) error {
 		return doCloseBranchPulls(ctx, doer, repoID, branch)
 	})
 }
@@ -700,7 +700,7 @@ func CloseRepoBranchesPulls(ctx context.Context, doer *user_model.User, repo *re
 	// One collaboration writer owns the repo close sweep before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabBatchResource("pr-sweep"), repo.ID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, nativeoperation.CollabBatchResource("pr-sweep"), repo.ID, func(ctx context.Context) error {
 		return doCloseRepoBranchesPulls(ctx, doer, repo)
 	})
 }

@@ -6,6 +6,8 @@ package issue
 import (
 	"context"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	user_model "forgejo.org/models/user"
@@ -17,7 +19,7 @@ func ClearLabels(ctx context.Context, issue *issues_model.Issue, doer *user_mode
 	// One collaboration writer owns the label change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabIssueResource(issue.ID, "labels"), issue.RepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "labels"), issue.RepoID, func(ctx context.Context) error {
 		return doClearLabels(ctx, issue, doer)
 	})
 }
@@ -37,7 +39,7 @@ func AddLabel(ctx context.Context, issue *issues_model.Issue, doer *user_model.U
 	// One collaboration writer owns the label change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabIssueResource(issue.ID, "labels"), issue.RepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "labels"), issue.RepoID, func(ctx context.Context) error {
 		return doAddLabel(ctx, issue, doer, label)
 	})
 }
@@ -56,7 +58,7 @@ func AddLabels(ctx context.Context, issue *issues_model.Issue, doer *user_model.
 	// One collaboration writer owns the label change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabIssueResource(issue.ID, "labels"), issue.RepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "labels"), issue.RepoID, func(ctx context.Context) error {
 		return doAddLabels(ctx, issue, doer, labels)
 	})
 }
@@ -75,7 +77,7 @@ func RemoveLabel(ctx context.Context, issue *issues_model.Issue, doer *user_mode
 	// One collaboration writer owns the label change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabIssueResource(issue.ID, "labels"), issue.RepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "labels"), issue.RepoID, func(ctx context.Context) error {
 		return doRemoveLabel(ctx, issue, doer, label)
 	})
 }
@@ -108,7 +110,7 @@ func ReplaceLabels(ctx context.Context, issue *issues_model.Issue, doer *user_mo
 	// One collaboration writer owns the label change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabIssueResource(issue.ID, "labels"), issue.RepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "labels"), issue.RepoID, func(ctx context.Context) error {
 		return doReplaceLabels(ctx, issue, doer, labels)
 	})
 }

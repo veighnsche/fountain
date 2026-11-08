@@ -46,7 +46,7 @@ func SyncFork(ctx context.Context, doer *user_model.User, repo *repo_model.Repos
 	// claiming again.
 	return nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation_service.RefWriteResource(repo.ID, nativeoperation_service.RefWriteSyncFork, forkRef),
+		nativeoperation.RefWriteResource(repo.ID, nativeoperation_service.RefWriteSyncFork, forkRef),
 		nativeoperation_service.Scope{
 			Family:       nativeoperation_service.FamilyRefWrite,
 			RepositoryID: repo.ID,

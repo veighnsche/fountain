@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	pull_model "forgejo.org/models/pull"
 	"forgejo.org/modules/base"
@@ -186,7 +188,7 @@ func UpdateResolveConversation(ctx *context.Context) {
 		// observations go stale.
 		doer := ctx.Doer
 		resolve := action == "Resolve"
-		err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.CommentResource(comment.ID, "conversation"), ctx.Repo.Repository.ID, func(ctx stdCtx.Context) error {
+		err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.CommentResource(comment.ID, "conversation"), ctx.Repo.Repository.ID, func(ctx stdCtx.Context) error {
 			return issues_model.MarkConversation(ctx, comment, doer, resolve)
 		})
 		if err != nil {

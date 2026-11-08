@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"time"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/modules/base"
@@ -153,7 +155,7 @@ func NewMilestonePost(ctx *context.Context) {
 		Content:      form.Content,
 		DeadlineUnix: timeutil.TimeStamp(deadline.Unix()),
 	}
-	if err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.MilestoneResource(repoID, "create"), repoID, func(ctx stdCtx.Context) error {
+	if err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.MilestoneResource(repoID, "create"), repoID, func(ctx stdCtx.Context) error {
 		return issues_model.NewMilestone(ctx, milestone)
 	}); err != nil {
 		ctx.ServerError("NewMilestone", err)
@@ -225,7 +227,7 @@ func EditMilestonePost(ctx *context.Context) {
 	// One collaboration writer owns the milestone change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	if err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.MilestoneResource(m.ID, "update"), m.RepoID, func(ctx stdCtx.Context) error {
+	if err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.MilestoneResource(m.ID, "update"), m.RepoID, func(ctx stdCtx.Context) error {
 		return issues_model.UpdateMilestone(ctx, m, m.IsClosed)
 	}); err != nil {
 		ctx.ServerError("UpdateMilestone", err)
@@ -254,7 +256,7 @@ func ChangeMilestoneStatus(ctx *context.Context) {
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
 	repoID := ctx.Repo.Repository.ID
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.MilestoneResource(id, "status"), repoID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.MilestoneResource(id, "status"), repoID, func(ctx stdCtx.Context) error {
 		return issues_model.ChangeMilestoneStatusByRepoIDAndID(ctx, repoID, id, toClose)
 	}); err != nil {
 		if issues_model.IsErrMilestoneNotExist(err) {
@@ -274,7 +276,7 @@ func DeleteMilestone(ctx *context.Context) {
 	// observations go stale.
 	repoID := ctx.Repo.Repository.ID
 	milestoneID := ctx.FormInt64("id")
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.MilestoneResource(milestoneID, "delete"), repoID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.MilestoneResource(milestoneID, "delete"), repoID, func(ctx stdCtx.Context) error {
 		return issues_model.DeleteMilestoneByRepoID(ctx, repoID, milestoneID)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {

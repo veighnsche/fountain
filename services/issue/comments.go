@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
@@ -21,7 +23,7 @@ func CreateRefComment(ctx context.Context, doer *user_model.User, repo *repo_mod
 	// One collaboration writer owns the comment creation before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabCommentCreateResource(issue.ID), repo.ID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.CommentCreateResource(issue.ID), repo.ID, func(ctx context.Context) error {
 		return doCreateRefComment(ctx, doer, repo, issue, content, commitSHA)
 	})
 }
@@ -59,7 +61,7 @@ func CreateIssueComment(ctx context.Context, doer *user_model.User, repo *repo_m
 	// One collaboration writer owns the comment creation before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	err = withCollabOwnership(ctx, CollabCommentCreateResource(issue.ID), repo.ID, func(ctx context.Context) error {
+	err = withCollabOwnership(ctx, execcontext.CommentCreateResource(issue.ID), repo.ID, func(ctx context.Context) error {
 		comment, err = doCreateIssueComment(ctx, doer, repo, issue, content, attachments)
 		return err
 	})
@@ -100,7 +102,7 @@ func UpdateComment(ctx context.Context, c *issues_model.Comment, contentVersion 
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale. The comment carries no repository ID, so
 	// the scope names none; the comment and issue anchors reconcile it.
-	return withCollabOwnership(ctx, CollabCommentResource(c.ID, "update"), 0, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.CommentResource(c.ID, "update"), 0, func(ctx context.Context) error {
 		return doUpdateComment(ctx, c, contentVersion, doer, oldContent)
 	})
 }
@@ -153,7 +155,7 @@ func DeleteComment(ctx context.Context, doer *user_model.User, comment *issues_m
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale. The comment carries no repository ID, so
 	// the scope names none; the comment and issue anchors reconcile it.
-	return withCollabOwnership(ctx, CollabCommentResource(comment.ID, "delete"), 0, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.CommentResource(comment.ID, "delete"), 0, func(ctx context.Context) error {
 		return doDeleteComment(ctx, doer, comment)
 	})
 }

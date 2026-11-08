@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models"
 	actions_model "forgejo.org/models/actions"
 	activities_model "forgejo.org/models/activities"
@@ -1711,7 +1713,7 @@ func CompareAndPullRequestPost(ctx *context.Context) {
 		// its effects, advancing the native revision so old
 		// accepted-input observations go stale.
 		doer := ctx.Doer
-		if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.IssueResource(pullIssue.ID, "project"), pullIssue.RepoID, func(ctx stdCtx.Context) error {
+		if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.IssueResource(pullIssue.ID, "project"), pullIssue.RepoID, func(ctx stdCtx.Context) error {
 			return issues_model.IssueAssignOrRemoveProject(ctx, pullIssue, doer, projectID, 0)
 		}); err != nil {
 			if !errors.Is(err, util.ErrPermissionDenied) {

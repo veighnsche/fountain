@@ -7,6 +7,8 @@ import (
 	stdCtx "context"
 	"net/http"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/modules/label"
@@ -57,7 +59,7 @@ func NewLabel(ctx *context.Context) {
 	// observations go stale. Org labels name no repository; the label
 	// row reconciles them.
 	orgID := ctx.Org.Organization.ID
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.LabelResource(orgID, "create"), 0, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.LabelResource(orgID, "create"), 0, func(ctx stdCtx.Context) error {
 		return issues_model.NewLabel(ctx, l)
 	}); err != nil {
 		ctx.ServerError("NewLabel", err)
@@ -89,7 +91,7 @@ func UpdateLabel(ctx *context.Context) {
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale. Org labels name no repository; the label
 	// row reconciles them.
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.LabelResource(l.ID, "update"), 0, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.LabelResource(l.ID, "update"), 0, func(ctx stdCtx.Context) error {
 		return issues_model.UpdateLabel(ctx, l)
 	}); err != nil {
 		ctx.ServerError("UpdateLabel", err)
@@ -106,7 +108,7 @@ func DeleteLabel(ctx *context.Context) {
 	// row reconciles them.
 	orgID := ctx.Org.Organization.ID
 	labelID := ctx.FormInt64("id")
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.LabelResource(labelID, "delete"), 0, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.LabelResource(labelID, "delete"), 0, func(ctx stdCtx.Context) error {
 		return issues_model.DeleteLabelInOrg(ctx, orgID, labelID)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {
@@ -134,7 +136,7 @@ func InitializeLabels(ctx *context.Context) {
 	// observations go stale. Org labels name no repository; the label
 	// rows reconcile them.
 	orgID := ctx.Org.Organization.ID
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.LabelResource(orgID, "create"), 0, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.LabelResource(orgID, "create"), 0, func(ctx stdCtx.Context) error {
 		return repo_module.InitializeLabels(ctx, orgID, form.TemplateName, true)
 	}); err != nil {
 		if label.IsErrTemplateLoad(err) {

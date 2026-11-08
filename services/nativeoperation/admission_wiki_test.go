@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"forgejo.org/services/nativeownership"
+
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	"forgejo.org/models/unittest"
 	execcontext "forgejo.org/modules/nativeoperation"
@@ -19,10 +21,10 @@ func TestTransactionBindsWikiTarget(t *testing.T) {
 		name, family, resource, repository string
 		allowed                            bool
 	}{
-		{"main file", FamilyRefWrite, RefWriteResource(1, RefWriteFile, "refs/heads/master"), "repo1", true},
-		{"wiki file", FamilyRefWrite, RefWriteResource(1, RefWriteFile, "wiki/refs/heads/master"), "repo1.wiki", true},
-		{"main proof on wiki", FamilyRefWrite, RefWriteResource(1, RefWriteFile, "refs/heads/master"), "repo1.wiki", false},
-		{"wiki proof on main", FamilyRefWrite, RefWriteResource(1, RefWriteFile, "wiki/refs/heads/master"), "repo1", false},
+		{"main file", FamilyRefWrite, execcontext.RefWriteResource(1, RefWriteFile, "refs/heads/master"), "repo1", true},
+		{"wiki file", FamilyRefWrite, execcontext.RefWriteResource(1, RefWriteFile, "wiki/refs/heads/master"), "repo1.wiki", true},
+		{"main proof on wiki", FamilyRefWrite, execcontext.RefWriteResource(1, RefWriteFile, "refs/heads/master"), "repo1.wiki", false},
+		{"wiki proof on main", FamilyRefWrite, execcontext.RefWriteResource(1, RefWriteFile, "wiki/refs/heads/master"), "repo1", false},
 		{"wiki SSH receive", FamilyReceiveSSH, "1/wiki", "repo1.wiki", true},
 		{"main SSH proof on wiki", FamilyReceiveSSH, "1/main", "repo1.wiki", false},
 	} {
@@ -31,7 +33,7 @@ func TestTransactionBindsWikiTarget(t *testing.T) {
 			ctx := t.Context()
 			scope, err := encodeScope(Scope{Family: test.family, RepositoryID: 1, Ref: "refs/heads/master"})
 			require.NoError(t, err)
-			_, err = nativeoperation_model.ClaimOrdinary(ctx, ordinaryOwner(test.family, test.resource), scope, execcontext.Verifier("wiki-target-proof"))
+			_, err = nativeoperation_model.ClaimOrdinary(ctx, nativeownership.NewOwner(test.family, test.resource), scope, execcontext.Verifier("wiki-target-proof"))
 			require.NoError(t, err)
 			decision, err := NewService().ClassifyTransaction(ctx, TransactionRequest{
 				OwnerName: "user2", RepoName: test.repository, Phase: PhasePrepared,

@@ -331,7 +331,7 @@ func RenameBranch(ctx context.Context, repo *repo_model.Repository, doer *user_m
 	objectFormat := git.ObjectFormatFromName(repo.ObjectFormatName)
 	err = nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation_service.RefWriteResource(repo.ID, nativeoperation_service.RefWriteRename, from+"->"+to),
+		nativeoperation.RefWriteResource(repo.ID, nativeoperation_service.RefWriteRename, from+"->"+to),
 		nativeoperation_service.Scope{
 			Family:       nativeoperation_service.FamilyRefWrite,
 			RepositoryID: repo.ID,
@@ -525,7 +525,7 @@ func DeleteBranchAfterMerge(ctx context.Context, doer *user_model.User, pr *issu
 	// branch-delete recovery contract stays limited to its own Git effect.
 	if err := nativeoperation_service.Default().WithOrdinaryOwnershipWait(ctx,
 		nativeoperation_service.FamilyCollaboration,
-		nativeoperation_service.CommentCreateResource(pr.Issue.ID),
+		nativeoperation.CommentCreateResource(pr.Issue.ID),
 		nativeoperation_service.Scope{RepositoryID: pr.BaseRepoID}, time.Second,
 		func(ctx context.Context) error {
 			return issues_model.AddDeletePRBranchComment(ctx, doer, pr.BaseRepo, pr.Issue.ID, pr.HeadBranch)
@@ -622,7 +622,7 @@ func SetRepoDefaultBranch(ctx context.Context, repo *repo_model.Repository, gitR
 	// instead of claiming again.
 	if err := nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation_service.RefWriteResource(repo.ID, nativeoperation_service.RefWriteDefaultBranch, newBranchName),
+		nativeoperation.RefWriteResource(repo.ID, nativeoperation_service.RefWriteDefaultBranch, newBranchName),
 		nativeoperation_service.Scope{
 			Family:       nativeoperation_service.FamilyRefWrite,
 			RepositoryID: repo.ID,

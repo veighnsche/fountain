@@ -103,8 +103,8 @@ func (s *Service) ClassifyTransaction(ctx context.Context, req TransactionReques
 		return TransactionDecision{}, err
 	}
 	if ownerKind == nativeoperation_model.OwnerOrdinary {
-		family, resource, ok := splitOrdinaryResource(reservation.Owner)
-		if ok && family == FamilyCollaboration && resource == CollabBatchResource("pr-sweep") && scope.Family == FamilyCollaboration {
+		family, resource, ok := execcontext.SplitOrdinaryResource(reservation.Owner)
+		if ok && family == FamilyCollaboration && resource == execcontext.CollabBatchResource("pr-sweep") && scope.Family == FamilyCollaboration {
 			allowed, err := sweepPermitsPRRefs(ctx, scope, repository.ID, req.Lines)
 			if err != nil {
 				return TransactionDecision{}, err
@@ -185,7 +185,7 @@ func transactionTargetMatches(owner, kind string, scope Scope, wiki bool) bool {
 	if kind != nativeoperation_model.OwnerOrdinary {
 		return !wiki
 	}
-	family, resource, ok := splitOrdinaryResource(owner)
+	family, resource, ok := execcontext.SplitOrdinaryResource(owner)
 	if !ok {
 		return !wiki
 	}
@@ -543,7 +543,7 @@ func (s *Service) ClassifyCompletion(ctx context.Context, repositoryID int64, re
 		}
 	}
 	if hasPushOptions {
-		family, resource, ok := splitOrdinaryResource(reservation.Owner)
+		family, resource, ok := execcontext.SplitOrdinaryResource(reservation.Owner)
 		if reservation.OwnerKind != nativeoperation_model.OwnerOrdinary || !ok ||
 			(family != FamilyReceiveHTTP && family != FamilyReceiveSSH) || scope.Family != family ||
 			resource != strconv.FormatInt(repositoryID, 10)+"/main" {

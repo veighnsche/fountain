@@ -109,7 +109,7 @@ func NormalizeWikiBranch(ctx context.Context, repo *repo_model.Repository, to st
 	objectFormat := git.ObjectFormatFromName(repo.ObjectFormatName)
 	return nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation_service.RefWriteResource(repo.ID, nativeoperation_service.RefWriteRename, "wiki/"+from+"->"+to),
+		nativeoperation.RefWriteResource(repo.ID, nativeoperation_service.RefWriteRename, "wiki/"+from+"->"+to),
 		nativeoperation_service.Scope{
 			Family:       nativeoperation_service.FamilyRefWrite,
 			RepositoryID: repo.ID,
@@ -196,7 +196,7 @@ func updateWikiPage(ctx context.Context, doer *user_model.User, repo *repo_model
 	// again.
 	return nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation_service.RefWriteResource(repo.ID, nativeoperation_service.RefWriteFile, "wiki/"+wikiRef),
+		nativeoperation.RefWriteResource(repo.ID, nativeoperation_service.RefWriteFile, "wiki/"+wikiRef),
 		nativeoperation_service.Scope{
 			Family:       nativeoperation_service.FamilyRefWrite,
 			RepositoryID: repo.ID,
@@ -392,7 +392,7 @@ func DeleteWikiPage(ctx context.Context, doer *user_model.User, repo *repo_model
 	// again.
 	return nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation_service.RefWriteResource(repo.ID, nativeoperation_service.RefWriteFile, "wiki/"+wikiRef),
+		nativeoperation.RefWriteResource(repo.ID, nativeoperation_service.RefWriteFile, "wiki/"+wikiRef),
 		nativeoperation_service.Scope{
 			Family:       nativeoperation_service.FamilyRefWrite,
 			RepositoryID: repo.ID,

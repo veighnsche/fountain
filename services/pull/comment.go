@@ -6,6 +6,8 @@ package pull
 import (
 	"context"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
@@ -66,7 +68,7 @@ func CreatePushPullComment(ctx context.Context, pusher *user_model.User, pr *iss
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale. Push and receive flows normally carry the
 	// enclosing execution; the claim only binds standalone callers.
-	err = withCollabOwnership(ctx, CollabCommentCreateResource(pr.IssueID), pr.BaseRepoID, func(ctx context.Context) error {
+	err = withCollabOwnership(ctx, execcontext.CommentCreateResource(pr.IssueID), pr.BaseRepoID, func(ctx context.Context) error {
 		comment, err = doCreatePushPullComment(ctx, pusher, pr, oldCommitID, newCommitID)
 		return err
 	})

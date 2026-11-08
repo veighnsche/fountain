@@ -31,6 +31,9 @@ func TestCollabOwnershipCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	require.NoError(t, withCollabOwnership(ctx, "issue/1/title", 1, func(ctx context.Context) error {
+		held, err := nativeoperation_model.ReadReservation(ctx)
+		require.NoError(t, err)
+		require.Equal(t, `{"kind":"ordinary","family":"collaboration","repository_id":1}`, held.Scope)
 		cancel()
 		return nil
 	}))

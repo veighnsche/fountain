@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	unit_model "forgejo.org/models/unit"
@@ -21,7 +23,7 @@ func SetAllowEdits(ctx context.Context, doer *user_model.User, pr *issues_model.
 	// One collaboration writer owns the maintainer-edits change before
 	// its effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabPullResource(pr.ID, "edits"), pr.BaseRepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.PullResource(pr.ID, "edits"), pr.BaseRepoID, func(ctx context.Context) error {
 		return doSetAllowEdits(ctx, doer, pr, allow)
 	})
 }

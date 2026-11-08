@@ -1,7 +1,8 @@
 // Copyright 2026 The Forgejo Authors. All rights reserved.
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-package pull
+// Package nativeownership owns the ordinary reservation and its capability lifetime.
+package nativeownership
 
 import (
 	"context"
@@ -10,16 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	execcontext "forgejo.org/modules/nativeoperation"
-	"forgejo.org/modules/setting"
 )
 
-// Keep the leaf implementation of the canonical claim protocol shared by
-// collaboration and ref writers; importing the service would create a cycle.
-func withPullOwnership(ctx context.Context, family, resource, scopeJSON string, fn func(context.Context) error) error {
+// WithOrdinary passes the caller's encoded scope unchanged to the existing
+// reservation. Nested execution reuses its owner; release outlives cancellation.
+func WithOrdinary(ctx context.Context, dir, family, resource, scopeJSON string, fn func(context.Context) error) error {
 	if execcontext.FromContext(ctx) != nil {
 		return fn(ctx)
 	}
@@ -28,18 +27,15 @@ func withPullOwnership(ctx context.Context, family, resource, scopeJSON string, 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if resource == "" {
+	if family == "" || resource == "" {
 		return errors.New("ordinary ownership requires a writer identity")
 	}
 
-	dir := filepath.Join(setting.AppDataPath, "nativeop-exec")
 	path, secret, err := execcontext.WriteCapabilityFile(dir)
 	if err != nil {
 		return err
 	}
-	nonce := make([]byte, 8)
-	_, _ = rand.Read(nonce)
-	owner := "ord:" + family + "/" + resource + "/" + hex.EncodeToString(nonce)
+	owner := NewOwner(family, resource)
 	release := func() {
 		_ = os.Remove(path)
 	}
@@ -66,4 +62,11 @@ func withPullOwnership(ctx context.Context, family, resource, scopeJSON string, 
 	}
 	release()
 	return fnErr
+}
+
+// NewOwner gives independently held ordinary protocols the same owner encoding.
+func NewOwner(family, resource string) string {
+	nonce := make([]byte, 8)
+	_, _ = rand.Read(nonce)
+	return "ord:" + family + "/" + resource + "/" + hex.EncodeToString(nonce)
 }

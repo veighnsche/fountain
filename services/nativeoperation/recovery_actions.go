@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
@@ -28,7 +30,7 @@ const EffectActionsConsistent = "consistent"
 // writer from its scope identities and strictly parsed resource label.
 // Anything unattributable stays fenced.
 func (s *Service) recoverActionsRun(ctx context.Context, assessment *RecoveryAssessment, reservation *nativeoperation_model.Reservation, scope Scope) (RecoveryAssessment, error) {
-	resource, err := ordinaryResource(reservation.Owner, FamilyActionsRun)
+	resource, err := execcontext.OrdinaryResource(reservation.Owner, FamilyActionsRun)
 	if err != nil {
 		return fenced(assessment, ReasonRecoveryUnknownFamily, "actions-run owner names no parseable resource")
 	}

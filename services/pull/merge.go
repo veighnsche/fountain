@@ -261,7 +261,7 @@ func Merge(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.U
 	// advancing the revision so stale observations go stale. Nested
 	// calls reuse the enclosing ownership instead of claiming again.
 	err = withMergeRefWriteOwnership(ctx,
-		refWriteResource(pr.BaseRepoID, refWriteMerge, baseRef),
+		nativeoperation.RefWriteResource(pr.BaseRepoID, refWriteMerge, baseRef),
 		refWriteScope{
 			RepositoryID: pr.BaseRepoID,
 			Ref:          baseRef,
@@ -278,7 +278,7 @@ func Merge(ctx context.Context, pr *issues_model.PullRequest, doer *user_model.U
 	// Metadata and notifications complete under their own collaboration
 	// claim. The ref writer's recovery rules remain specific to Git;
 	// interrupted multi-statement completion stays fenced for intervention.
-	return withCollabOwnershipWait(ctx, CollabPullResource(pr.ID, "refresh"), collabScope{RepositoryID: pr.BaseRepoID}, func(ctx context.Context) error {
+	return withCollabOwnershipWait(ctx, nativeoperation.PullResource(pr.ID, "refresh"), collabScope{RepositoryID: pr.BaseRepoID}, func(ctx context.Context) error {
 		return FinishMerge(ctx, pr, doer, wasAutoMerged)
 	})
 }

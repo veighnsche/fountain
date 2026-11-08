@@ -7,6 +7,8 @@ import (
 	stdCtx "context"
 	"net/http"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/organization"
@@ -46,7 +48,7 @@ func InitializeLabels(ctx *context.Context) {
 	// its effects, advancing the native revision so old accepted-input
 	// observations go stale.
 	repoID := ctx.Repo.Repository.ID
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.LabelResource(repoID, "create"), repoID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.LabelResource(repoID, "create"), repoID, func(ctx stdCtx.Context) error {
 		return repo_module.InitializeLabels(ctx, repoID, form.TemplateName, false)
 	}); err != nil {
 		if label.IsErrTemplateLoad(err) {
@@ -129,7 +131,7 @@ func NewLabel(ctx *context.Context) {
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
 	repoID := ctx.Repo.Repository.ID
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.LabelResource(repoID, "create"), repoID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.LabelResource(repoID, "create"), repoID, func(ctx stdCtx.Context) error {
 		return issues_model.NewLabel(ctx, l)
 	}); err != nil {
 		ctx.ServerError("NewLabel", err)
@@ -160,7 +162,7 @@ func UpdateLabel(ctx *context.Context) {
 	// One collaboration writer owns the label change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.LabelResource(l.ID, "update"), l.RepoID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.LabelResource(l.ID, "update"), l.RepoID, func(ctx stdCtx.Context) error {
 		return issues_model.UpdateLabel(ctx, l)
 	}); err != nil {
 		ctx.ServerError("UpdateLabel", err)
@@ -176,7 +178,7 @@ func DeleteLabel(ctx *context.Context) {
 	// observations go stale.
 	repoID := ctx.Repo.Repository.ID
 	labelID := ctx.FormInt64("id")
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.LabelResource(labelID, "delete"), repoID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.LabelResource(labelID, "delete"), repoID, func(ctx stdCtx.Context) error {
 		return issues_model.DeleteLabelInRepo(ctx, repoID, labelID)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {

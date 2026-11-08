@@ -6,6 +6,8 @@ package repo
 import (
 	stdCtx "context"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/modules/web"
 	"forgejo.org/services/context"
@@ -36,7 +38,7 @@ func LockIssue(ctx *context.Context) {
 	// advancing the native revision so old accepted-input observations
 	// go stale.
 	doer := ctx.Doer
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.IssueResource(issue.ID, "lock"), issue.RepoID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.IssueResource(issue.ID, "lock"), issue.RepoID, func(ctx stdCtx.Context) error {
 		return issues_model.LockIssue(ctx, &issues_model.IssueLockOptions{
 			Doer:   doer,
 			Issue:  issue,
@@ -66,7 +68,7 @@ func UnlockIssue(ctx *context.Context) {
 	// advancing the native revision so old accepted-input observations
 	// go stale.
 	doer := ctx.Doer
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.IssueResource(issue.ID, "lock"), issue.RepoID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.IssueResource(issue.ID, "lock"), issue.RepoID, func(ctx stdCtx.Context) error {
 		return issues_model.UnlockIssue(ctx, &issues_model.IssueLockOptions{
 			Doer:  doer,
 			Issue: issue,

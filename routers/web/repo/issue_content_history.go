@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models/avatars"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/modules/log"
@@ -238,7 +240,7 @@ func SoftDeleteContentHistory(ctx *context.Context) {
 	// One collaboration writer owns the history delete before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.HistoryResource(historyID), ctx.Repo.Repository.ID, func(ctx stdCtx.Context) error {
+	err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.HistoryResource(historyID), ctx.Repo.Repository.ID, func(ctx stdCtx.Context) error {
 		return issues_model.SoftDeleteIssueContentHistory(ctx, historyID)
 	})
 	log.Debug("soft delete issue content history. issue=%d, comment=%d, history=%d", issue.ID, commentID, historyID)

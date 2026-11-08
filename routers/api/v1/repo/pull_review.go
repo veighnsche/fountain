@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
@@ -414,7 +416,7 @@ func DeletePullReview(ctx *context.APIContext) {
 	// One collaboration writer owns the review delete before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.ReviewDeleteResource(review.IssueID, review.ID), ctx.Repo().Repository.ID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.ReviewDeleteResource(review.IssueID, review.ID), ctx.Repo().Repository.ID, func(ctx stdCtx.Context) error {
 		return issues_model.DeleteReview(ctx, review)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {

@@ -91,7 +91,7 @@ func RefineCollabPullScope(ctx context.Context, proof string, refs []ScopedRef) 
 	if !execcontext.VerifyProof(reservation.Verifier, proof) {
 		return
 	}
-	family, resource, ok := splitOrdinaryResource(reservation.Owner)
+	family, resource, ok := execcontext.SplitOrdinaryResource(reservation.Owner)
 	if !ok || family != FamilyCollaboration || !strings.HasPrefix(resource, "pull/new/") {
 		return
 	}

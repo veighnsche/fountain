@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
@@ -18,18 +20,18 @@ import (
 )
 
 func TestSplitOrdinaryResource(t *testing.T) {
-	family, resource, ok := splitOrdinaryResource("ord:ref-write/1/file/refs/heads/main/0123456789abcdef")
+	family, resource, ok := execcontext.SplitOrdinaryResource("ord:ref-write/1/file/refs/heads/main/0123456789abcdef")
 	if !ok || family != "ref-write" || resource != "1/file/refs/heads/main" {
 		t.Fatalf("split = %q %q %t, want ref-write 1/file/refs/heads/main true", family, resource, ok)
 	}
 
-	if _, _, ok := splitOrdinaryResource("cond:installation/operation"); ok {
+	if _, _, ok := execcontext.SplitOrdinaryResource("cond:installation/operation"); ok {
 		t.Fatal("conditional owner must not parse as an ordinary resource")
 	}
-	if _, _, ok := splitOrdinaryResource("ord:familyonly"); ok {
+	if _, _, ok := execcontext.SplitOrdinaryResource("ord:familyonly"); ok {
 		t.Fatal("owner without a resource must not parse")
 	}
-	if _, _, ok := splitOrdinaryResource(""); ok {
+	if _, _, ok := execcontext.SplitOrdinaryResource(""); ok {
 		t.Fatal("empty owner must not parse")
 	}
 }
@@ -39,7 +41,7 @@ func TestSplitOrdinaryResource(t *testing.T) {
 // four for lifecycle operations and protection rules, with slashes
 // permitted only in the trailing segment.
 func TestRepositoryResourceFormats(t *testing.T) {
-	refWrite := RefWriteResource(7, RefWriteFile, "wiki/refs/heads/master")
+	refWrite := execcontext.RefWriteResource(7, RefWriteFile, "wiki/refs/heads/master")
 	parts := strings.SplitN(refWrite, "/", 3)
 	if len(parts) != 3 || parts[0] != "7" || parts[1] != RefWriteFile || parts[2] != "wiki/refs/heads/master" {
 		t.Fatalf("ref-write resource %q splits to %#v", refWrite, parts)

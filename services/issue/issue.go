@@ -11,6 +11,8 @@ import (
 	"slices"
 	"time"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	activities_model "forgejo.org/models/activities"
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
@@ -32,7 +34,7 @@ func NewIssue(ctx context.Context, repo *repo_model.Repository, issue *issues_mo
 	// One collaboration writer owns the issue creation before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabIssueCreateResource(repo.ID), repo.ID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.IssueCreateResource(repo.ID), repo.ID, func(ctx context.Context) error {
 		return doNewIssue(ctx, repo, issue, labelIDs, uuids, assigneeIDs)
 	})
 }
@@ -74,7 +76,7 @@ func ChangeTitle(ctx context.Context, issue *issues_model.Issue, doer *user_mode
 	// One collaboration writer owns the title change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabIssueResource(issue.ID, "title"), issue.RepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "title"), issue.RepoID, func(ctx context.Context) error {
 		return doChangeTitle(ctx, issue, doer, title)
 	})
 }
@@ -132,7 +134,7 @@ func ChangeIssueRef(ctx context.Context, issue *issues_model.Issue, doer *user_m
 	// One collaboration writer owns the ref change before its effects,
 	// advancing the native revision so old accepted-input observations
 	// go stale.
-	return withCollabOwnership(ctx, CollabIssueResource(issue.ID, "ref"), issue.RepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "ref"), issue.RepoID, func(ctx context.Context) error {
 		return doChangeIssueRef(ctx, issue, doer, ref)
 	})
 }
@@ -160,7 +162,7 @@ func UpdateAssignees(ctx context.Context, issue *issues_model.Issue, oneAssignee
 	// One collaboration writer owns the assignee change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabIssueResource(issue.ID, "assignee"), issue.RepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "assignee"), issue.RepoID, func(ctx context.Context) error {
 		return doUpdateAssignees(ctx, issue, oneAssignee, multipleAssignees, doer)
 	})
 }
@@ -216,7 +218,7 @@ func DeleteIssue(ctx context.Context, doer *user_model.User, gitRepo *git.Reposi
 	// One collaboration writer owns the issue delete before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabIssueResource(issue.ID, "delete"), issue.RepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "delete"), issue.RepoID, func(ctx context.Context) error {
 		return doDeleteIssue(ctx, doer, gitRepo, issue)
 	})
 }
@@ -260,7 +262,7 @@ func AddAssigneeIfNotAssigned(ctx context.Context, issue *issues_model.Issue, do
 	// One collaboration writer owns the assignee change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	err = withCollabOwnership(ctx, CollabIssueResource(issue.ID, "assignee"), issue.RepoID, func(ctx context.Context) error {
+	err = withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "assignee"), issue.RepoID, func(ctx context.Context) error {
 		comment, err = doAddAssigneeIfNotAssigned(ctx, issue, doer, assigneeID, notify)
 		return err
 	})

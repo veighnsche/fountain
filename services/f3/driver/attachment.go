@@ -12,6 +12,8 @@ import (
 	"io"
 	"os"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
@@ -180,7 +182,7 @@ func (o *attachment) Delete(ctx context.Context) {
 	// The mirror delete claims the same per-row owner the interactive
 	// paths use, so a crash mid-delete reconciles offline; inside an
 	// enclosing owner the claim reuses that execution.
-	err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.AttachmentResource(o.forgejoAttachment.ID, nativeoperation_service.CollabAttachmentDelete), o.forgejoAttachment.RepoID, func(ctx context.Context) error {
+	err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.AttachmentResource(o.forgejoAttachment.ID, execcontext.CollabAttachmentDelete), o.forgejoAttachment.RepoID, func(ctx context.Context) error {
 		return repo_model.DeleteAttachment(ctx, o.forgejoAttachment, true)
 	})
 	if err != nil {

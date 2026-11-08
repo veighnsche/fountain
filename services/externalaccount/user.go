@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models/auth"
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
@@ -93,7 +95,7 @@ func UpdateMigrationsByType(ctx context.Context, tp structs.GitServiceType, exte
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale. The remap spans issue, comment, reaction,
 	// review and release rows, so offline recovery fences it.
-	return nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.CollabBatchResource("external-remap"), 0, func(ctx context.Context) error {
+	return nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.CollabBatchResource("external-remap"), 0, func(ctx context.Context) error {
 		return doUpdateMigrationsByType(ctx, tp, externalUserID, userID)
 	})
 }

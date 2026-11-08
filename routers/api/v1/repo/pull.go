@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models"
 	activities_model "forgejo.org/models/activities"
 	"forgejo.org/models/db"
@@ -681,7 +683,7 @@ func EditPullRequest(ctx *context.APIContext) {
 		// effects, advancing the native revision so old accepted-input
 		// observations go stale.
 		doer := ctx.Doer()
-		if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.IssueResource(issue.ID, "deadline"), issue.RepoID, func(ctx stdCtx.Context) error {
+		if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.IssueResource(issue.ID, "deadline"), issue.RepoID, func(ctx stdCtx.Context) error {
 			return issues_model.UpdateIssueDeadline(ctx, issue, deadlineUnix, doer)
 		}); err != nil {
 			if nativeoperation_service.IsBusy(err) {
@@ -745,7 +747,7 @@ func EditPullRequest(ctx *context.APIContext) {
 		// effects, advancing the native revision so old accepted-input
 		// observations go stale.
 		doer := ctx.Doer()
-		if err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.IssueResource(issue.ID, "labels"), issue.RepoID, func(ctx stdCtx.Context) error {
+		if err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.IssueResource(issue.ID, "labels"), issue.RepoID, func(ctx stdCtx.Context) error {
 			return issues_model.ReplaceIssueLabels(ctx, issue, labels, doer)
 		}); err != nil {
 			if nativeoperation_service.IsBusy(err) {

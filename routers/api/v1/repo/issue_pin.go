@@ -7,6 +7,8 @@ import (
 	stdCtx "context"
 	"net/http"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/services/context"
@@ -66,7 +68,7 @@ func PinIssue(ctx *context.APIContext) {
 	// advancing the native revision so old accepted-input observations
 	// go stale.
 	doer := ctx.Doer()
-	err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.IssueResource(issue.ID, "pin"), issue.RepoID, func(ctx stdCtx.Context) error {
+	err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.IssueResource(issue.ID, "pin"), issue.RepoID, func(ctx stdCtx.Context) error {
 		return issue.Pin(ctx, doer)
 	})
 	if err != nil {
@@ -131,7 +133,7 @@ func UnpinIssue(ctx *context.APIContext) {
 	// advancing the native revision so old accepted-input observations
 	// go stale.
 	doer := ctx.Doer()
-	err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.IssueResource(issue.ID, "pin"), issue.RepoID, func(ctx stdCtx.Context) error {
+	err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.IssueResource(issue.ID, "pin"), issue.RepoID, func(ctx stdCtx.Context) error {
 		return issue.Unpin(ctx, doer)
 	})
 	if err != nil {
@@ -195,7 +197,7 @@ func MoveIssuePin(ctx *context.APIContext) {
 	// advancing the native revision so old accepted-input observations
 	// go stale.
 	position := int(ctx.ParamsInt64(":position"))
-	err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.IssueResource(issue.ID, "pin"), issue.RepoID, func(ctx stdCtx.Context) error {
+	err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.IssueResource(issue.ID, "pin"), issue.RepoID, func(ctx stdCtx.Context) error {
 		return issue.MovePin(ctx, position)
 	})
 	if err != nil {

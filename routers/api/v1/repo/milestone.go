@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/modules/optional"
@@ -179,7 +181,7 @@ func CreateMilestone(ctx *context.APIContext) {
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
 	repoID := ctx.Repo().Repository.ID
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.MilestoneResource(repoID, "create"), repoID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.MilestoneResource(repoID, "create"), repoID, func(ctx stdCtx.Context) error {
 		return issues_model.NewMilestone(ctx, milestone)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {
@@ -251,7 +253,7 @@ func EditMilestone(ctx *context.APIContext) {
 	// One collaboration writer owns the milestone change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.MilestoneResource(milestone.ID, "update"), milestone.RepoID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.MilestoneResource(milestone.ID, "update"), milestone.RepoID, func(ctx stdCtx.Context) error {
 		return issues_model.UpdateMilestone(ctx, milestone, oldIsClosed)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {
@@ -301,7 +303,7 @@ func DeleteMilestone(ctx *context.APIContext) {
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
 	repoID := ctx.Repo().Repository.ID
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.MilestoneResource(m.ID, "delete"), repoID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.MilestoneResource(m.ID, "delete"), repoID, func(ctx stdCtx.Context) error {
 		return issues_model.DeleteMilestoneByRepoID(ctx, repoID, m.ID)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {

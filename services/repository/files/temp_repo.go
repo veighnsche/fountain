@@ -311,7 +311,7 @@ func (t *TemporaryUploadRepository) PushOwned(ctx context.Context, doer *user_mo
 
 	return nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation_service.RefWriteResource(t.repo.ID, nativeoperation_service.RefWriteFile, git.BranchPrefix+branch),
+		nativeoperation.RefWriteResource(t.repo.ID, nativeoperation_service.RefWriteFile, git.BranchPrefix+branch),
 		nativeoperation_service.Scope{
 			Family:       nativeoperation_service.FamilyRefWrite,
 			RepositoryID: t.repo.ID,

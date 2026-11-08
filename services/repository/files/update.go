@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models"
 	git_model "forgejo.org/models/git"
 	repo_model "forgejo.org/models/repo"
@@ -272,7 +274,7 @@ func ChangeRepoFiles(ctx context.Context, repo *repo_model.Repository, doer *use
 	// instead of claiming again.
 	err = nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation_service.RefWriteResource(repo.ID, nativeoperation_service.RefWriteFile, git.BranchPrefix+opts.NewBranch),
+		execcontext.RefWriteResource(repo.ID, nativeoperation_service.RefWriteFile, git.BranchPrefix+opts.NewBranch),
 		nativeoperation_service.Scope{
 			Family:       nativeoperation_service.FamilyRefWrite,
 			RepositoryID: repo.ID,

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/log"
@@ -295,7 +297,7 @@ func EditIssueCommentAttachment(ctx *context.APIContext) {
 	}
 
 	// One attachment update owns the row edit before its effects.
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.AttachmentResource(attach.ID, nativeoperation_service.CollabAttachmentUpdate), ctx.Repo().Repository.ID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.AttachmentResource(attach.ID, execcontext.CollabAttachmentUpdate), ctx.Repo().Repository.ID, func(ctx stdCtx.Context) error {
 		return repo_model.UpdateAttachment(ctx, attach)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {
@@ -352,7 +354,7 @@ func DeleteIssueCommentAttachment(ctx *context.APIContext) {
 
 	// One attachment delete owns the row and file removal before its
 	// effects.
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.AttachmentResource(attach.ID, nativeoperation_service.CollabAttachmentDelete), ctx.Repo().Repository.ID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.AttachmentResource(attach.ID, execcontext.CollabAttachmentDelete), ctx.Repo().Repository.ID, func(ctx stdCtx.Context) error {
 		return repo_model.DeleteAttachment(ctx, attach, true)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {

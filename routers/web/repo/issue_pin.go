@@ -7,6 +7,8 @@ import (
 	stdCtx "context"
 	"net/http"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
@@ -33,7 +35,7 @@ func IssuePinOrUnpin(ctx *context.Context) {
 	// advancing the native revision so old accepted-input observations
 	// go stale.
 	doer := ctx.Doer
-	err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.IssueResource(issue.ID, "pin"), issue.RepoID, func(ctx stdCtx.Context) error {
+	err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.IssueResource(issue.ID, "pin"), issue.RepoID, func(ctx stdCtx.Context) error {
 		return issue.PinOrUnpin(ctx, doer)
 	})
 	if err != nil {
@@ -70,7 +72,7 @@ func IssueUnpin(ctx *context.Context) {
 	// advancing the native revision so old accepted-input observations
 	// go stale.
 	doer := ctx.Doer
-	err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.IssueResource(issue.ID, "pin"), issue.RepoID, func(ctx stdCtx.Context) error {
+	err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.IssueResource(issue.ID, "pin"), issue.RepoID, func(ctx stdCtx.Context) error {
 		return issue.Unpin(ctx, doer)
 	})
 	if err != nil {
@@ -121,7 +123,7 @@ func IssuePinMove(ctx *context.Context) {
 	// One collaboration writer owns the pin change before its effects,
 	// advancing the native revision so old accepted-input observations
 	// go stale.
-	err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.IssueResource(issue.ID, "pin"), issue.RepoID, func(ctx stdCtx.Context) error {
+	err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.IssueResource(issue.ID, "pin"), issue.RepoID, func(ctx stdCtx.Context) error {
 		return issue.MovePin(ctx, form.Position)
 	})
 	if err != nil {

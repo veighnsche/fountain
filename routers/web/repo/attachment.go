@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models/auth"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
@@ -86,7 +88,7 @@ func DeleteAttachment(ctx *context.Context) {
 	}
 	// One attachment delete owns the row and file removal before its
 	// effects.
-	err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.AttachmentResource(attach.ID, nativeoperation_service.CollabAttachmentDelete), attach.RepoID, func(ctx stdCtx.Context) error {
+	err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.AttachmentResource(attach.ID, execcontext.CollabAttachmentDelete), attach.RepoID, func(ctx stdCtx.Context) error {
 		return repo_model.DeleteAttachment(ctx, attach, true)
 	})
 	if err != nil {

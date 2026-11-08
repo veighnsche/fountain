@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	user_model "forgejo.org/models/user"
@@ -92,7 +94,7 @@ func ChangeMilestoneAssign(ctx context.Context, issue *issues_model.Issue, doer 
 	// One collaboration writer owns the milestone change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabIssueResource(issue.ID, "milestone"), issue.RepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "milestone"), issue.RepoID, func(ctx context.Context) error {
 		return doChangeMilestoneAssign(ctx, issue, doer, oldMilestoneID)
 	})
 }

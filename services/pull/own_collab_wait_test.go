@@ -5,8 +5,11 @@ package pull
 
 import (
 	"context"
-	"encoding/json" //nolint:depguard // Verify the persisted enclosing ownership scope.
+	"encoding/json"
 	"testing"
+
+	//nolint:depguard // Verify the persisted enclosing ownership scope.
+	execcontext "forgejo.org/modules/nativeoperation"
 
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	"forgejo.org/models/unittest"
@@ -17,7 +20,7 @@ import (
 func TestCollabOwnershipWaitDoesNotRepeatEffects(t *testing.T) {
 	unittest.PrepareTestEnv(t)
 	calls := 0
-	err := withCollabOwnershipWait(t.Context(), CollabBatchResource("pr-sweep"), collabScope{RepositoryID: 1}, func(context.Context) error {
+	err := withCollabOwnershipWait(t.Context(), execcontext.CollabBatchResource("pr-sweep"), collabScope{RepositoryID: 1}, func(context.Context) error {
 		calls++
 		return nativeoperation_model.ErrBusy
 	})
@@ -30,7 +33,7 @@ func TestCollabOwnershipWaitDoesNotRepeatEffects(t *testing.T) {
 
 func TestNestedRefResultPreservesSweepBranch(t *testing.T) {
 	unittest.PrepareTestEnv(t)
-	err := withCollabOwnershipScope(t.Context(), CollabBatchResource("pr-sweep"), collabScope{RepositoryID: 1, HeadRef: "refs/heads/branch2"}, func(ctx context.Context) error {
+	err := withCollabOwnershipScope(t.Context(), execcontext.CollabBatchResource("pr-sweep"), collabScope{RepositoryID: 1, HeadRef: "refs/heads/branch2"}, func(ctx context.Context) error {
 		require.NoError(t, recordRefWriteResult(ctx, "new-tip"))
 		held, err := nativeoperation_model.ReadReservation(ctx)
 		require.NoError(t, err)

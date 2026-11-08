@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models"
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
@@ -53,7 +55,7 @@ func MergedManually(ctx context.Context, pr *issues_model.PullRequest, doer *use
 	// One collaboration writer owns the manual merge mark before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabPullResource(pr.ID, "manual"), pr.BaseRepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.PullResource(pr.ID, "manual"), pr.BaseRepoID, func(ctx context.Context) error {
 		return doMergedManually(ctx, pr, doer, baseGitRepo, commitID)
 	})
 }

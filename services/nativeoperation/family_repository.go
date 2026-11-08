@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"forgejo.org/services/nativeownership"
+
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	execcontext "forgejo.org/modules/nativeoperation"
 )
@@ -93,12 +95,6 @@ const (
 	LifecycleConvertMirror   = "convert-mirror"
 	LifecycleDeleteUnadopted = "delete-unadopted"
 )
-
-// RefWriteResource builds the owner resource string for one direct ref
-// write: repository, kind and affected ref.
-func RefWriteResource(repoID int64, kind, ref string) string {
-	return fmt.Sprintf("%d/%s/%s", repoID, kind, ref)
-}
 
 // LifecycleResource builds the owner resource string for one repository
 // lifecycle operation: repository (0 when the row does not exist yet),
@@ -200,7 +196,7 @@ func (s *Service) ClaimSSHReceive(ctx context.Context, repoID, pusherID int64, v
 	if wiki {
 		target = "wiki"
 	}
-	owner = ordinaryOwner(FamilyReceiveSSH, fmt.Sprintf("%d/%s", repoID, target))
+	owner = nativeownership.NewOwner(FamilyReceiveSSH, fmt.Sprintf("%d/%s", repoID, target))
 	deadline := time.Now().Add(ReceiveClaimTimeout)
 	backoff := 100 * time.Millisecond
 	for {

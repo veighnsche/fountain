@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
@@ -164,7 +166,7 @@ func CreateRelease(ctx context.Context, gitRepo *git.Repository, rel *repo_model
 	// effects, advancing the revision so stale observations go stale.
 	err = nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation_service.RefWriteResource(rel.RepoID, nativeoperation_service.RefWriteTag, rel.TagName),
+		execcontext.RefWriteResource(rel.RepoID, nativeoperation_service.RefWriteTag, rel.TagName),
 		nativeoperation_service.Scope{
 			Family:       nativeoperation_service.FamilyRefWrite,
 			RepositoryID: rel.RepoID,
@@ -266,7 +268,7 @@ func CreateNewTag(ctx context.Context, doer *user_model.User, repo *repo_model.R
 	// effects, advancing the revision so stale observations go stale.
 	return nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation_service.RefWriteResource(repo.ID, nativeoperation_service.RefWriteTag, tagName),
+		execcontext.RefWriteResource(repo.ID, nativeoperation_service.RefWriteTag, tagName),
 		nativeoperation_service.Scope{
 			Family:       nativeoperation_service.FamilyRefWrite,
 			RepositoryID: repo.ID,
@@ -315,7 +317,7 @@ func UpdateRelease(ctx context.Context, doer *user_model.User, gitRepo *git.Repo
 	var delAttachmentUUIDs container.Set[string]
 	err := nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation_service.RefWriteResource(rel.RepoID, nativeoperation_service.RefWriteTag, rel.TagName),
+		execcontext.RefWriteResource(rel.RepoID, nativeoperation_service.RefWriteTag, rel.TagName),
 		nativeoperation_service.Scope{
 			Family:       nativeoperation_service.FamilyRefWrite,
 			RepositoryID: rel.RepoID,
@@ -476,7 +478,7 @@ func DeleteReleaseByID(ctx context.Context, repo *repo_model.Repository, rel *re
 	}
 	err := nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation_service.RefWriteResource(repo.ID, nativeoperation_service.RefWriteTag, rel.TagName),
+		execcontext.RefWriteResource(repo.ID, nativeoperation_service.RefWriteTag, rel.TagName),
 		nativeoperation_service.Scope{
 			Family:       nativeoperation_service.FamilyRefWrite,
 			RepositoryID: repo.ID,

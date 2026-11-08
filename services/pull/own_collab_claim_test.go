@@ -23,9 +23,12 @@ func TestCollabOwnershipPrimitive(t *testing.T) {
 	ctx := t.Context()
 
 	ran := false
-	require.NoError(t, withCollabOwnership(ctx, CollabPullResource(3, "refresh"), 1, func(ctx context.Context) error {
+	require.NoError(t, withCollabOwnership(ctx, execcontext.PullResource(3, "refresh"), 1, func(ctx context.Context) error {
 		ran = true
 		require.NotNil(t, execcontext.FromContext(ctx))
+		held, err := nativeoperation_model.ReadReservation(ctx)
+		require.NoError(t, err)
+		require.Equal(t, `{"kind":"ordinary","family":"collaboration","repository_id":1}`, held.Scope)
 		return nil
 	}))
 	require.True(t, ran)
@@ -35,14 +38,14 @@ func TestCollabOwnershipPrimitive(t *testing.T) {
 	defer func() { _ = nativeoperation_model.ReleaseOwner(ctx, claimed.Owner) }()
 
 	ran = false
-	require.ErrorIs(t, withCollabOwnership(ctx, CollabPullResource(3, "refresh"), 1, func(ctx context.Context) error {
+	require.ErrorIs(t, withCollabOwnership(ctx, execcontext.PullResource(3, "refresh"), 1, func(ctx context.Context) error {
 		ran = true
 		return nil
 	}), nativeoperation_model.ErrBusy)
 	require.False(t, ran)
 
 	nested := execcontext.NewContext(ctx, &execcontext.Execution{Owner: claimed.Owner})
-	require.NoError(t, withCollabOwnership(nested, CollabPullResource(3, "refresh"), 1, func(ctx context.Context) error {
+	require.NoError(t, withCollabOwnership(nested, execcontext.PullResource(3, "refresh"), 1, func(ctx context.Context) error {
 		return nil
 	}))
 }
@@ -56,7 +59,7 @@ func TestCollabOwnershipCanceledContext(t *testing.T) {
 	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
 	ran := false
-	require.ErrorIs(t, withCollabOwnership(canceled, CollabPullResource(3, "refresh"), 1, func(ctx context.Context) error {
+	require.ErrorIs(t, withCollabOwnership(canceled, execcontext.PullResource(3, "refresh"), 1, func(ctx context.Context) error {
 		ran = true
 		return nil
 	}), context.Canceled)
@@ -64,7 +67,7 @@ func TestCollabOwnershipCanceledContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	require.NoError(t, withCollabOwnership(ctx, CollabPullResource(3, "refresh"), 1, func(ctx context.Context) error {
+	require.NoError(t, withCollabOwnership(ctx, execcontext.PullResource(3, "refresh"), 1, func(ctx context.Context) error {
 		cancel()
 		return nil
 	}))

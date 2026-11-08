@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
@@ -295,7 +297,7 @@ func testPR(id int64) error {
 	// stays outside the claim.
 	var pr *issues_model.PullRequest
 	updated := false
-	if err := withCollabOwnershipWait(ctx, CollabPullResource(id, "refresh"), collabScope{}, func(ctx context.Context) error {
+	if err := withCollabOwnershipWait(ctx, execcontext.PullResource(id, "refresh"), collabScope{}, func(ctx context.Context) error {
 		pr, updated = testPRProtected(ctx, id)
 		return nil
 	}); err != nil {

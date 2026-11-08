@@ -31,6 +31,9 @@ func TestOrdinaryOwnershipSerializesAndReleases(t *testing.T) {
 		exec := execcontext.FromContext(ctx)
 		require.NotNil(t, exec)
 		require.NotEmpty(t, exec.CapabilityPath)
+		reservation, err := nativeoperation_model.ReadReservation(ctx)
+		require.NoError(t, err)
+		require.Equal(t, `{"kind":"ordinary","repository_id":1,"ref":"refs/heads/topic","family":"branch"}`, reservation.Scope)
 		held, err := svc.ReadNativeRevision(ctx)
 		require.NoError(t, err)
 		require.False(t, held.Idle)
@@ -47,6 +50,23 @@ func TestOrdinaryOwnershipSerializesAndReleases(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, idle.Idle)
 	require.Equal(t, start.Revision+1, idle.Revision)
+
+	// A real conditional owner lends its execution without another claim or
+	// replacing its broader scope with the ordinary caller's projection.
+	token := writerToken(t)
+	owner, _ := claimMergeOwner(t, ctx, token, "ordinary-nesting", Scope{Kind: nativeoperation_model.OwnerConditional, RepositoryID: 1, Ref: "refs/heads/main"}, 1000)
+	held, err := nativeoperation_model.ReadReservation(ctx)
+	require.NoError(t, err)
+	execution := &execcontext.Execution{Owner: owner, Generation: held.Generation}
+	nested := execcontext.NewContext(ctx, execution)
+	require.NoError(t, svc.WithOrdinaryOwnership(nested, "", "", Scope{}, func(owned context.Context) error {
+		require.Same(t, execution, execcontext.FromContext(owned))
+		return nil
+	}))
+	after, err := nativeoperation_model.ReadReservation(ctx)
+	require.NoError(t, err)
+	require.Equal(t, held, after)
+	require.NoError(t, nativeoperation_model.ReleaseOwner(ctx, owner))
 }
 
 func TestOrdinaryOwnershipRefusesWhenBusy(t *testing.T) {
@@ -75,6 +95,31 @@ func TestOrdinaryOwnershipRefusesWhenBusy(t *testing.T) {
 	idle, err := svc.ReadNativeRevision(ctx)
 	require.NoError(t, err)
 	require.True(t, idle.Idle)
+	// Simulate ownership loss at release. The shared primitive must remove
+	// its own capability, surface failure and leave the replacement fence held.
+	for _, fnErr := range []error{nil, boom} {
+		var path string
+		err := svc.WithOrdinaryOwnership(ctx, "branch", "1/topic", Scope{RepositoryID: 1}, func(owned context.Context) error {
+			execution := execcontext.FromContext(owned)
+			path = execution.CapabilityPath
+			require.FileExists(t, path)
+			require.NoError(t, nativeoperation_model.ReleaseOwner(ctx, execution.Owner))
+			_, err := nativeoperation_model.ClaimOrdinary(ctx, "ord:test/replacement", "{}", "replacement-proof")
+			require.NoError(t, err)
+			return fnErr
+		})
+		require.ErrorContains(t, err, "failed to release")
+		if fnErr != nil {
+			require.ErrorIs(t, err, fnErr)
+		} else {
+			require.ErrorIs(t, err, nativeoperation_model.ErrWrongOwner)
+		}
+		require.NoFileExists(t, path)
+		held, err := nativeoperation_model.ReadReservation(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "ord:test/replacement", held.Owner)
+		require.NoError(t, nativeoperation_model.ReleaseOwner(ctx, held.Owner))
+	}
 }
 
 func TestOrdinaryOwnershipRefusesCanceledContext(t *testing.T) {
@@ -149,7 +194,7 @@ func TestOrdinaryOwnershipWaitDoesNotRepeatEffects(t *testing.T) {
 	unittest.PrepareTestEnv(t)
 	service := admissionService(t, nil, 0)
 	calls := 0
-	err := service.WithOrdinaryOwnershipWait(t.Context(), FamilyCollaboration, CollabBatchResource("pr-sweep"), Scope{RepositoryID: 1}, time.Second, func(context.Context) error {
+	err := service.WithOrdinaryOwnershipWait(t.Context(), FamilyCollaboration, execcontext.CollabBatchResource("pr-sweep"), Scope{RepositoryID: 1}, time.Second, func(context.Context) error {
 		calls++
 		return nativeoperation_model.ErrBusy
 	})

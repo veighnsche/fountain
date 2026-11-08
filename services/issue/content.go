@@ -6,6 +6,8 @@ package issue
 import (
 	"context"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	user_model "forgejo.org/models/user"
 	notify_service "forgejo.org/services/notify"
@@ -16,7 +18,7 @@ func ChangeContent(ctx context.Context, issue *issues_model.Issue, doer *user_mo
 	// One collaboration writer owns the content change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabIssueResource(issue.ID, "content"), issue.RepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "content"), issue.RepoID, func(ctx context.Context) error {
 		return doChangeContent(ctx, issue, doer, content, contentVersion)
 	})
 }

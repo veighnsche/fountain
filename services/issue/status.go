@@ -6,6 +6,8 @@ package issue
 import (
 	"context"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
@@ -17,7 +19,7 @@ func ChangeStatus(ctx context.Context, issue *issues_model.Issue, doer *user_mod
 	// One collaboration writer owns the status change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabIssueResource(issue.ID, "status"), issue.RepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "status"), issue.RepoID, func(ctx context.Context) error {
 		return doChangeStatus(ctx, issue, doer, commitID, closed)
 	})
 }

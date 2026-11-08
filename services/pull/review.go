@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
@@ -58,7 +60,7 @@ func InvalidateCodeComments(ctx context.Context, prs issues_model.PullRequestLis
 	// One collaboration writer owns the invalidation sweep before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabBatchResource("pr-sweep"), repo.ID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.CollabBatchResource("pr-sweep"), repo.ID, func(ctx context.Context) error {
 		return doInvalidateCodeComments(ctx, prs, doer, repo, newCommitID)
 	})
 }
@@ -95,7 +97,7 @@ func CreateCodeComment(ctx context.Context, doer *user_model.User, gitRepo *git.
 	// One collaboration writer owns the code comment creation before
 	// its effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	err = withCollabOwnership(ctx, CollabCommentCreateResource(issue.ID), issue.RepoID, func(ctx context.Context) error {
+	err = withCollabOwnership(ctx, execcontext.CommentCreateResource(issue.ID), issue.RepoID, func(ctx context.Context) error {
 		comment, err = doCreateCodeComment(ctx, doer, gitRepo, issue, line, content, treePath, pendingReview, replyReviewID, beforeCommitID, latestCommitID, attachments)
 		return err
 	})
@@ -209,7 +211,7 @@ func CreateCodeCommentKnownReviewID(ctx context.Context, doer *user_model.User, 
 	// One collaboration writer owns the code comment creation before
 	// its effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	err = withCollabOwnership(ctx, CollabCommentCreateResource(issue.ID), repo.ID, func(ctx context.Context) error {
+	err = withCollabOwnership(ctx, execcontext.CommentCreateResource(issue.ID), repo.ID, func(ctx context.Context) error {
 		comment, err = doCreateCodeCommentKnownReviewID(ctx, doer, repo, issue, content, treePath, beforeCommitID, afterCommitID, line, reviewID, attachments)
 		return err
 	})
@@ -394,7 +396,7 @@ func SubmitReview(ctx context.Context, doer *user_model.User, gitRepo *git.Repos
 	// One collaboration writer owns the review submission before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	err = withCollabOwnership(ctx, CollabReviewSubmitResource(issue.ID), issue.RepoID, func(ctx context.Context) error {
+	err = withCollabOwnership(ctx, execcontext.ReviewSubmitResource(issue.ID), issue.RepoID, func(ctx context.Context) error {
 		review, comment, err = doSubmitReview(ctx, doer, gitRepo, issue, reviewType, content, commitID, attachmentUUIDs)
 		return err
 	})
@@ -485,7 +487,7 @@ func DismissApprovalReviews(ctx context.Context, doer *user_model.User, pull *is
 	// accepted-input observations go stale. Validation sweeps normally
 	// carry the enclosing execution; the claim only binds standalone
 	// callers.
-	return withCollabOwnership(ctx, CollabBatchResource("pr-sweep"), pull.BaseRepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.CollabBatchResource("pr-sweep"), pull.BaseRepoID, func(ctx context.Context) error {
 		return doDismissApprovalReviews(ctx, doer, pull)
 	})
 }
@@ -538,7 +540,7 @@ func DismissReview(ctx context.Context, reviewID, repoID int64, message string, 
 	// One collaboration writer owns the review dismissal before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	err = withCollabOwnership(ctx, CollabReviewResource(reviewID, "dismiss"), repoID, func(ctx context.Context) error {
+	err = withCollabOwnership(ctx, execcontext.ReviewResource(reviewID, "dismiss"), repoID, func(ctx context.Context) error {
 		comment, err = doDismissReview(ctx, reviewID, repoID, message, doer, isDismiss, dismissPriors)
 		return err
 	})

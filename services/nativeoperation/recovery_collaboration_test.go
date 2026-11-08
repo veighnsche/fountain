@@ -6,6 +6,8 @@ package nativeoperation
 import (
 	"testing"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	"forgejo.org/models/unittest"
 
@@ -39,67 +41,67 @@ func collabScope(repoID int64) Scope {
 }
 
 func TestRecoverCollabIssueUpdateConsistent(t *testing.T) {
-	assessment := recoverCollab(t, IssueResource(1, "title"), collabScope(1))
+	assessment := recoverCollab(t, execcontext.IssueResource(1, "title"), collabScope(1))
 	require.Equal(t, RecoveryReleased, assessment.Verdict)
 	require.Equal(t, EffectCollaborationConsistent, assessment.Effect)
 }
 
 func TestRecoverCollabDependencyConsistent(t *testing.T) {
-	assessment := recoverCollab(t, DependencyResource(1, 2), collabScope(1))
+	assessment := recoverCollab(t, execcontext.DependencyResource(1, 2), collabScope(1))
 	require.Equal(t, RecoveryReleased, assessment.Verdict)
 	require.Equal(t, EffectCollaborationConsistent, assessment.Effect)
 }
 
 func TestRecoverCollabReviewSubmitConsistent(t *testing.T) {
-	assessment := recoverCollab(t, ReviewSubmitResource(1), collabScope(1))
+	assessment := recoverCollab(t, execcontext.ReviewSubmitResource(1), collabScope(1))
 	require.Equal(t, RecoveryReleased, assessment.Verdict)
 	require.Equal(t, EffectCollaborationConsistent, assessment.Effect)
 }
 
 func TestRecoverCollabReactionConsistent(t *testing.T) {
-	assessment := recoverCollab(t, ReactionResource(1, 0, 2), collabScope(1))
+	assessment := recoverCollab(t, execcontext.ReactionResource(1, 0, 2), collabScope(1))
 	require.Equal(t, RecoveryReleased, assessment.Verdict)
 	require.Equal(t, EffectCollaborationConsistent, assessment.Effect)
 }
 
 func TestRecoverCollabCommentConversationConsistent(t *testing.T) {
-	assessment := recoverCollab(t, CommentResource(1, "conversation"), collabScope(1))
+	assessment := recoverCollab(t, execcontext.CommentResource(1, "conversation"), collabScope(1))
 	require.Equal(t, RecoveryReleased, assessment.Verdict)
 	require.Equal(t, EffectCollaborationConsistent, assessment.Effect)
 }
 
 func TestRecoverCollabReviewDeleteConsistent(t *testing.T) {
-	assessment := recoverCollab(t, ReviewDeleteResource(1, 2), collabScope(1))
+	assessment := recoverCollab(t, execcontext.ReviewDeleteResource(1, 2), collabScope(1))
 	require.Equal(t, RecoveryReleased, assessment.Verdict)
 	require.Equal(t, EffectCollaborationConsistent, assessment.Effect)
 }
 
 func TestRecoverCollabCommentUpdateFences(t *testing.T) {
-	assessment := recoverCollab(t, CommentResource(1, "update"), collabScope(1))
+	assessment := recoverCollab(t, execcontext.CommentResource(1, "update"), collabScope(1))
 	require.Equal(t, RecoveryFenced, assessment.Verdict)
 	require.Equal(t, ReasonRecoveryUnaccounted, assessment.Reason)
 }
 
 func TestRecoverCollabCreateFences(t *testing.T) {
-	assessment := recoverCollab(t, IssueCreateResource(1), collabScope(1))
+	assessment := recoverCollab(t, execcontext.IssueCreateResource(1), collabScope(1))
 	require.Equal(t, RecoveryFenced, assessment.Verdict)
 	require.Equal(t, ReasonRecoveryUnaccounted, assessment.Reason)
 }
 
 func TestRecoverCollabStatusFences(t *testing.T) {
-	assessment := recoverCollab(t, IssueResource(1, "status"), collabScope(1))
+	assessment := recoverCollab(t, execcontext.IssueResource(1, "status"), collabScope(1))
 	require.Equal(t, RecoveryFenced, assessment.Verdict)
 	require.Equal(t, ReasonRecoveryUnaccounted, assessment.Reason)
 }
 
 func TestRecoverCollabBatchFences(t *testing.T) {
-	assessment := recoverCollab(t, CollabBatchResource("orphan-fix"), collabScope(1))
+	assessment := recoverCollab(t, execcontext.CollabBatchResource("orphan-fix"), collabScope(1))
 	require.Equal(t, RecoveryFenced, assessment.Verdict)
 	require.Equal(t, ReasonRecoveryUnaccounted, assessment.Reason)
 }
 
 func TestRecoverCollabMissingAnchorFences(t *testing.T) {
-	assessment := recoverCollab(t, IssueResource(9999, "title"), collabScope(1))
+	assessment := recoverCollab(t, execcontext.IssueResource(9999, "title"), collabScope(1))
 	require.Equal(t, RecoveryFenced, assessment.Verdict)
 	require.Equal(t, ReasonRecoveryUnaccounted, assessment.Reason)
 }
@@ -111,25 +113,25 @@ func TestRecoverCollabUnparseableFences(t *testing.T) {
 }
 
 func TestRecoverCollabAttachmentDeleteAbsent(t *testing.T) {
-	assessment := recoverCollab(t, AttachmentResource(9999, CollabAttachmentDelete), collabScope(1))
+	assessment := recoverCollab(t, execcontext.AttachmentResource(9999, execcontext.CollabAttachmentDelete), collabScope(1))
 	require.Equal(t, RecoveryReleased, assessment.Verdict)
 	require.Equal(t, "deleted", assessment.Effect)
 }
 
 func TestRecoverCollabAttachmentDeletePresent(t *testing.T) {
-	assessment := recoverCollab(t, AttachmentResource(1, CollabAttachmentDelete), collabScope(1))
+	assessment := recoverCollab(t, execcontext.AttachmentResource(1, execcontext.CollabAttachmentDelete), collabScope(1))
 	require.Equal(t, RecoveryReleased, assessment.Verdict)
 	require.Equal(t, nativeoperation_model.EffectNotCommitted, assessment.Effect)
 }
 
 func TestRecoverCollabAttachmentCreateFences(t *testing.T) {
-	assessment := recoverCollab(t, AttachmentCreateResource(1), collabScope(1))
+	assessment := recoverCollab(t, execcontext.AttachmentCreateResource(1), collabScope(1))
 	require.Equal(t, RecoveryFenced, assessment.Verdict)
 	require.Equal(t, ReasonRecoveryUncertainEffect, assessment.Reason)
 }
 
 func TestRecoverCollabAttachmentUpdateFences(t *testing.T) {
-	assessment := recoverCollab(t, AttachmentResource(1, CollabAttachmentUpdate), collabScope(1))
+	assessment := recoverCollab(t, execcontext.AttachmentResource(1, execcontext.CollabAttachmentUpdate), collabScope(1))
 	require.Equal(t, RecoveryFenced, assessment.Verdict)
 	require.Equal(t, ReasonRecoveryUncertainEffect, assessment.Reason)
 }

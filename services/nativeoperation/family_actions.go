@@ -235,29 +235,3 @@ func validStatusSHA(sha string) bool {
 	}
 	return true
 }
-
-// ordinaryResource extracts the resource label from one ordinary owner of
-// the given family. Ordinary owners have the form
-// "ord:<family>/<resource>/<16-hex-nonce>"; the resource itself may
-// contain slashes, so the nonce is the last segment. A format drift
-// fences rather than guessing.
-func ordinaryResource(owner, family string) (string, error) {
-	rest, ok := strings.CutPrefix(owner, "ord:"+family+"/")
-	if !ok {
-		return "", fmt.Errorf("owner %q is not an %s owner", owner, family)
-	}
-	idx := strings.LastIndex(rest, "/")
-	if idx <= 0 {
-		return "", fmt.Errorf("owner %q names no parseable resource", owner)
-	}
-	nonce := rest[idx+1:]
-	if len(nonce) != 16 {
-		return "", fmt.Errorf("owner %q names no parseable resource", owner)
-	}
-	for _, c := range nonce {
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return "", fmt.Errorf("owner %q names no parseable resource", owner)
-		}
-	}
-	return rest[:idx], nil
-}

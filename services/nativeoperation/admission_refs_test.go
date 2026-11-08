@@ -196,7 +196,7 @@ func TestPRSweepBindsDerivedHeadRefs(t *testing.T) {
 			unittest.PrepareTestEnv(t)
 			resource := test.resource
 			if resource == "" {
-				resource = CollabBatchResource("pr-sweep")
+				resource = execcontext.CollabBatchResource("pr-sweep")
 			}
 			proof := test.proof
 			if proof == "" {

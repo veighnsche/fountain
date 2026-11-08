@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
@@ -54,7 +56,7 @@ func doUpdate(ctx context.Context, pr *issues_model.PullRequest, doer *user_mode
 	// advancing the revision so stale observations go stale. Nested
 	// calls reuse the enclosing ownership instead of claiming again.
 	err = withRefWriteOwnership(ctx,
-		refWriteResource(pr.HeadRepoID, refWritePRUpdate, headRef),
+		execcontext.RefWriteResource(pr.HeadRepoID, refWritePRUpdate, headRef),
 		refWriteScope{
 			RepositoryID: pr.HeadRepoID,
 			Ref:          headRef,

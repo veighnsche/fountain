@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
@@ -66,7 +68,7 @@ func runPullRequestTask(task *pullRequestTask) error {
 	if err != nil {
 		return err
 	}
-	return withCollabOwnershipWait(ctx, CollabBatchResource("pr-sweep"), collabScope{RepositoryID: task.RepositoryID, HeadRef: git.BranchPrefix + task.Branch}, func(ctx context.Context) error {
+	return withCollabOwnershipWait(ctx, execcontext.CollabBatchResource("pr-sweep"), collabScope{RepositoryID: task.RepositoryID, HeadRef: git.BranchPrefix + task.Branch}, func(ctx context.Context) error {
 		return testPullRequest(ctx, doer, task.RepositoryID, task.TimeNano, task.Branch, task.Sync, task.OldCommit, task.NewCommit)
 	})
 }

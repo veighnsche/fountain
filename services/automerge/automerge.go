@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
@@ -62,7 +64,7 @@ func ScheduleAutoMerge(ctx context.Context, doer *user_model.User, pull *issues_
 	// One collaboration writer owns the automerge schedule before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.PullResource(pull.ID, "automerge"), pull.BaseRepoID, func(ctx context.Context) error {
+	err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.PullResource(pull.ID, "automerge"), pull.BaseRepoID, func(ctx context.Context) error {
 		scheduled, err = doScheduleAutoMerge(ctx, doer, pull, style, message, deleteBranch)
 		return err
 	})
@@ -87,7 +89,7 @@ func RemoveScheduledAutoMerge(ctx context.Context, doer *user_model.User, pull *
 	// One collaboration writer owns the automerge unschedule before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.PullResource(pull.ID, "automerge"), pull.BaseRepoID, func(ctx context.Context) error {
+	return nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.PullResource(pull.ID, "automerge"), pull.BaseRepoID, func(ctx context.Context) error {
 		return doRemoveScheduledAutoMerge(ctx, doer, pull, repoPerms)
 	})
 }

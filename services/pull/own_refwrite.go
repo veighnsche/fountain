@@ -8,19 +8,14 @@ import (
 	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	execcontext "forgejo.org/modules/nativeoperation"
+	"forgejo.org/modules/setting"
+	"forgejo.org/services/nativeownership"
 )
-
-// This file carries the pull package's ordinary-ownership primitive. The
-// pull package cannot import services/nativeoperation (that package drives
-// pull.Merge for conditional execution), so the claim protocol is mirrored
-// here from leaf packages only. services/nativeoperation/guard.go is the
-// canonical implementation (shared locally through own_ordinary.go): owner strings, scope JSON and the
-// claim-before-effects order below must stay wire-compatible with it, and
-// the compatibility test pins the shared format.
 
 // refWriteScope mirrors the service Scope JSON fields the pull ref writers
 // record. Unknown fields in either direction are ignored by encoding/json,
@@ -62,12 +57,6 @@ const (
 	refWritePRUpdate = "pr-update"
 )
 
-// refWriteResource builds the owner resource string for one direct ref
-// write: repository, kind and affected ref.
-func refWriteResource(repoID int64, kind, ref string) string {
-	return fmt.Sprintf("%d/%s/%s", repoID, kind, ref)
-}
-
 // withRefWriteOwnership claims the idle reservation for one pull ref
 // writer, advancing the revision before its effects, and releases it after
 // the writer returns. A busy reservation refuses before any effect. Nested
@@ -81,7 +70,7 @@ func withRefWriteOwnership(ctx context.Context, resource string, scope refWriteS
 	if err != nil {
 		return err
 	}
-	return withPullOwnership(ctx, familyRefWrite, resource, string(encoded), fn)
+	return nativeownership.WithOrdinary(ctx, filepath.Join(setting.AppDataPath, "nativeop-exec"), familyRefWrite, resource, string(encoded), fn)
 }
 
 // recordRefWriteResult records the realized new OID of the calling ref

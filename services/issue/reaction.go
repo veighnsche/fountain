@@ -5,6 +5,8 @@ package issue
 import (
 	"context"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	user_model "forgejo.org/models/user"
 )
@@ -14,7 +16,7 @@ func CreateIssueReaction(ctx context.Context, doer *user_model.User, issue *issu
 	// One collaboration writer owns the reaction change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	err = withCollabOwnership(ctx, CollabReactionResource(issue.ID, 0, doer.ID), issue.RepoID, func(ctx context.Context) error {
+	err = withCollabOwnership(ctx, execcontext.ReactionResource(issue.ID, 0, doer.ID), issue.RepoID, func(ctx context.Context) error {
 		reaction, err = doCreateIssueReaction(ctx, doer, issue, content)
 		return err
 	})
@@ -43,7 +45,7 @@ func CreateCommentReaction(ctx context.Context, doer *user_model.User, issue *is
 	// One collaboration writer owns the reaction change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	err = withCollabOwnership(ctx, CollabReactionResource(issue.ID, comment.ID, doer.ID), issue.RepoID, func(ctx context.Context) error {
+	err = withCollabOwnership(ctx, execcontext.ReactionResource(issue.ID, comment.ID, doer.ID), issue.RepoID, func(ctx context.Context) error {
 		reaction, err = doCreateCommentReaction(ctx, doer, issue, comment, content)
 		return err
 	})

@@ -8,6 +8,8 @@ import (
 	"errors"
 	"net/http"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	user_model "forgejo.org/models/user"
 	api "forgejo.org/modules/structs"
@@ -203,7 +205,7 @@ func changeIssueCommentReaction(ctx *context.APIContext, form api.EditReactionOp
 		// effects, advancing the native revision so old accepted-input
 		// observations go stale.
 		doerID := ctx.Doer().ID
-		err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.ReactionResource(comment.Issue.ID, comment.ID, doerID), comment.Issue.RepoID, func(ctx stdCtx.Context) error {
+		err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.ReactionResource(comment.Issue.ID, comment.ID, doerID), comment.Issue.RepoID, func(ctx stdCtx.Context) error {
 			return issues_model.DeleteCommentReaction(ctx, doerID, comment.Issue.ID, comment.ID, form.Reaction)
 		})
 		if err != nil {
@@ -429,7 +431,7 @@ func changeIssueReaction(ctx *context.APIContext, form api.EditReactionOption, i
 		// effects, advancing the native revision so old accepted-input
 		// observations go stale.
 		doerID := ctx.Doer().ID
-		err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.ReactionResource(issue.ID, 0, doerID), issue.RepoID, func(ctx stdCtx.Context) error {
+		err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.ReactionResource(issue.ID, 0, doerID), issue.RepoID, func(ctx stdCtx.Context) error {
 			return issues_model.DeleteIssueReaction(ctx, doerID, issue.ID, form.Reaction)
 		})
 		if err != nil {

@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	sdk "forgejo.org/extension-sdk"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	"forgejo.org/modules/git"
@@ -402,7 +404,7 @@ func (s *Service) Status(ctx context.Context) (ReservationStatus, error) {
 		Kind:       reservation.OwnerKind,
 		Generation: reservation.Generation,
 	}
-	if family, _, ok := splitOrdinaryResource(reservation.Owner); ok {
+	if family, _, ok := execcontext.SplitOrdinaryResource(reservation.Owner); ok {
 		status.Family = family
 	}
 	status.Inhibited = nativeoperation_model.OfflineInhibited()

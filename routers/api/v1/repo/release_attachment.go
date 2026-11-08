@@ -12,6 +12,8 @@ import (
 	"path"
 	"strings"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	repo_model "forgejo.org/models/repo"
 	unit_model "forgejo.org/models/unit"
 	"forgejo.org/modules/log"
@@ -396,7 +398,7 @@ func EditReleaseAttachment(ctx *context.APIContext) {
 	}
 
 	// One attachment update owns the row edit before its effects.
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.AttachmentResource(attach.ID, nativeoperation_service.CollabAttachmentUpdate), ctx.Repo().Repository.ID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.AttachmentResource(attach.ID, execcontext.CollabAttachmentUpdate), ctx.Repo().Repository.ID, func(ctx stdCtx.Context) error {
 		return repo_model.UpdateAttachment(ctx, attach)
 	}); err != nil {
 		if repo_model.IsErrInvalidExternalURL(err) {
@@ -472,7 +474,7 @@ func DeleteReleaseAttachment(ctx *context.APIContext) {
 
 	// One attachment delete owns the row and file removal before its
 	// effects.
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.AttachmentResource(attach.ID, nativeoperation_service.CollabAttachmentDelete), ctx.Repo().Repository.ID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.AttachmentResource(attach.ID, execcontext.CollabAttachmentDelete), ctx.Repo().Repository.ID, func(ctx stdCtx.Context) error {
 		return repo_model.DeleteAttachment(ctx, attach, true)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {

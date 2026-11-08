@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"testing"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	"forgejo.org/models/unittest"
 
@@ -78,7 +80,7 @@ func TestRefWriteScopeWireContract(t *testing.T) {
 		t.Fatalf("mirror scope JSON = %v, want %v", decoded, want)
 	}
 
-	if got := refWriteResource(7, refWriteMerge, "refs/heads/main"); got != "7/merge/refs/heads/main" {
+	if got := execcontext.RefWriteResource(7, refWriteMerge, "refs/heads/main"); got != "7/merge/refs/heads/main" {
 		t.Fatalf("mirror resource = %q, want %q", got, "7/merge/refs/heads/main")
 	}
 }

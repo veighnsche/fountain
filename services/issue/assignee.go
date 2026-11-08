@@ -6,6 +6,8 @@ package issue
 import (
 	"context"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
@@ -22,7 +24,7 @@ func DeleteNotPassedAssignee(ctx context.Context, issue *issues_model.Issue, doe
 	// One collaboration writer owns the assignee change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	return withCollabOwnership(ctx, CollabIssueResource(issue.ID, "assignee"), issue.RepoID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "assignee"), issue.RepoID, func(ctx context.Context) error {
 		return doDeleteNotPassedAssignee(ctx, issue, doer, assignees)
 	})
 }
@@ -57,7 +59,7 @@ func ToggleAssigneeWithNotify(ctx context.Context, issue *issues_model.Issue, do
 	// One collaboration writer owns the assignee change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	err = withCollabOwnership(ctx, CollabIssueResource(issue.ID, "assignee"), issue.RepoID, func(ctx context.Context) error {
+	err = withCollabOwnership(ctx, execcontext.IssueResource(issue.ID, "assignee"), issue.RepoID, func(ctx context.Context) error {
 		removed, comment, err = doToggleAssigneeWithNotify(ctx, issue, doer, assigneeID)
 		return err
 	})
@@ -85,7 +87,7 @@ func ReviewRequest(ctx context.Context, issue *issues_model.Issue, doer, reviewe
 	// One collaboration writer owns the review-request change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	err = withCollabOwnership(ctx, CollabReviewRequestResource(issue.ID, reviewer.ID), issue.RepoID, func(ctx context.Context) error {
+	err = withCollabOwnership(ctx, execcontext.ReviewRequestResource(issue.ID, reviewer.ID), issue.RepoID, func(ctx context.Context) error {
 		comment, err = doReviewRequest(ctx, issue, doer, reviewer, isAdd)
 		return err
 	})
@@ -234,7 +236,7 @@ func TeamReviewRequest(ctx context.Context, issue *issues_model.Issue, doer *use
 	// One collaboration writer owns the review-request change before its
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
-	err = withCollabOwnership(ctx, CollabReviewTeamRequestResource(issue.ID, reviewer.ID), issue.RepoID, func(ctx context.Context) error {
+	err = withCollabOwnership(ctx, execcontext.ReviewTeamRequestResource(issue.ID, reviewer.ID), issue.RepoID, func(ctx context.Context) error {
 		comment, err = doTeamReviewRequest(ctx, issue, doer, reviewer, isAdd)
 		return err
 	})

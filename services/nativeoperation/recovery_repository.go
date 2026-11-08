@@ -9,30 +9,13 @@ import (
 	"os"
 	"strings"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	git_model "forgejo.org/models/git"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/git"
 )
-
-// splitOrdinaryResource splits an ordinary owner into its family and
-// resource label. Owners read "ord:family/resource/nonce"; the resource
-// may itself contain slashes, so only the first and last segments split.
-func splitOrdinaryResource(owner string) (family, resource string, ok bool) {
-	rest, found := strings.CutPrefix(owner, "ord:")
-	if !found {
-		return "", "", false
-	}
-	family, middle, found := strings.Cut(rest, "/")
-	if !found || family == "" {
-		return "", "", false
-	}
-	slash := strings.LastIndex(middle, "/")
-	if slash < 0 {
-		return "", "", false
-	}
-	return family, middle[:slash], true
-}
 
 // recoveryRepo loads the repository named by a held scope. A missing row
 // reports gone; any other failure is an error.
@@ -73,7 +56,7 @@ func (s *Service) recoverReceive(ctx context.Context, assessment *RecoveryAssess
 	if len(scope.Refs) == 0 {
 		return fenced(assessment, ReasonRecoveryUncertainEffect, "receive scope records no proposed ref tuples")
 	}
-	_, resource, ok := splitOrdinaryResource(reservation.Owner)
+	_, resource, ok := execcontext.SplitOrdinaryResource(reservation.Owner)
 	if !ok {
 		return fenced(assessment, ReasonRecoveryUnknownFamily, "receive owner names no resource")
 	}
@@ -137,7 +120,7 @@ func (s *Service) recoverRefWrite(ctx context.Context, assessment *RecoveryAsses
 	if scope.RepositoryID <= 0 {
 		return fenced(assessment, ReasonRecoveryUnknownFamily, "ref-write scope names no repository")
 	}
-	_, resource, ok := splitOrdinaryResource(reservation.Owner)
+	_, resource, ok := execcontext.SplitOrdinaryResource(reservation.Owner)
 	if !ok {
 		return fenced(assessment, ReasonRecoveryUnknownFamily, "ref-write owner names no resource")
 	}
@@ -235,7 +218,7 @@ func (s *Service) recoverDefaultBranch(ctx context.Context, assessment *Recovery
 // conversions compare the row against the recorded pre-operation
 // identity. Any partial state fences.
 func (s *Service) recoverRepoLifecycle(ctx context.Context, assessment *RecoveryAssessment, reservation *nativeoperation_model.Reservation, scope Scope) (RecoveryAssessment, error) {
-	_, resource, ok := splitOrdinaryResource(reservation.Owner)
+	_, resource, ok := execcontext.SplitOrdinaryResource(reservation.Owner)
 	if !ok {
 		return fenced(assessment, ReasonRecoveryUnknownFamily, "lifecycle owner names no resource")
 	}
@@ -342,7 +325,7 @@ func (s *Service) recoverLifecycleConvert(ctx context.Context, assessment *Recov
 //
 //nolint:unparam // Keep the common operation helper and callback signature.
 func (s *Service) recoverRepoSettings(ctx context.Context, assessment *RecoveryAssessment, reservation *nativeoperation_model.Reservation, scope Scope) (RecoveryAssessment, error) {
-	_, resource, ok := splitOrdinaryResource(reservation.Owner)
+	_, resource, ok := execcontext.SplitOrdinaryResource(reservation.Owner)
 	if !ok {
 		return fenced(assessment, ReasonRecoveryUnknownFamily, "settings owner names no resource")
 	}
@@ -363,7 +346,7 @@ func (s *Service) recoverProtection(ctx context.Context, assessment *RecoveryAss
 	if scope.RepositoryID <= 0 {
 		return fenced(assessment, ReasonRecoveryUnknownFamily, "protection scope names no repository")
 	}
-	_, resource, ok := splitOrdinaryResource(reservation.Owner)
+	_, resource, ok := execcontext.SplitOrdinaryResource(reservation.Owner)
 	if !ok {
 		return fenced(assessment, ReasonRecoveryUnknownFamily, "protection owner names no resource")
 	}
@@ -478,7 +461,7 @@ func (s *Service) recoverMirrorSync(ctx context.Context, assessment *RecoveryAss
 // deleted-branches purge is one atomic delete over an unknowable set, so
 // any observed state is a valid end state and releases.
 func (s *Service) recoverRefSync(ctx context.Context, assessment *RecoveryAssessment, reservation *nativeoperation_model.Reservation, scope Scope) (RecoveryAssessment, error) {
-	if _, resource, ok := splitOrdinaryResource(reservation.Owner); ok && resource == "0/deleted-branches" {
+	if _, resource, ok := execcontext.SplitOrdinaryResource(reservation.Owner); ok && resource == "0/deleted-branches" {
 		assessment.Checks = append(assessment.Checks, "ref-sync purge is one atomic delete; any observed state is valid")
 		return s.releaseRecovered(ctx, assessment, reservation, "consistent")
 	}
@@ -535,7 +518,7 @@ var maintenanceBatchOps = map[string]bool{
 // collection, the empty-flag repair and the atomic repair batches
 // release the same way with rerun notes.
 func (s *Service) recoverMaintenance(ctx context.Context, assessment *RecoveryAssessment, reservation *nativeoperation_model.Reservation, scope Scope) (RecoveryAssessment, error) {
-	_, resource, ok := splitOrdinaryResource(reservation.Owner)
+	_, resource, ok := execcontext.SplitOrdinaryResource(reservation.Owner)
 	if !ok {
 		return fenced(assessment, ReasonRecoveryUnknownFamily, "maintenance owner names no resource")
 	}

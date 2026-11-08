@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/perm"
@@ -417,7 +419,7 @@ func UpdateIssueProject(ctx *context.Context) {
 		// its effects, advancing the native revision so old accepted-input
 		// observations go stale.
 		doer := ctx.Doer
-		if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.IssueResource(issue.ID, "project"), issue.RepoID, func(ctx stdCtx.Context) error {
+		if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.IssueResource(issue.ID, "project"), issue.RepoID, func(ctx stdCtx.Context) error {
 			return issues_model.IssueAssignOrRemoveProject(ctx, issue, doer, projectID, 0)
 		}); err != nil {
 			if errors.Is(err, util.ErrPermissionDenied) {

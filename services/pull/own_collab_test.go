@@ -4,21 +4,15 @@
 package pull_test
 
 import (
-	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
+	"encoding/json"
 	"testing"
-
-	nativeoperation_service "forgejo.org/services/nativeoperation"
-	pull_service "forgejo.org/services/pull"
+	//nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
+	execcontext "forgejo.org/modules/nativeoperation"
 
 	"github.com/stretchr/testify/require"
 )
 
-// TestCollabOwnershipWireContract pins the pull-local collaboration
-// mirror to the native-operation wire shape: the same scope JSON field
-// names the service scope decodes, and resource labels identical to the
-// canonical builders, so offline recovery reads pull claims exactly
-// like service claims. The mirror exists only to break the pull to
-// native-operation import cycle; any drift here is a recovery bug.
+// TestCollabOwnershipWireContract pins the retained ordinary scope and resource bytes.
 func TestCollabOwnershipWireContract(t *testing.T) {
 	raw, err := json.Marshal(struct {
 		Kind         string `json:"kind"`
@@ -30,11 +24,11 @@ func TestCollabOwnershipWireContract(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &decoded))
 	require.Equal(t, map[string]any{"kind": "ordinary", "family": "collaboration", "repository_id": float64(7)}, decoded)
 
-	require.Equal(t, nativeoperation_service.PullResource(3, "retarget"), pull_service.CollabPullResource(3, "retarget"))
-	require.Equal(t, nativeoperation_service.PullCreateResource(7), pull_service.CollabPullCreateResource(7))
-	require.Equal(t, nativeoperation_service.ReviewResource(5, "dismiss"), pull_service.CollabReviewResource(5, "dismiss"))
-	require.Equal(t, nativeoperation_service.ReviewSubmitResource(7), pull_service.CollabReviewSubmitResource(7))
-	require.Equal(t, nativeoperation_service.CommentCreateResource(7), pull_service.CollabCommentCreateResource(7))
-	require.Equal(t, nativeoperation_service.IssueResource(7, "title"), pull_service.CollabIssueResource(7, "title"))
-	require.Equal(t, nativeoperation_service.CollabBatchResource("pr-sweep"), pull_service.CollabBatchResource("pr-sweep"))
+	require.Equal(t, "pull/3/retarget", execcontext.PullResource(3, "retarget"))
+	require.Equal(t, "pull/new/7", execcontext.PullCreateResource(7))
+	require.Equal(t, "review/5/dismiss", execcontext.ReviewResource(5, "dismiss"))
+	require.Equal(t, "review/new/7", execcontext.ReviewSubmitResource(7))
+	require.Equal(t, "comment/new/7", execcontext.CommentCreateResource(7))
+	require.Equal(t, "issue/7/title", execcontext.IssueResource(7, "title"))
+	require.Equal(t, "batch/pr-sweep", execcontext.CollabBatchResource("pr-sweep"))
 }

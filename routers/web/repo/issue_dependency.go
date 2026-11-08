@@ -7,6 +7,8 @@ import (
 	stdCtx "context"
 	"net/http"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	"forgejo.org/modules/setting"
@@ -79,7 +81,7 @@ func AddDependency(ctx *context.Context) {
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
 	doer := ctx.Doer
-	err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.DependencyResource(issue.ID, dep.ID), issue.RepoID, func(ctx stdCtx.Context) error {
+	err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.DependencyResource(issue.ID, dep.ID), issue.RepoID, func(ctx stdCtx.Context) error {
 		return issues_model.CreateIssueDependency(ctx, doer, issue, dep)
 	})
 	if err != nil {
@@ -152,7 +154,7 @@ func RemoveDependency(ctx *context.Context) {
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale.
 	doer := ctx.Doer
-	if err = nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.DependencyResource(issue.ID, dep.ID), issue.RepoID, func(ctx stdCtx.Context) error {
+	if err = nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.DependencyResource(issue.ID, dep.ID), issue.RepoID, func(ctx stdCtx.Context) error {
 		return issues_model.RemoveIssueDependency(ctx, doer, issue, dep, depType)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {

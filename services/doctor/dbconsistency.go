@@ -6,6 +6,8 @@ package doctor
 import (
 	"context"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	actions_model "forgejo.org/models/actions"
 	activities_model "forgejo.org/models/activities"
 	auth_model "forgejo.org/models/auth"
@@ -71,7 +73,7 @@ func asFixer(fn func(ctx context.Context) error) func(ctx context.Context) (int6
 func collabFixer(fn func(ctx context.Context) (int64, error)) func(ctx context.Context) (int64, error) {
 	return func(ctx context.Context) (int64, error) {
 		var fixed int64
-		err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.CollabBatchResource("orphan-fix"), 0, func(ctx context.Context) error {
+		err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.CollabBatchResource("orphan-fix"), 0, func(ctx context.Context) error {
 			var err error
 			fixed, err = fn(ctx)
 			return err

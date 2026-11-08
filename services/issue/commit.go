@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
@@ -107,7 +109,7 @@ func UpdateIssuesCommit(ctx context.Context, doer *user_model.User, repo *repo_m
 	// its effects, advancing the native revision so old accepted-input
 	// observations go stale. Push completion normally carries the
 	// enclosing execution; the claim only binds standalone callers.
-	return withCollabOwnership(ctx, CollabBatchResource("push-commit"), repo.ID, func(ctx context.Context) error {
+	return withCollabOwnership(ctx, execcontext.CollabBatchResource("push-commit"), repo.ID, func(ctx context.Context) error {
 		return doUpdateIssuesCommit(ctx, doer, repo, commits, branchName)
 	})
 }

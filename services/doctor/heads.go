@@ -6,6 +6,8 @@ package doctor
 import (
 	"context"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/log"
@@ -50,7 +52,7 @@ func synchronizeRepoHeads(ctx context.Context, logger log.Logger, autofix bool) 
 		// ref-write ownership so no writer interleaves the repair.
 		err := nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 			nativeoperation_service.FamilyRefWrite,
-			nativeoperation_service.RefWriteResource(repo.ID, nativeoperation_service.RefWriteDefaultBranch, git.BranchPrefix+repo.DefaultBranch),
+			execcontext.RefWriteResource(repo.ID, nativeoperation_service.RefWriteDefaultBranch, git.BranchPrefix+repo.DefaultBranch),
 			nativeoperation_service.Scope{
 				Family:       nativeoperation_service.FamilyRefWrite,
 				RepositoryID: repo.ID,

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	execcontext "forgejo.org/modules/nativeoperation"
+
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/modules/label"
 	api "forgejo.org/modules/structs"
@@ -114,7 +116,7 @@ func CreateLabel(ctx *context.APIContext) {
 	// observations go stale. Org labels name no repository; the label
 	// row reconciles them.
 	orgID := ctx.Org().Organization.ID
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.LabelResource(orgID, "create"), 0, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.LabelResource(orgID, "create"), 0, func(ctx stdCtx.Context) error {
 		return issues_model.NewLabel(ctx, label)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {
@@ -240,7 +242,7 @@ func EditLabel(ctx *context.APIContext) {
 	// effects, advancing the native revision so old accepted-input
 	// observations go stale. Org labels name no repository; the label
 	// row reconciles them.
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.LabelResource(l.ID, "update"), 0, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.LabelResource(l.ID, "update"), 0, func(ctx stdCtx.Context) error {
 		return issues_model.UpdateLabel(ctx, l)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {
@@ -283,7 +285,7 @@ func DeleteLabel(ctx *context.APIContext) {
 	// row reconciles them.
 	orgID := ctx.Org().Organization.ID
 	labelID := ctx.ParamsInt64(":id")
-	if err := nativeoperation_service.WithCollaborationOwnership(ctx, nativeoperation_service.LabelResource(labelID, "delete"), 0, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithCollaborationOwnership(ctx, execcontext.LabelResource(labelID, "delete"), 0, func(ctx stdCtx.Context) error {
 		return issues_model.DeleteLabelInOrg(ctx, orgID, labelID)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {
