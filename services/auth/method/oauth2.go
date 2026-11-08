@@ -73,30 +73,38 @@ func grantAdditionalScopes(grantScopes string) string {
 // CheckOAuthAccessToken returns uid of user from oauth token
 // + non default openid scopes requested
 func CheckOAuthAccessToken(ctx context.Context, accessToken string) (int64, string) {
-	if !setting.OAuth2.Enabled {
+	grant, scope := checkedOAuthAccessToken(ctx, accessToken)
+	if grant == nil {
 		return 0, ""
+	}
+	return grant.UserID, scope
+}
+
+func checkedOAuthAccessToken(ctx context.Context, accessToken string) (*auth_model.OAuth2Grant, string) {
+	if !setting.OAuth2.Enabled {
+		return nil, ""
 	}
 	// JWT tokens require a "."
 	if !strings.Contains(accessToken, ".") {
-		return 0, ""
+		return nil, ""
 	}
 	token, err := oauth2.ParseToken(accessToken, oauth2.DefaultSigningKey)
 	if err != nil {
 		log.Trace("oauth2.ParseToken: %v", err)
-		return 0, ""
+		return nil, ""
 	}
 	var grant *auth_model.OAuth2Grant
 	if grant, err = auth_model.GetOAuth2GrantByID(ctx, token.GrantID); err != nil || grant == nil {
-		return 0, ""
+		return nil, ""
 	}
 	if token.Type != oauth2.TypeAccessToken {
-		return 0, ""
+		return nil, ""
 	}
 	if token.ExpiresAt.Before(time.Now()) || token.IssuedAt.After(time.Now()) {
-		return 0, ""
+		return nil, ""
 	}
 	grantScopes := grantAdditionalScopes(grant.Scope)
-	return grant.UserID, grantScopes
+	return grant, grantScopes
 }
 
 // CheckTaskIsRunning verifies that the TaskID corresponds to a running task
@@ -160,7 +168,11 @@ func (o *OAuth2) userIDFromToken(ctx context.Context, tokenSHA string) auth.Meth
 		}
 
 		// Otherwise, check if this is an OAuth access token
-		uid, grantScopes := CheckOAuthAccessToken(ctx, tokenSHA)
+		grant, grantScopes := checkedOAuthAccessToken(ctx, tokenSHA)
+		var uid, grantID int64
+		if grant != nil {
+			uid, grantID = grant.UserID, grant.ID
+		}
 		var accessTokenScope optional.Option[auth_model.AccessTokenScope]
 		if uid != 0 {
 			if grantScopes != "" {
@@ -176,7 +188,7 @@ func (o *OAuth2) userIDFromToken(ctx context.Context, tokenSHA string) auth.Meth
 			}
 			return &auth.AuthenticationError{Error: fmt.Errorf("oauth2 GetPossibleUserByID: %w", err)}
 		}
-		return &auth.AuthenticationSuccess{Result: &oAuth2JWTAuthenticationResult{user: user, scope: accessTokenScope}}
+		return &auth.AuthenticationSuccess{Result: &oAuth2JWTAuthenticationResult{user: user, scope: accessTokenScope, grantID: grantID}}
 	}
 
 	t, err := auth_model.GetAccessTokenBySHA(ctx, tokenSHA)
