@@ -56,16 +56,24 @@ func TestSodaExtensionLiveBridge(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, os.RemoveAll(root)) })
 	socket := filepath.Join(root, "s")
+	factoryBinary := os.Getenv("SODA_C03_FACTORY")
+	factorySocket := filepath.Join(root, "f")
 
 	packageDir := filepath.Join(root, "p", "soda")
 	require.NoError(t, os.MkdirAll(filepath.Join(packageDir, "assets"), 0o700))
 	backendLog := filepath.Join(root, "backend.log")
-	run := "#!/bin/sh\nexec " + shellQuoteC03(backend) + " --package-id soda --soda-socket " + shellQuoteC03(socket) + " 2>" + shellQuoteC03(backendLog) + "\n"
+	run := "#!/bin/sh\nexec " + shellQuoteC03(backend) + " --package-id soda --soda-socket " + shellQuoteC03(socket) + " --factory-socket " + shellQuoteC03(factorySocket) + " 2>" + shellQuoteC03(backendLog) + "\n"
 	require.NoError(t, os.WriteFile(filepath.Join(packageDir, "run"), []byte(run), 0o700))
 	manifest := extension.Manifest{
 		Protocol: extension.Protocol, ID: "soda", Name: "Soda", Version: "0.1.0", Executable: "run", Capabilities: []string{extension.CapabilityActorRead, extension.CapabilityServiceBridge, extension.CapabilityContributionAuthorize, extension.CapabilityExtensionLifecycle}, Policies: []string{extension.PolicyForgejoUsername},
 		Pages:  []extension.Page{{ID: "spaces", Title: "Spaces", Scope: "global", Entry: "spaces.js"}},
 		Panels: []extension.Panel{{ID: "workspace", Title: "Spaces", Entry: "workspace.js"}},
+	}
+	if factoryBinary != "" {
+		manifest.Capabilities = append(manifest.Capabilities, extension.CapabilityRepositoryRead, extension.CapabilityRuntimeControl)
+		previous := setting.OAuth2.FactoryAppliancePackageID
+		setting.OAuth2.FactoryAppliancePackageID = "soda"
+		t.Cleanup(func() { setting.OAuth2.FactoryAppliancePackageID = previous })
 	}
 	encoded, err := json.Marshal(manifest)
 	require.NoError(t, err)
@@ -111,6 +119,11 @@ func TestSodaExtensionLiveBridge(t *testing.T) {
 	owner := loginUser(t, "user2")
 	other := loginUser(t, "user4")
 	startSodaExtensionService(t, root, socket, dashboard, serviceCallback)
+	if factoryBinary != "" {
+		factoryRoot := filepath.Join(root, "factory")
+		require.NoError(t, os.Mkdir(factoryRoot, 0o700))
+		startSodaExtensionService(t, factoryRoot, factorySocket, factoryBinary, serviceCallback)
+	}
 	generation := func(session *TestSession) string {
 		response := session.MakeRequest(t, NewRequest(t, http.MethodGet, "/-/native/session"), http.StatusNoContent)
 		value := response.Header().Get(extension.SessionGenerationHeader)
@@ -146,6 +159,29 @@ func TestSodaExtensionLiveBridge(t *testing.T) {
 	}
 	panelRequest := func(session *TestSession, method, endpoint, generation string, body any, status int) map[string]any {
 		return requestAt(panelBase, session, method, endpoint, generation, body, status)
+	}
+	if factoryBinary != "" {
+		identity := request(owner, http.MethodPost, "factory/native-repositories/resolve", ownerGeneration, map[string]string{"repository": "2"}, http.StatusOK)
+		repository := identity["repository"].(string)
+		path := "repositories/" + repository + "/factory/controller"
+		view := request(owner, http.MethodGet, path, ownerGeneration, nil, http.StatusOK)
+		require.Equal(t, true, view["can_select"])
+		placement := view["placement"].(map[string]any)
+		command := map[string]any{"command_id": "19191919191919191919191919191961", "expected_revision": placement["revision"], "action": "activate", "not_after": time.Now().Unix() + 120, "installation_id": view["installation_id"], "runtime_id": view["runtime_id"]}
+		receipt := request(owner, http.MethodPost, path, ownerGeneration, command, http.StatusOK)
+		require.Equal(t, "applied", receipt["outcome"])
+		require.Equal(t, receipt, request(owner, http.MethodPost, path, ownerGeneration, command, http.StatusOK))
+		request(other, http.MethodPost, path, otherGeneration, command, http.StatusNotFound)
+		request(owner, http.MethodGet, path, otherGeneration, nil, http.StatusConflict)
+		for i, action := range []string{"withdraw", "retire"} {
+			command["command_id"] = []string{"19191919191919191919191919191962", "19191919191919191919191919191963"}[i]
+			command["action"] = action
+			command["expected_revision"] = receipt["placement"].(map[string]any)["revision"]
+			receipt = request(owner, http.MethodPost, path, ownerGeneration, command, http.StatusOK)
+			require.Equal(t, "applied", receipt["outcome"])
+		}
+		require.Equal(t, "inactive", receipt["placement"].(map[string]any)["state"])
+		t.Log("PASS: actual canonical Factory service and Soda bridge with native human login, repository mapping, host controller selection/exact replay, other-actor and stale-session refusal, withdrawal and retirement; development fixture, no worker or installed claim")
 	}
 
 	ownerSession := request(owner, http.MethodGet, "session", ownerGeneration, nil, http.StatusOK)
