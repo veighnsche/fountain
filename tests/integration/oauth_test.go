@@ -2172,7 +2172,33 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 			pair, err := tls.LoadX509KeyPair(filepath.Join(root, "server.pem"), filepath.Join(root, "server.key"))
 			require.NoError(t, err)
 			var lost atomic.Bool
+			var effectSends atomic.Int32
 			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/submit") {
+					effectSends.Add(1)
+					require.NoError(t, os.WriteFile(filepath.Join(root, "effect-request-paused"), []byte("original request received"), 0o600))
+					deadline := time.Now().Add(5 * time.Second)
+					for time.Now().Before(deadline) {
+						if _, err := os.Stat(filepath.Join(root, "effect-request-release")); err == nil {
+							break
+						}
+						time.Sleep(10 * time.Millisecond)
+					}
+					recorder := httptest.NewRecorder()
+					testWebRoutes.ServeHTTP(recorder, r)
+					if recorder.Code == http.StatusOK {
+						http.Error(w, "fixture lost native effect reply", http.StatusServiceUnavailable)
+						return
+					}
+					for key, values := range recorder.Header() {
+						for _, value := range values {
+							w.Header().Add(key, value)
+						}
+					}
+					w.WriteHeader(recorder.Code)
+					_, _ = w.Write(recorder.Body.Bytes())
+					return
+				}
 				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/placement") && !lost.Load() {
 					recorder := httptest.NewRecorder()
 					testWebRoutes.ServeHTTP(recorder, r)
@@ -2201,6 +2227,7 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 			t.Log(string(output))
 			require.NoError(t, err)
 			require.True(t, lost.Load())
+			require.EqualValues(t, 1, effectSends.Load(), "lookup absence and native reopen never send the completion note twice")
 		}
 		// Provider-side revocation cannot be replaced by today's login. A
 		// fresh authorization may observe the old profile's exact history,
