@@ -109,6 +109,7 @@ func catalogCapabilities() map[string]bool {
 		CapabilityServiceBridge:           true,
 		CapabilityBackgroundOperations:    true,
 		CapabilityIssueIntake:             true,
+		CapabilityRuntimeControl:          true,
 		CapabilityHumanComments:           true,
 		CapabilityHumanEdits:              true,
 		CapabilityHumanStates:             true,

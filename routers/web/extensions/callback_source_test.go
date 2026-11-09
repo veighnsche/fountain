@@ -197,6 +197,10 @@ func (fixture sourceTestFixture) request(t *testing.T, request extension.Callbac
 }
 
 func TestRepositorySourceCallbackReturnsExactSelectedNativeBytesAndBundle(t *testing.T) {
+	if backend := os.Getenv("FACTORY_FOUNTAIN_RUNTIME_SDK_BACKEND"); backend != "" {
+		runRuntimeControllerSDK(t, backend)
+		return
+	}
 	fixture := newSourceTestFixture(t)
 	response, source := fixture.request(t, extension.CallbackRequest{SourcePaths: []string{"setup.sh", "check.sh", "README"}, SourceActors: []string{"2", "4", "3", "999999"}})
 	require.Equal(t, http.StatusOK, response.Code)
@@ -330,6 +334,137 @@ func TestRepositorySourceCallbackReturnsExactSelectedNativeBytesAndBundle(t *tes
 	require.True(t, found)
 	require.Equal(t, "retained prose", retainedRow.Content)
 	require.Nil(t, retainedRow.OriginalAnchor)
+}
+
+func runRuntimeControllerSDK(t *testing.T, backend string) {
+	t.Helper()
+	fixture := newSourceTestFixture(t)
+	ctx := t.Context()
+	oldPackage := setting.OAuth2.FactoryAppliancePackageID
+	setting.OAuth2.FactoryAppliancePackageID = "soda"
+	t.Cleanup(func() { setting.OAuth2.FactoryAppliancePackageID = oldPackage })
+	root := shortWitnessRoot(t)
+	packageDir := filepath.Join(root, "soda")
+	require.NoError(t, os.Mkdir(packageDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(packageDir, "run"), []byte(fmt.Sprintf("#!/bin/sh\nexec %q\n", backend)), 0o700))
+	manifest := `{"protocol":1,"id":"soda","name":"RuntimeSDK","version":"1.0","executable":"run","capabilities":["native.actor.read","native.repository.read","native.repository.runtime.control"]}`
+	require.NoError(t, os.WriteFile(filepath.Join(packageDir, "extension.json"), []byte(manifest), 0o600))
+	packageStore, err := packages.OpenPackageStore(root)
+	require.NoError(t, err)
+	_, err = packageStore.SetDesired("soda", true)
+	require.NoError(t, err)
+	require.NoError(t, packageStore.Close())
+	manager := extensions_service.NewManager(root)
+	require.NoError(t, manager.SetCallbackHandlerFactory(CallbackHandlerForInstance))
+	previous := extensions_service.GetManager()
+	extensions_service.SetDefault(manager)
+	t.Cleanup(func() { require.NoError(t, manager.Close()); extensions_service.SetDefault(previous) })
+	require.NoError(t, manager.Start(ctx))
+	var descriptor extensions_service.Descriptor
+	until := time.Now().Add(20 * time.Second)
+	for {
+		var ready bool
+		descriptor, _, ready = manager.Lookup("soda")
+		if ready {
+			break
+		}
+		require.True(t, time.Now().Before(until), "admitted SDK process did not start")
+		time.Sleep(20 * time.Millisecond)
+	}
+	installation, ready := manager.AdmittedInstallation("soda", descriptor.InstanceID)
+	require.True(t, ready)
+	sockets, err := filepath.Glob(filepath.Join(root, ".runtime", "*", "c"))
+	require.NoError(t, err)
+	require.Len(t, sockets, 1)
+	t.Setenv(extension.CallbackEnv, sockets[0])
+	t.Setenv(extension.ServiceCallbackEnv, "")
+	bind := func(actorID int64) (extension.Authority, *callbackAdmission) {
+		actor := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: actorID})
+		a := fixture.authority
+		a.InstanceID = descriptor.InstanceID
+		a.Actor = extension.Actor{ID: strconv.FormatInt(actorID, 10), Username: actor.Name, SiteAdmin: actor.IsAdmin}
+		fixture.session.uid = actorID
+		requestCtx, cancel := context.WithCancel(ctx)
+		t.Cleanup(cancel)
+		entry := &callbackAdmission{method: http.MethodPost, instanceID: descriptor.InstanceID, actorID: actorID, sessionID: "source-test-session", session: fixture.session, authority: a,
+			capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityRuntimeControl: {}}, requestCtx: requestCtx, cancel: cancel}
+		token, err := nativeAdmissions.issue(entry)
+		require.NoError(t, err)
+		t.Cleanup(func() { nativeAdmissions.revoke(token) })
+		raw, err := json.Marshal(a)
+		require.NoError(t, err)
+		request := httptest.NewRequest(http.MethodGet, "http://extension-fixture/", nil)
+		request.Header.Set(extension.ContextHeader, string(raw))
+		request.Header.Set(extension.AdmissionHeader, token)
+		bound, err := extension.RequestContext(request)
+		require.NoError(t, err)
+		return bound, entry
+	}
+	owner, entry := bind(2)
+	view, err := owner.RuntimeController(ctx, "2")
+	require.NoError(t, err)
+	require.Equal(t, installation, view.InstallationID)
+	require.True(t, view.CanSelect)
+	q := extension.ApplianceRuntimeSelection{RuntimeSelection: extension.RuntimeSelection{CommandID: "191919191919191919191919191919a1", ExpectedRevision: view.Placement.Revision, Action: "activate", NotAfter: time.Now().Unix() + 120}, InstallationID: installation, RuntimeID: view.RuntimeID}
+	applied, err := owner.SelectRuntimeController(ctx, "2", q)
+	require.NoError(t, err)
+	require.Equal(t, "applied", applied.Outcome)
+	replay, err := owner.SelectRuntimeController(ctx, "2", q)
+	require.NoError(t, err)
+	require.Equal(t, applied, replay)
+	journal, err := nativeoperation_model.LookupOperation(ctx, installation, q.CommandID)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, journal.ActorID)
+	require.EqualValues(t, 2, journal.RepositoryID)
+	changed := q
+	changed.NotAfter++
+	_, err = owner.SelectRuntimeController(ctx, "2", changed)
+	require.Error(t, err)
+	changed = q
+	changed.CommandID = "191919191919191919191919191919a2"
+	changed.ExpectedRevision = applied.Placement.Revision
+	refused, err := owner.SelectRuntimeController(ctx, "2", changed)
+	require.NoError(t, err)
+	require.Equal(t, "refused", refused.Outcome)
+	require.Equal(t, applied.Placement, refused.Placement)
+	entry.method = http.MethodGet
+	_, err = owner.SelectRuntimeController(ctx, "2", changed)
+	require.Error(t, err)
+	entry.method = http.MethodPost
+	delete(entry.capabilities, extension.CapabilityRuntimeControl)
+	_, err = owner.RuntimeController(ctx, "2")
+	require.Error(t, err)
+	entry.capabilities[extension.CapabilityRuntimeControl] = struct{}{}
+	// This is an actual native role change, not a copied browser permission.
+	_, err = db.GetEngine(ctx).Insert(&repo_model.Collaboration{RepoID: 2, UserID: 4, Mode: perm.AccessModeAdmin}, &access_model.Access{RepoID: 2, UserID: 4, Mode: perm.AccessModeAdmin})
+	require.NoError(t, err)
+	reader, _ := bind(4)
+	priorRole, err := reader.RuntimeController(ctx, "2")
+	require.NoError(t, err)
+	require.True(t, priorRole.CanSelect)
+	_, err = db.GetEngine(ctx).Where("repo_id=? AND user_id=?", 2, 4).Cols("mode").Update(&repo_model.Collaboration{Mode: perm.AccessModeRead})
+	require.NoError(t, err)
+	_, err = db.GetEngine(ctx).Where("repo_id=? AND user_id=?", 2, 4).Cols("mode").Update(&access_model.Access{Mode: perm.AccessModeRead})
+	require.NoError(t, err)
+	currentRole, err := reader.RuntimeController(ctx, "2")
+	require.NoError(t, err)
+	require.False(t, currentRole.CanSelect)
+	changed.CommandID = "191919191919191919191919191919a3"
+	changed.Action = "withdraw"
+	_, err = reader.SelectRuntimeController(ctx, "2", changed)
+	require.Error(t, err)
+	fixture.session.uid = 2
+	changed.CommandID = "191919191919191919191919191919a4"
+	withdrawn, err := owner.SelectRuntimeController(ctx, "2", changed)
+	require.NoError(t, err)
+	require.Equal(t, "retiring", withdrawn.Placement.State)
+	changed.CommandID = "191919191919191919191919191919a5"
+	changed.Action = "retire"
+	changed.ExpectedRevision = withdrawn.Placement.Revision
+	retired, err := owner.SelectRuntimeController(ctx, "2", changed)
+	require.NoError(t, err)
+	require.Equal(t, "inactive", retired.Placement.State)
+	t.Log("PASS: real admitted SDK process/private Unix callbacks, central appliance selection/replay/refusal, original human journal attribution, read-method/capability denial, current native admin-to-reader loss and retirement; fixture session, no worker or installed claim")
 }
 
 // Exercises the actual native edit service against native SQL and the existing

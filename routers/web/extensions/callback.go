@@ -323,6 +323,10 @@ func callbackHandler(instanceID string, service bool) http.Handler {
 			http.Error(w, "unexpected issue intake fields", http.StatusBadRequest)
 			return
 		}
+		if request.Operation != extension.OperationRuntimeControllerSelect && request.RuntimeSelection != nil {
+			http.Error(w, "unexpected controller command", http.StatusBadRequest)
+			return
+		}
 		if request.Operation != extension.OperationRepositoryIssues && request.CompleteIssueBodies {
 			http.Error(w, "unexpected issue body selector", http.StatusBadRequest)
 			return
@@ -412,6 +416,12 @@ func callbackHandler(instanceID string, service bool) http.Handler {
 			return
 		}
 		switch request.Operation {
+		case extension.OperationRuntimeControllerRead, extension.OperationRuntimeControllerSelect:
+			if mustParsePositiveID(request.RepositoryID) == 0 || request.Query != "" || request.Cursor != "" || request.Limit != 0 || request.Organization != "" ||
+				request.Operation == extension.OperationRuntimeControllerSelect && (entry.method != http.MethodPost || request.RuntimeSelection == nil || !extension.ValidApplianceRuntimeSelection(*request.RuntimeSelection)) {
+				http.Error(w, "invalid runtime controller request", http.StatusBadRequest)
+				return
+			}
 		case extension.OperationHumanMergeSubmit, extension.OperationHumanMergeGet, extension.OperationHumanMergeCancel:
 			if mustParsePositiveID(request.RepositoryID) == 0 || request.Query != "" || request.Cursor != "" || request.Limit != 0 || request.Organization != "" ||
 				request.Operation != extension.OperationHumanMergeGet && (entry.method != http.MethodPost || !extension.ValidHumanMergeInstallationID(request.MergeInstallationID)) ||
@@ -778,6 +788,12 @@ func callbackHandler(instanceID string, service bool) http.Handler {
 		var response extension.CallbackResponse
 		var status int
 		switch request.Operation {
+		case extension.OperationRuntimeControllerRead, extension.OperationRuntimeControllerSelect:
+			response.RuntimeController, response.RuntimeSelection, status = resolveRuntimeController(callbackCtx, entry, request)
+			if status != http.StatusOK {
+				http.Error(w, "native runtime controller is unavailable", status)
+				return
+			}
 		case extension.OperationRepositoryReviewRequestSnapshot:
 			response.ReviewRequestSnapshot, status = resolveReviewRequestSnapshot(callbackCtx, entry, request)
 			if status != http.StatusOK {
@@ -1179,6 +1195,8 @@ func sameAuthority(actual, expected extension.Authority) bool {
 
 func callbackCapability(operation string) (string, bool) {
 	switch operation {
+	case extension.OperationRuntimeControllerRead, extension.OperationRuntimeControllerSelect:
+		return extension.CapabilityRuntimeControl, true
 	case extension.OperationHumanMergeSubmit, extension.OperationHumanMergeGet, extension.OperationHumanMergeCancel:
 		return extension.CapabilityHumanMerges, true
 	case extension.OperationHumanPullCreateSubmit, extension.OperationHumanPullCreateGet, extension.OperationHumanPullCreateCancel:

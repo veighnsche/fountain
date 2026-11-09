@@ -96,9 +96,25 @@ func (s *Service) SelectDesktopRuntime(ctx context.Context, enrollment string, r
 	if err != nil {
 		return receipt, err
 	}
+	return s.selectRuntime(ctx, controllerSelection{ActorID: g.ActorID, RepositoryID: g.RepositoryID, RuntimeID: g.RuntimeID, OwnerKind: desktopgrant.ControllerDesktop, OwnerID: g.ID, InstallationID: desktopgrant.DesktopInstallation(enrollment)}, request, raw, func(ctx context.Context) error {
+		_, _, err := desktopControllerAuthority(ctx, enrollment, true)
+		return err
+	})
+}
+
+type controllerSelection struct {
+	ActorID, RepositoryID                         int64
+	RuntimeID, OwnerKind, OwnerID, InstallationID string
+}
+
+func (s *Service) selectRuntime(ctx context.Context, principal controllerSelection, request sdk.RuntimeSelection, raw []byte, admit func(context.Context) error) (sdk.RuntimeSelectionReceipt, error) {
+	var receipt sdk.RuntimeSelectionReceipt
+	if !validHex(request.CommandID, 16) || !validHex(principal.RuntimeID, 16) || (request.Action != "activate" && request.Action != "withdraw" && request.Action != "retire") {
+		return receipt, ErrInvalidIntent
+	}
 	digest := sha256.Sum256(raw)
-	installation := desktopgrant.DesktopInstallation(enrollment)
-	err = desktopgrant.WithPlacement(ctx, g.RepositoryID, func(ctx context.Context, p *desktopgrant.Placement) error {
+	installation := principal.InstallationID
+	err := desktopgrant.WithPlacement(ctx, principal.RepositoryID, func(ctx context.Context, p *desktopgrant.Placement) error {
 		old, err := native_model.LookupOperation(ctx, installation, request.CommandID)
 		if err != nil {
 			return err
@@ -109,7 +125,7 @@ func (s *Service) SelectDesktopRuntime(ctx context.Context, enrollment string, r
 			}
 			return json.Unmarshal([]byte(old.Receipt), &receipt)
 		}
-		if _, _, err := desktopControllerAuthority(ctx, enrollment, true); err != nil {
+		if err := admit(ctx); err != nil {
 			return err
 		}
 		record := func(applied bool, reason string) error {
@@ -123,7 +139,7 @@ func (s *Service) SelectDesktopRuntime(ctx context.Context, enrollment string, r
 				return err
 			}
 			return db.Insert(ctx, &native_model.Operation{InstallationID: installation, OperationID: request.CommandID, Kind: kindRuntimeSelection,
-				ActorID: g.ActorID, RepositoryID: g.RepositoryID, NotAfter: request.NotAfter, IntentDigest: hex.EncodeToString(digest[:]), Intent: string(raw),
+				ActorID: principal.ActorID, RepositoryID: principal.RepositoryID, NotAfter: request.NotAfter, IntentDigest: hex.EncodeToString(digest[:]), Intent: string(raw),
 				Submitted: true, Admitted: applied, EffectState: effect, Reason: reason, Completion: native_model.CompletionComplete, Cancellation: native_model.CancellationNone, Receipt: string(body)})
 		}
 		if request.NotAfter <= s.clock() || request.NotAfter > s.clock()+300 || request.ExpectedRevision != p.Revision {
@@ -134,14 +150,14 @@ func (s *Service) SelectDesktopRuntime(ctx context.Context, enrollment string, r
 			if p.State != desktopgrant.ControllerInactive {
 				return record(false, "controller_already_selected")
 			}
-			settled, err := controllerSettled(ctx, g.RepositoryID)
+			settled, err := controllerSettled(ctx, principal.RepositoryID)
 			if err != nil {
 				return err
 			}
 			if !settled {
 				return record(false, "prior_controller_unsettled")
 			}
-			p.RuntimeID, p.OwnerKind, p.OwnerID = g.RuntimeID, desktopgrant.ControllerDesktop, g.ID
+			p.RuntimeID, p.OwnerKind, p.OwnerID = principal.RuntimeID, principal.OwnerKind, principal.OwnerID
 			p.Generation++
 			p.State = desktopgrant.ControllerActive
 		case "withdraw":
@@ -153,7 +169,7 @@ func (s *Service) SelectDesktopRuntime(ctx context.Context, enrollment string, r
 			if p.State != desktopgrant.ControllerRetiring {
 				return record(false, "controller_not_retiring")
 			}
-			settled, err := controllerSettled(ctx, g.RepositoryID)
+			settled, err := controllerSettled(ctx, principal.RepositoryID)
 			if err != nil {
 				return err
 			}
@@ -162,7 +178,7 @@ func (s *Service) SelectDesktopRuntime(ctx context.Context, enrollment string, r
 			}
 			p.State = desktopgrant.ControllerInactive
 		}
-		p.SelectedBy = g.ActorID
+		p.SelectedBy = principal.ActorID
 		if err := desktopgrant.SavePlacement(ctx, p); err != nil {
 			return err
 		}
@@ -174,6 +190,46 @@ func (s *Service) SelectDesktopRuntime(ctx context.Context, enrollment string, r
 func validHex(value string, bytes int) bool {
 	raw, err := hex.DecodeString(value)
 	return err == nil && len(raw) == bytes && strings.ToLower(value) == value
+}
+
+// SelectApplianceRuntime is invoked only by the live human SDK admission.
+// Installation/package and actor are resolved by that adapter, never from the
+// browser body. A background PAT cannot select its own controller.
+func (s *Service) SelectApplianceRuntime(ctx context.Context, installation, packageID, runtime string, actorID, repositoryID int64, request sdk.RuntimeSelection, admit func(context.Context) error) (sdk.RuntimeSelectionReceipt, error) {
+	var empty sdk.RuntimeSelectionReceipt
+	if admit == nil || packageID == "" || packageID != setting.OAuth2.FactoryAppliancePackageID || !sdk.ValidHumanCommentInstallationID(installation) || runtime != desktopgrant.ApplianceRuntime(installation) {
+		return empty, ErrAuthorityLost
+	}
+	check := func(ctx context.Context) error {
+		if err := admit(ctx); err != nil {
+			return ErrAuthorityLost
+		}
+		actor, err := user_model.GetUserByID(ctx, actorID)
+		if err != nil || !actor.IsActive || actor.ProhibitLogin {
+			return ErrAuthorityLost
+		}
+		repository, err := repo_model.GetRepositoryByID(ctx, repositoryID)
+		if err != nil || repository.IsArchived || repository.IsMirror || user_model.IsBlocked(ctx, repository.OwnerID, actor.ID) {
+			return ErrAuthorityLost
+		}
+		permission, err := access_model.GetUserRepoPermission(ctx, repository, actor)
+		if err != nil || !permission.IsAdmin() || !permission.CanWrite(unit.TypeCode) {
+			return ErrAuthorityLost
+		}
+		return nil
+	}
+	if err := check(ctx); err != nil {
+		return empty, err
+	}
+	raw, err := json.Marshal(struct {
+		Installation, Package, Runtime string
+		Actor, Repository              int64
+		Request                        sdk.RuntimeSelection
+	}{installation, packageID, runtime, actorID, repositoryID, request})
+	if err != nil {
+		return empty, err
+	}
+	return s.selectRuntime(ctx, controllerSelection{ActorID: actorID, RepositoryID: repositoryID, RuntimeID: runtime, OwnerKind: desktopgrant.ControllerAppliance, OwnerID: installation, InstallationID: installation}, request, raw, check)
 }
 
 // AuthorizeDesktopOperations is separate from read enrollment and runtime

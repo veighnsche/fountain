@@ -48,6 +48,7 @@ const (
 // CallbackRequest is sent only on the private host socket.
 // The host resolves the actor from the admission, never from this body.
 type CallbackRequest struct {
+	RuntimeSelection            *ApplianceRuntimeSelection              `json:"runtime_selection,omitempty"`
 	HumanPullCreate             *HumanPullCreateRequest                 `json:"human_pull_create,omitempty"`
 	PullCreateOperationID       string                                  `json:"pull_create_operation_id,omitempty"`
 	PullCreateInstallationID    string                                  `json:"pull_create_installation_id,omitempty"`
@@ -120,6 +121,8 @@ type CallbackRequest struct {
 }
 
 type CallbackResponse struct {
+	RuntimeController     *RuntimeControllerView           `json:"runtime_controller,omitempty"`
+	RuntimeSelection      *RuntimeSelectionReceipt         `json:"runtime_selection,omitempty"`
 	HumanPullCreate       *OperationLookup                 `json:"human_pull_create,omitempty"`
 	HumanMerge            *OperationLookup                 `json:"human_merge,omitempty"`
 	HumanManualMerge      *OperationLookup                 `json:"human_manual_merge,omitempty"`
@@ -741,6 +744,12 @@ func decodeCallbackResponse(body io.Reader, request CallbackRequest) (CallbackRe
 
 func validCallbackResult(result CallbackResponse, request CallbackRequest) bool {
 	fields := 0
+	if result.RuntimeController != nil {
+		fields++
+	}
+	if result.RuntimeSelection != nil {
+		fields++
+	}
 	if result.HumanPullCreate != nil {
 		fields++
 	}
@@ -771,6 +780,11 @@ func validCallbackResult(result CallbackResponse, request CallbackRequest) bool 
 		return false
 	}
 	switch request.Operation {
+	case OperationRuntimeControllerRead:
+		return result.RuntimeController != nil && validInstallationID(result.RuntimeController.InstallationID) && runtimeHex(result.RuntimeController.RuntimeID) && ValidRuntimePlacement(result.RuntimeController.Placement, request.RepositoryID)
+	case OperationRuntimeControllerSelect:
+		q, r := request.RuntimeSelection, result.RuntimeSelection
+		return q != nil && r != nil && r.CommandID == q.CommandID && (r.Outcome == "applied" || r.Outcome == "refused") && ValidRuntimePlacement(r.Placement, request.RepositoryID)
 	case OperationHumanMergeSubmit, OperationHumanMergeGet, OperationHumanMergeCancel:
 		return validHumanMergeResult(result.HumanMerge, request)
 	case OperationHumanPullCreateSubmit, OperationHumanPullCreateGet, OperationHumanPullCreateCancel:

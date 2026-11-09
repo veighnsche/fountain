@@ -78,6 +78,13 @@ func DesktopInstallation(enrollment string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("fountain.native-desktop\x00"+enrollment)).String()
 }
 
+// ApplianceRuntime names the controller of this exact admitted installation,
+// not a browser-selected address or a desktop profile. Reinstallation changes
+// the owner; old grants and unresolved claims cannot move to the replacement.
+func ApplianceRuntime(installation string) string {
+	return strings.ReplaceAll(uuid.NewSHA1(uuid.NameSpaceOID, []byte("fountain.native-appliance\x00"+installation)).String(), "-", "")
+}
+
 func (g *OperationGrant) Allows(kind string) bool {
 	for _, allowed := range strings.Split(g.Operations, ",") {
 		if allowed == kind {
