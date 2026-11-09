@@ -331,6 +331,10 @@ func callbackHandler(instanceID string, service bool) http.Handler {
 			http.Error(w, "unexpected runtime authorization", http.StatusBadRequest)
 			return
 		}
+		if request.Operation != extension.OperationRuntimeControllerGrant && request.RuntimeGrantID != "" {
+			http.Error(w, "unexpected runtime grant reference", http.StatusBadRequest)
+			return
+		}
 		if request.Operation != extension.OperationRepositoryIssues && request.CompleteIssueBodies {
 			http.Error(w, "unexpected issue body selector", http.StatusBadRequest)
 			return
@@ -420,6 +424,11 @@ func callbackHandler(instanceID string, service bool) http.Handler {
 			return
 		}
 		switch request.Operation {
+		case extension.OperationRuntimeControllerGrant:
+			if mustParsePositiveID(request.RepositoryID) == 0 || len(request.RuntimeGrantID) != 32 || request.Query != "" || request.Cursor != "" || request.Limit != 0 || request.Organization != "" {
+				http.Error(w, "invalid runtime grant reference", http.StatusBadRequest)
+				return
+			}
 		case extension.OperationRuntimeControllerAuthorize:
 			if mustParsePositiveID(request.RepositoryID) == 0 || entry.method != http.MethodPost || request.RuntimeAuthorization == nil || !extension.ValidApplianceOperationAuthorization(*request.RuntimeAuthorization) || request.Query != "" || request.Cursor != "" || request.Limit != 0 || request.Organization != "" {
 				http.Error(w, "invalid runtime authorization", http.StatusBadRequest)
@@ -797,6 +806,12 @@ func callbackHandler(instanceID string, service bool) http.Handler {
 		var response extension.CallbackResponse
 		var status int
 		switch request.Operation {
+		case extension.OperationRuntimeControllerGrant:
+			response.RuntimeGrant, status = resolveRuntimeGrant(callbackCtx, entry, request)
+			if status != http.StatusOK {
+				http.Error(w, "runtime grant unavailable", status)
+				return
+			}
 		case extension.OperationRuntimeControllerAuthorize:
 			response.RuntimeGrant, status = resolveRuntimeAuthorization(callbackCtx, entry, request)
 			if status != http.StatusOK {
@@ -1210,7 +1225,7 @@ func sameAuthority(actual, expected extension.Authority) bool {
 
 func callbackCapability(operation string) (string, bool) {
 	switch operation {
-	case extension.OperationRuntimeControllerRead, extension.OperationRuntimeControllerSelect, extension.OperationRuntimeControllerAuthorize:
+	case extension.OperationRuntimeControllerRead, extension.OperationRuntimeControllerSelect, extension.OperationRuntimeControllerAuthorize, extension.OperationRuntimeControllerGrant:
 		return extension.CapabilityRuntimeControl, true
 	case extension.OperationHumanMergeSubmit, extension.OperationHumanMergeGet, extension.OperationHumanMergeCancel:
 		return extension.CapabilityHumanMerges, true

@@ -360,6 +360,17 @@ func ClaimProjection(c *desktopgrant.ExecutionClaim, acquired bool) sdk.Executio
 }
 
 func (s *Service) ClaimDesktopExecution(ctx context.Context, grant *desktopgrant.OperationGrant, request sdk.ExecutionClaimRequest) (sdk.ExecutionClaimReceipt, error) {
+	return s.claimExecution(ctx, grant, request, extensionauth.ControllerUse{GrantID: grant.ID, InstallationID: grant.InstallationID, ActorID: grant.ActorID, RepositoryID: grant.RepositoryID, CredentialFingerprint: grant.Fingerprint(), Kind: desktopgrant.ExecutionLaunch, NotAfter: request.NotAfter})
+}
+
+func (s *Service) ClaimApplianceExecution(ctx context.Context, grant *desktopgrant.OperationGrant, decision extensionauth.SubmissionDecision, request sdk.ExecutionClaimRequest) (sdk.ExecutionClaimReceipt, error) {
+	if grant.CredentialKind != desktopgrant.CredentialPAT || decision.ControllerGrantID != grant.ID {
+		return sdk.ExecutionClaimReceipt{}, ErrAuthorityLost
+	}
+	return s.claimExecution(ctx, grant, request, extensionauth.ControllerUse{GrantID: grant.ID, InstallationID: grant.InstallationID, PackageID: decision.PackageID, ActorID: grant.ActorID, RepositoryID: grant.RepositoryID, TokenID: decision.TokenID, CredentialFingerprint: decision.CredentialFingerprint, Kind: desktopgrant.ExecutionLaunch, NotAfter: request.NotAfter})
+}
+
+func (s *Service) claimExecution(ctx context.Context, grant *desktopgrant.OperationGrant, request sdk.ExecutionClaimRequest, use extensionauth.ControllerUse) (sdk.ExecutionClaimReceipt, error) {
 	var receipt sdk.ExecutionClaimReceipt
 	if !validHex(request.CommandID, 16) || !validHex(request.ManifestDigest, 32) || request.NotAfter <= 0 {
 		return receipt, ErrInvalidIntent
@@ -379,8 +390,7 @@ func (s *Service) ClaimDesktopExecution(ctx context.Context, grant *desktopgrant
 		if request.NotAfter <= s.clock() {
 			return ErrAuthorityLost
 		}
-		if _, err := extensionauth.CheckControllerUse(ctx, extensionauth.ControllerUse{GrantID: grant.ID, InstallationID: grant.InstallationID,
-			ActorID: grant.ActorID, RepositoryID: grant.RepositoryID, CredentialFingerprint: grant.Fingerprint(), Kind: desktopgrant.ExecutionLaunch, NotAfter: request.NotAfter}); err != nil {
+		if _, err := extensionauth.CheckControllerUse(ctx, use); err != nil {
 			return ErrAuthorityLost
 		}
 		claim, acquired, err := desktopgrant.RecordExecutionClaim(ctx, &desktopgrant.ExecutionClaim{ID: request.CommandID, GrantID: grant.ID, InstallationID: grant.InstallationID,

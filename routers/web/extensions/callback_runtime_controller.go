@@ -138,6 +138,10 @@ func resolveRuntimeAuthorization(ctx context.Context, entry *callbackAdmission, 
 	if err := admit(ctx); err != nil {
 		return nil, http.StatusForbidden
 	}
+	return runtimeGrantProjection(ctx, g, request.RepositoryID), http.StatusOK
+}
+
+func runtimeGrantProjection(ctx context.Context, g *desktopgrant.OperationGrant, repository string) *sdk.ApplianceOperationGrant {
 	active := true
 	for _, kind := range strings.Split(g.Operations, ",") {
 		if _, err := extensionauth.CheckControllerUse(ctx, extensionauth.ControllerUse{GrantID: g.ID, InstallationID: g.InstallationID, PackageID: g.PackageID, ActorID: g.ActorID, RepositoryID: g.RepositoryID, TokenID: g.TokenID, CredentialFingerprint: g.TokenFingerprint, Kind: kind}); err != nil {
@@ -145,5 +149,23 @@ func resolveRuntimeAuthorization(ctx context.Context, entry *callbackAdmission, 
 			break
 		}
 	}
-	return &sdk.ApplianceOperationGrant{ID: g.ID, InstallationID: g.InstallationID, RuntimeID: g.RuntimeID, RepositoryID: request.RepositoryID, TokenID: strconv.FormatInt(g.TokenID, 10), ActorID: strconv.FormatInt(g.ActorID, 10), Generation: g.Generation, SelectionRevision: g.SelectionRevision, Operations: strings.Split(g.Operations, ","), NotAfter: g.NotAfter, Revoked: g.Revoked, Active: active}, http.StatusOK
+	return &sdk.ApplianceOperationGrant{ID: g.ID, InstallationID: g.InstallationID, RuntimeID: g.RuntimeID, RepositoryID: repository, TokenID: strconv.FormatInt(g.TokenID, 10), ActorID: strconv.FormatInt(g.ActorID, 10), Generation: g.Generation, SelectionRevision: g.SelectionRevision, Operations: strings.Split(g.Operations, ","), NotAfter: g.NotAfter, Revoked: g.Revoked, Active: active}
+}
+
+func resolveRuntimeGrant(ctx context.Context, entry *callbackAdmission, request sdk.CallbackRequest) (*sdk.ApplianceOperationGrant, int) {
+	if entry.authority.ExtensionID == "" {
+		return nil, http.StatusForbidden
+	}
+	installation, err := humanOperationAdmission(ctx, entry, request.RepositoryID, "")
+	if err != nil {
+		return nil, http.StatusForbidden
+	}
+	if _, status := resolveRepository(ctx, entry, request.RepositoryID); status != http.StatusOK {
+		return nil, status
+	}
+	g, err := desktopgrant.GetOperationGrant(ctx, request.RuntimeGrantID)
+	if err != nil || g.CredentialKind != desktopgrant.CredentialPAT || g.InstallationID != installation || g.PackageID != entry.authority.ExtensionID || strconv.FormatInt(g.RepositoryID, 10) != request.RepositoryID {
+		return nil, http.StatusNotFound
+	}
+	return runtimeGrantProjection(ctx, g, request.RepositoryID), http.StatusOK
 }

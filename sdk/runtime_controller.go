@@ -74,6 +74,7 @@ type ExecutionClaimReceipt struct {
 	Acquired         bool   `json:"acquired"`
 }
 type ExecutionRetirement struct {
+	NotAfter       int64  `json:"not_after,omitempty"`
 	ManifestDigest string `json:"manifest_digest"`
 	State          string `json:"state"`
 	ReceiptDigest  string `json:"receipt_digest"`

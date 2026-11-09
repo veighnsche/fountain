@@ -23,6 +23,7 @@ const (
 	OperationRuntimeControllerRead      = "repository.runtime.controller.read"
 	OperationRuntimeControllerSelect    = "repository.runtime.controller.select"
 	OperationRuntimeControllerAuthorize = "repository.runtime.controller.authorize"
+	OperationRuntimeControllerGrant     = "repository.runtime.controller.grant"
 )
 
 type ApplianceRuntimeSelection struct {
@@ -77,6 +78,17 @@ func (a Authority) AuthorizeRuntimeOperations(ctx context.Context, repository st
 		return ApplianceOperationGrant{}, errors.New("invalid runtime authorization")
 	}
 	r, err := a.nativeClient().call(ctx, CallbackRequest{Operation: OperationRuntimeControllerAuthorize, RepositoryID: repository, RuntimeAuthorization: &q})
+	if err != nil {
+		return ApplianceOperationGrant{}, err
+	}
+	return *r.RuntimeGrant, nil
+}
+
+func (a Authority) RuntimeOperationGrant(ctx context.Context, repository, grant string) (ApplianceOperationGrant, error) {
+	if !decimalID(repository) || !runtimeHex(grant) {
+		return ApplianceOperationGrant{}, errors.New("invalid runtime grant reference")
+	}
+	r, err := a.nativeClient().call(ctx, CallbackRequest{Operation: OperationRuntimeControllerGrant, RepositoryID: repository, RuntimeGrantID: grant})
 	if err != nil {
 		return ApplianceOperationGrant{}, err
 	}

@@ -48,6 +48,7 @@ const (
 // CallbackRequest is sent only on the private host socket.
 // The host resolves the actor from the admission, never from this body.
 type CallbackRequest struct {
+	RuntimeGrantID              string                                  `json:"runtime_grant_id,omitempty"`
 	RuntimeAuthorization        *ApplianceOperationAuthorization        `json:"runtime_authorization,omitempty"`
 	RuntimeSelection            *ApplianceRuntimeSelection              `json:"runtime_selection,omitempty"`
 	HumanPullCreate             *HumanPullCreateRequest                 `json:"human_pull_create,omitempty"`
@@ -793,6 +794,9 @@ func validCallbackResult(result CallbackResponse, request CallbackRequest) bool 
 	case OperationRuntimeControllerAuthorize:
 		q, r := request.RuntimeAuthorization, result.RuntimeGrant
 		return q != nil && r != nil && r.ID == q.CommandID && r.InstallationID == q.InstallationID && r.RuntimeID == q.RuntimeID && r.RepositoryID == request.RepositoryID && r.ActorID == q.ActorID && r.TokenID == q.TokenID && r.Generation == q.Generation && r.SelectionRevision == q.ExpectedPlacement && r.NotAfter == q.NotAfter && sameRuntimeOperations(q.Operations, r.Operations)
+	case OperationRuntimeControllerGrant:
+		r := result.RuntimeGrant
+		return r != nil && r.ID == request.RuntimeGrantID && r.RepositoryID == request.RepositoryID && validInstallationID(r.InstallationID) && runtimeHex(r.RuntimeID) && runtimeHex(r.SelectionRevision) && decimalID(r.ActorID) && decimalID(r.TokenID) && r.Generation > 0 && r.NotAfter > 0 && len(r.Operations) > 0 && len(r.Operations) <= 10
 	case OperationHumanMergeSubmit, OperationHumanMergeGet, OperationHumanMergeCancel:
 		return validHumanMergeResult(result.HumanMerge, request)
 	case OperationHumanPullCreateSubmit, OperationHumanPullCreateGet, OperationHumanPullCreateCancel:

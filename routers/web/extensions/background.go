@@ -73,7 +73,7 @@ func backgroundMux(manager *extensions_service.Manager, browser http.Handler, in
 			}
 			serveBackgroundBootstrap(w, r, manager)
 			return
-		case extension.BackgroundIssueIntakePath, extension.BackgroundSubmitPath, extension.BackgroundGetPath, extension.BackgroundCancelPath, extension.BackgroundRevisionPath, extension.BackgroundSnapshotPath, extension.BackgroundCreationsPath, extension.BackgroundOperationsPath:
+		case extension.BackgroundIssueIntakePath, extension.BackgroundSubmitPath, extension.BackgroundGetPath, extension.BackgroundCancelPath, extension.BackgroundRevisionPath, extension.BackgroundSnapshotPath, extension.BackgroundCreationsPath, extension.BackgroundOperationsPath, extension.BackgroundControllerGrantPath, extension.BackgroundControllerClaimPath, extension.BackgroundControllerClaimGetPath, extension.BackgroundControllerRetirePath:
 			serveBackgroundOperation(w, r, manager, instanceID, service, verifiers, operations)
 			return
 		case extension.LifecycleAuthorizePath:
@@ -221,6 +221,8 @@ func serveBackgroundOperation(w http.ResponseWriter, r *http.Request, manager *e
 		return
 	}
 	switch r.URL.Path {
+	case extension.BackgroundControllerGrantPath, extension.BackgroundControllerClaimPath, extension.BackgroundControllerClaimGetPath, extension.BackgroundControllerRetirePath:
+		serveBackgroundController(w, r, admission)
 	case extension.BackgroundIssueIntakePath:
 		// The legacy signed intake callback has no central controller grant.
 		// Configuring Factory's central authority must fence that old writer

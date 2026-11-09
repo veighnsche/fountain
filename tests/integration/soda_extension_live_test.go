@@ -5,7 +5,10 @@ package integration
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
+	"forgejo.org/models/db"
 	"net"
 	"net/http"
 	"net/url"
@@ -75,7 +78,7 @@ func TestSodaExtensionLiveBridge(t *testing.T) {
 		Panels: []extension.Panel{{ID: "workspace", Title: "Spaces", Entry: "workspace.js"}},
 	}
 	if factoryBinary != "" {
-		manifest.Capabilities = append(manifest.Capabilities, extension.CapabilityRepositoryRead, extension.CapabilityRuntimeControl)
+		manifest.Capabilities = append(manifest.Capabilities, extension.CapabilityRepositoryRead, extension.CapabilityRuntimeControl, extension.CapabilityBackgroundOperations)
 		previous := setting.OAuth2.FactoryAppliancePackageID
 		setting.OAuth2.FactoryAppliancePackageID = "soda"
 		t.Cleanup(func() { setting.OAuth2.FactoryAppliancePackageID = previous })
@@ -95,10 +98,13 @@ func TestSodaExtensionLiveBridge(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, packageStore.Close())
 	manager := extensions_service.NewManager(filepath.Join(root, "p"))
+	if factoryBinary != "" {
+		require.NoError(t, manager.SetServiceBridgePeers(map[uint32]string{uint32(os.Getuid()): "soda"}))
+	}
 	seedSodaExtensionOperatorID(t, filepath.Join(root, "p"))
 	serviceCallback := filepath.Join(root, "h")
 	require.NoError(t, manager.SetCallbackHandlerFactory(web_extensions.CallbackHandlerForInstance))
-	require.NoError(t, manager.SetServiceCallbackEndpoint(serviceCallback, web_extensions.CallbackHandlerForService()))
+	require.NoError(t, manager.SetServiceCallbackEndpoint(serviceCallback, web_extensions.BackgroundMux(manager, web_extensions.CallbackHandlerForService(), "", true)))
 	if err := manager.Start(context.Background()); err != nil {
 		logContents, _ := os.ReadFile(backendLog)
 		t.Fatalf("Soda extension process did not start: %v: %s", err, string(logContents))
@@ -211,6 +217,89 @@ func TestSodaExtensionLiveBridge(t *testing.T) {
 		use.ControllerGrantID = executionGrant["id"].(string)
 		_, err = extensionauth.VerifySubmission(t.Context(), use)
 		require.NoError(t, err)
+		background, err := extension.BootstrapServiceBackground(t.Context(), extension.ServiceBridgeOptions{SocketPath: serviceCallback, ExpectedHostUID: uint32(os.Getuid()), InstallationID: installation})
+		require.NoError(t, err)
+		controller, ok := background.(extension.ControllerBackground)
+		require.True(t, ok)
+		credential := filepath.Join(root, "role.credential")
+		require.NoError(t, os.WriteFile(credential, []byte(role.Token), 0o600))
+		executionID := executionGrant["id"].(string)
+		meta, err := controller.ReadControllerGrant(t.Context(), executionID)
+		require.NoError(t, err)
+		require.True(t, meta.Active)
+		claimRequest := extension.ExecutionClaimRequest{CommandID: "19191919191919191919191919191971", ManifestDigest: strings.Repeat("a", 64), NotAfter: time.Now().Unix() + 60}
+		claim, err := controller.ClaimControllerExecution(t.Context(), extension.CredentialFile(credential), executionID, claimRequest)
+		require.NoError(t, err)
+		require.True(t, claim.Acquired)
+		replayClaim, err := controller.ClaimControllerExecution(t.Context(), extension.CredentialFile(credential), executionID, claimRequest)
+		require.NoError(t, err)
+		require.False(t, replayClaim.Acquired)
+		require.Equal(t, claim.ManifestDigest, replayClaim.ManifestDigest)
+		readClaim, err := controller.ReadControllerExecution(t.Context(), executionID, claimRequest.CommandID)
+		require.NoError(t, err)
+		require.False(t, readClaim.Acquired)
+		role.Scope = auth_model.AccessTokenScopeReadRepository
+		_, err = db.GetEngine(t.Context()).ID(role.ID).Cols("scope").Update(role)
+		require.NoError(t, err)
+		meta, err = controller.ReadControllerGrant(t.Context(), executionID)
+		require.NoError(t, err)
+		require.False(t, meta.Active)
+		refusedClaim := claimRequest
+		refusedClaim.CommandID = "19191919191919191919191919191972"
+		_, err = controller.ClaimControllerExecution(t.Context(), extension.CredentialFile(credential), executionID, refusedClaim)
+		require.Error(t, err)
+		_, err = desktopgrant.GetExecutionClaim(t.Context(), refusedClaim.CommandID)
+		require.ErrorIs(t, err, desktopgrant.ErrNotFound)
+		role.Scope = auth_model.AccessTokenScopeWriteRepository
+		_, err = db.GetEngine(t.Context()).ID(role.ID).Cols("scope").Update(role)
+		require.NoError(t, err)
+		// Metadata-only fixture: no native dispatch method is called. These
+		// owner declarations exercise API fencing, not native retirement proof.
+		proof := sha256.Sum256([]byte("owned fixture sent no native work: " + claimRequest.CommandID))
+		retired, err := controller.RetireControllerExecution(t.Context(), executionID, claimRequest.CommandID, extension.ExecutionRetirement{NotAfter: claimRequest.NotAfter, ManifestDigest: claimRequest.ManifestDigest, State: "not_started", ReceiptDigest: hex.EncodeToString(proof[:])})
+		require.NoError(t, err)
+		require.Equal(t, "not_started", retired.State)
+		missing := claimRequest
+		missing.CommandID = "19191919191919191919191919191973"
+		missing.NotAfter = meta.NotAfter + 1
+		_, err = controller.ReadControllerExecution(t.Context(), executionID, missing.CommandID)
+		require.Error(t, err)
+		_, err = controller.RetireControllerExecution(t.Context(), executionID, missing.CommandID, extension.ExecutionRetirement{NotAfter: missing.NotAfter, ManifestDigest: missing.ManifestDigest, State: "not_started", ReceiptDigest: hex.EncodeToString(proof[:])})
+		require.NoError(t, err)
+		fenced, err := controller.ClaimControllerExecution(t.Context(), extension.CredentialFile(credential), executionID, missing)
+		require.NoError(t, err)
+		require.False(t, fenced.Acquired)
+		require.Equal(t, "not_started", fenced.State)
+		actor := map[string]any{"token_id": strconv.FormatInt(role.ID, 10), "actor_id": identity["actor"]}
+		policy := map[string]any{"expected_revision": 0, "enabled": false, "paused": false, "target_branch": "refs/heads/main", "roles": map[string]any{"soda-coder": map[string]any{"harness": "muse", "harness_version": "fixture-1", "model": "fixture-config"}, "soda-reviewer": map[string]any{"harness": "muse", "harness_version": "fixture-1", "model": "fixture-config"}}, "required_checks": []string{"fixture-ci"}, "merge_method": "merge", "publish_actor": actor, "create_actor": actor, "review_actor": actor, "merge_actor": actor, "intent_minutes": 0}
+		policyPath := "repositories/" + repository + "/factory/policy"
+		request(owner, http.MethodPut, policyPath, ownerGeneration, policy, http.StatusOK)
+		status := request(owner, http.MethodGet, "repositories/"+repository+"/factory", ownerGeneration, nil, http.StatusOK)
+		grantCommand["command_id"] = "19191919191919191919191919191967"
+		grantCommand["policy_revision"] = status["policy"].(map[string]any)["revision"]
+		selectedGrant := request(owner, http.MethodPost, path+"/operations", ownerGeneration, grantCommand, http.StatusOK)
+		require.Equal(t, "applied", selectedGrant["selection_outcome"])
+		selectedStatus := request(owner, http.MethodGet, "repositories/"+repository+"/factory", ownerGeneration, nil, http.StatusOK)
+		selectedPolicy := selectedStatus["policy"].(map[string]any)
+		require.Equal(t, selectedGrant["id"], selectedPolicy["execution_actor"].(map[string]any)["controller_grant_id"])
+		request(owner, http.MethodPost, path+"/operations", ownerGeneration, grantCommand, http.StatusOK)
+		replayedStatus := request(owner, http.MethodGet, "repositories/"+repository+"/factory", ownerGeneration, nil, http.StatusOK)
+		require.Equal(t, selectedPolicy["revision"], replayedStatus["policy"].(map[string]any)["revision"])
+		policy["expected_revision"] = selectedPolicy["revision"]
+		policy["paused"] = true
+		policy["execution_actor"] = map[string]any{"token_id": actor["token_id"], "actor_id": actor["actor_id"], "controller_grant_id": selectedGrant["id"]}
+		request(owner, http.MethodPut, policyPath, ownerGeneration, policy, http.StatusOK)
+		grantCommand["command_id"] = "19191919191919191919191919191968"
+		grantCommand["policy_revision"] = selectedPolicy["revision"]
+		partial := request(owner, http.MethodPost, path+"/operations", ownerGeneration, grantCommand, http.StatusOK)
+		require.Equal(t, "refused", partial["selection_outcome"])
+		_, err = desktopgrant.GetOperationGrant(t.Context(), partial["id"].(string))
+		require.NoError(t, err, "completed host authorization must survive policy refusal")
+		changed := request(owner, http.MethodGet, "repositories/"+repository+"/factory", ownerGeneration, nil, http.StatusOK)["policy"].(map[string]any)
+		require.Equal(t, true, changed["paused"])
+		require.Equal(t, selectedGrant["id"], changed["execution_actor"].(map[string]any)["controller_grant_id"])
+		delete(grantCommand, "policy_revision")
+		grantCommand["command_id"] = "19191919191919191919191919191966"
 		request(other, http.MethodPost, path, otherGeneration, command, http.StatusNotFound)
 		request(owner, http.MethodGet, path, otherGeneration, nil, http.StatusConflict)
 		for i, action := range []string{"withdraw", "retire"} {
@@ -230,7 +319,7 @@ func TestSodaExtensionLiveBridge(t *testing.T) {
 		replayed = request(owner, http.MethodPost, path+"/operations", ownerGeneration, grantCommand, http.StatusOK)
 		require.Equal(t, false, replayed["active"])
 		require.Equal(t, executionGrant["id"], replayed["id"])
-		t.Log("PASS: actual canonical Factory service and Soda bridge with native human login, repository mapping, host controller selection/exact replay, other-actor and stale-session refusal, withdrawal and retirement; development fixture, no worker or installed claim")
+		t.Log("PASS: actual canonical Factory/Soda services, native human login, controller/grant replay, private background claim acquisition/duplicate/token-scope refusal/terminal no-start fence, explicit policy selection and concurrent human policy preservation, withdrawal and retirement; metadata fixture without native dispatch, worker retirement or installed qualification")
 	}
 
 	ownerSession := request(owner, http.MethodGet, "session", ownerGeneration, nil, http.StatusOK)

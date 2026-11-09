@@ -197,3 +197,29 @@ func RetireExecutionClaim(ctx context.Context, id, grant, manifest, state, diges
 	}
 	return GetExecutionClaim(ctx, id)
 }
+
+// FenceUnobservedExecution records an explicit native stop-before-start proof
+// under WithPlacement. Absence itself is not proof. A delayed claim sees this
+// same immutable tombstone and cannot acquire launch ownership afterward.
+func FenceUnobservedExecution(ctx context.Context, g *OperationGrant, id, manifest, digest string, notAfter int64) (*ExecutionClaim, error) {
+	// A rejected request may outlive its grant. This terminal fence records
+	// that original request deadline; it cannot authorize execution.
+	if notAfter <= 0 || len(manifest) != 64 || len(digest) != 64 {
+		return nil, ErrConflict
+	}
+	prior, err := GetExecutionClaim(ctx, id)
+	if err == nil {
+		if prior.NotAfter != notAfter {
+			return nil, ErrConflict
+		}
+		return RetireExecutionClaim(ctx, id, g.ID, manifest, ClaimNotStarted, digest)
+	}
+	if err != ErrNotFound {
+		return nil, err
+	}
+	c := &ExecutionClaim{ID: id, GrantID: g.ID, InstallationID: g.InstallationID, RepositoryID: g.RepositoryID, ActorID: g.ActorID, RuntimeID: g.RuntimeID, Generation: g.Generation, ManifestDigest: manifest, NotAfter: notAfter, State: ClaimNotStarted, RetirementDigest: digest}
+	if err := db.Insert(ctx, c); err != nil {
+		return nil, err
+	}
+	return c, nil
+}

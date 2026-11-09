@@ -366,6 +366,25 @@ qualifications. It does not provide a marketplace or an untrusted-code sandbox.
 Extend demonstrated native capabilities instead of exposing arbitrary internal
 objects or adding parallel authentication.
 
+## Factory controller claims
+
+The optional SDK `ControllerBackground` uses the existing private background
+admission and exact installation. A finite PAT controller grant requires its
+own enrolled `execution.launch` binding and current repository authority.
+`ClaimControllerExecution` captures one immutable native run and manifest digest;
+replay returns the original claim without acquiring it again. Grant metadata and
+claim lookup grant no execution authority. Expiry and absent lookup never prove
+that a native send did not happen.
+
+Only the original admitted controller can retire a claim after its native
+execution and custody owners provide exact retirement evidence. An explicit
+native stop-before-start fence can settle an unobserved claim as `not_started`;
+a delayed original claim then cannot acquire it. This is distinct from inferring
+no send from a missing receipt. History and retirement remain available after
+token withdrawal, while fresh claims require current permission and placement.
+The existing live Soda bridge check qualifies this API and policy-selection
+boundary; native worker and installed appliance qualification remain separate.
+
 ## Conditional issue graph changes
 
 The background native operation `issue.graph.mutate` accepts the SDK's
