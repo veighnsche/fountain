@@ -2174,8 +2174,14 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 		}()
 		claimRequest := extension.ExecutionClaimRequest{CommandID: strings.Repeat("6", 32), ManifestDigest: strings.Repeat("7", 64), NotAfter: authorize.NotAfter}
 		var claim extension.ExecutionClaimReceipt
+		claimPath := opBase + "/claims/" + claimRequest.CommandID
+		call(http.MethodGet, claimPath, nil, http.StatusNotFound)
 		DecodeJSON(t, call(http.MethodPost, opBase+"/claims", claimRequest, http.StatusOK), &claim)
 		require.True(t, claim.Acquired)
+		originalClaim := claim
+		originalClaim.Acquired = false
+		DecodeJSON(t, call(http.MethodGet, claimPath, nil, http.StatusOK), &claim)
+		require.Equal(t, originalClaim, claim, "lookup observes exact original scope without acquiring dispatch")
 		DecodeJSON(t, call(http.MethodPost, opBase+"/claims", claimRequest, http.StatusOK), &claim)
 		require.False(t, claim.Acquired, "same claim replay never authorizes another native launch")
 		var revision struct {
@@ -2198,6 +2204,7 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 		otherAuthorization.CommandID = strings.Repeat("f", 32)
 		var otherOperationGrant extension.DesktopOperationGrant
 		DecodeJSON(t, call(http.MethodPost, selected+"/operations", otherAuthorization, http.StatusOK), &otherOperationGrant)
+		call(http.MethodGet, selected+"/operations/"+otherOperationGrant.ID+"/claims/"+claim.CommandID, nil, http.StatusNotFound)
 		changedIntent := intent
 		changedIntent.ControllerGrantID = otherOperationGrant.ID
 		call(http.MethodPost, selected+"/operations/"+otherOperationGrant.ID+"/submit", changedIntent, http.StatusConflict)
@@ -2208,7 +2215,16 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 		expiring.NotAfter = time.Now().Unix() + 2
 		var expired extension.DesktopOperationGrant
 		DecodeJSON(t, call(http.MethodPost, selected+"/operations", expiring, http.StatusOK), &expired)
+		expiringPath := selected + "/operations/" + expired.ID + "/claims"
+		expiringRequest := extension.ExecutionClaimRequest{CommandID: strings.Repeat("e", 32), ManifestDigest: strings.Repeat("2", 64), NotAfter: expiring.NotAfter}
+		var expiredReceipt extension.ExecutionClaimReceipt
+		DecodeJSON(t, call(http.MethodPost, expiringPath, expiringRequest, http.StatusOK), &expiredReceipt)
+		require.True(t, expiredReceipt.Acquired)
 		time.Sleep(time.Until(time.Unix(expiring.NotAfter+1, 0)))
+		DecodeJSON(t, call(http.MethodGet, expiringPath+"/"+expiringRequest.CommandID, nil, http.StatusOK), &expiredReceipt)
+		require.False(t, expiredReceipt.Acquired)
+		require.Equal(t, "claimed", expiredReceipt.State, "expiry cannot infer whether the native worker started")
+		call(http.MethodPost, expiringPath+"/"+expiringRequest.CommandID+"/retire", extension.ExecutionRetirement{ManifestDigest: expiringRequest.ManifestDigest, State: "not_started", ReceiptDigest: strings.Repeat("3", 64)}, http.StatusOK)
 		DecodeJSON(t, call(http.MethodPost, selected+"/operations", expiring, http.StatusOK), &expired)
 		require.False(t, expired.Active)
 		changedDeadline := expiring
@@ -2219,6 +2235,8 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 		withdraw := extension.RuntimeSelection{CommandID: strings.Repeat("8", 32), ExpectedRevision: selectedReceipt.Placement.Revision, Action: "withdraw", NotAfter: time.Now().Unix() + 120}
 		DecodeJSON(t, call(http.MethodPost, selected+"/placement", withdraw, http.StatusOK), &selectedReceipt)
 		require.Equal(t, "retiring", selectedReceipt.Placement.State)
+		DecodeJSON(t, call(http.MethodGet, claimPath, nil, http.StatusOK), &claim)
+		require.Equal(t, originalClaim, claim, "placement withdrawal preserves lookup without renewed launch authority")
 		claimRequest.CommandID = strings.Repeat("9", 32)
 		call(http.MethodPost, opBase+"/claims", claimRequest, http.StatusForbidden)
 		retire := extension.RuntimeSelection{CommandID: strings.Repeat("a", 32), ExpectedRevision: selectedReceipt.Placement.Revision, Action: "retire", NotAfter: time.Now().Unix() + 120}
@@ -2228,6 +2246,10 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 		// evidence; no expiry or empty lookup is used as a retirement shortcut.
 		retirement := extension.ExecutionRetirement{ManifestDigest: claim.ManifestDigest, State: "not_started", ReceiptDigest: strings.Repeat("b", 64)}
 		call(http.MethodPost, opBase+"/claims/"+claim.CommandID+"/retire", retirement, http.StatusOK)
+		DecodeJSON(t, call(http.MethodGet, claimPath, nil, http.StatusOK), &claim)
+		require.False(t, claim.Acquired)
+		require.Equal(t, "not_started", claim.State)
+		require.Equal(t, retirement.ReceiptDigest, claim.RetirementDigest)
 		DecodeJSON(t, call(http.MethodPost, selected+"/placement", retire, http.StatusOK), &refusal)
 		require.Equal(t, "refused", refusal.Outcome, "settlement never renews a previously refused command")
 		retire.CommandID = strings.Repeat("c", 32)
@@ -2237,6 +2259,9 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 		var revoked extension.DesktopOperationGrant
 		DecodeJSON(t, call(http.MethodPost, selected+"/operations", authorize, http.StatusOK), &revoked)
 		require.False(t, revoked.Active, "grant replay cannot reactivate withdrawal")
+		DecodeJSON(t, call(http.MethodGet, claimPath, nil, http.StatusOK), &claim)
+		require.False(t, claim.Acquired)
+		require.Equal(t, retirement.ReceiptDigest, claim.RetirementDigest)
 		var lookup extension.OperationLookup
 		DecodeJSON(t, call(http.MethodGet, opBase+"/journal/"+intent.OperationID, nil, http.StatusOK), &lookup)
 		require.Equal(t, record, *lookup.Record, "withdrawal preserves the original committed effect receipt")
@@ -2247,7 +2272,27 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 			require.NoError(t, err)
 			var lost atomic.Bool
 			var effectSends atomic.Int32
+			var claimSends atomic.Int32
 			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/claims") && claimSends.Add(1) == 2 {
+					require.NoError(t, os.WriteFile(filepath.Join(root, "claim-request-paused"), []byte("original claim received"), 0o600))
+					deadline := time.Now().Add(5 * time.Second)
+					for time.Now().Before(deadline) {
+						if _, err := os.Stat(filepath.Join(root, "claim-request-release")); err == nil {
+							break
+						}
+						time.Sleep(10 * time.Millisecond)
+					}
+					recorder := httptest.NewRecorder()
+					testWebRoutes.ServeHTTP(recorder, r)
+					if recorder.Code == http.StatusOK {
+						http.Error(w, "fixture lost claim reply", http.StatusServiceUnavailable)
+						return
+					}
+					w.WriteHeader(recorder.Code)
+					_, _ = w.Write(recorder.Body.Bytes())
+					return
+				}
 				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/submit") {
 					effectSends.Add(1)
 					require.NoError(t, os.WriteFile(filepath.Join(root, "effect-request-paused"), []byte("original request received"), 0o600))
@@ -2302,6 +2347,7 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, lost.Load())
 			require.EqualValues(t, 1, effectSends.Load(), "lookup absence and native reopen never send the completion note twice")
+			require.EqualValues(t, 2, claimSends.Load(), "each native claim is reserved once; absence, lost reply, reopen and retirement only look up")
 		}
 		// Provider-side revocation cannot be replaced by today's login. A
 		// fresh authorization may observe the old profile's exact history,
@@ -2335,6 +2381,9 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 		var afterRevocation extension.DesktopOperationGrant
 		DecodeJSON(t, call(http.MethodGet, selected+"/operations/"+beforeRevocation.ID, nil, http.StatusOK), &afterRevocation)
 		require.False(t, afterRevocation.Active)
+		DecodeJSON(t, call(http.MethodGet, claimPath, nil, http.StatusOK), &claim)
+		require.False(t, claim.Acquired)
+		require.Equal(t, retirement.ReceiptDigest, claim.RetirementDigest, "new OAuth consent permits history lookup without renewing dispatch")
 		DecodeJSON(t, call(http.MethodGet, opBase+"/journal/"+intent.OperationID, nil, http.StatusOK), &lookup)
 		require.Equal(t, record, *lookup.Record)
 		changedIntent = intent

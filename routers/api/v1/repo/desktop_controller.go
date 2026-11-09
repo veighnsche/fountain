@@ -211,6 +211,37 @@ func ClaimDesktopExecution(ctx *context.APIContext) {
 	ctx.JSON(http.StatusOK, receipt)
 }
 
+// GetDesktopExecution observes the original claim without dispatch admission.
+// Current login and native proof permit history reads even after withdrawal;
+// neither a retained claim nor its absence grants another native launch.
+func GetDesktopExecution(ctx *context.APIContext) {
+	g, ok := currentDesktopOperation(ctx)
+	if !ok {
+		return
+	}
+	id := ctx.Params(":claim")
+	if !desktopID.MatchString(id) {
+		ctx.NotFound()
+		return
+	}
+	claim, err := desktopgrant.GetExecutionClaim(ctx, id)
+	if errors.Is(err, desktopgrant.ErrNotFound) {
+		ctx.NotFound()
+		return
+	}
+	if err != nil {
+		desktopControllerError(ctx, err)
+		return
+	}
+	if claim.GrantID != g.ID || claim.InstallationID != g.InstallationID ||
+		claim.RepositoryID != g.RepositoryID || claim.ActorID != g.ActorID ||
+		claim.RuntimeID != g.RuntimeID || claim.Generation != g.Generation {
+		ctx.NotFound()
+		return
+	}
+	ctx.JSON(http.StatusOK, native_service.ClaimProjection(claim, false))
+}
+
 func RetireDesktopExecution(ctx *context.APIContext) {
 	g, ok := currentDesktopOperation(ctx)
 	if !ok {

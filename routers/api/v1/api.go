@@ -821,6 +821,7 @@ func Routes() *web.Route {
 					m.Post("/submit", tokenRequiresWriteScopes(auth_model.AccessTokenScopeCategoryRepository), repo.SubmitDesktopOperation)
 					m.Get("/journal/{operation}", repo.GetDesktopOperation)
 					m.Post("/claims", tokenRequiresWriteScopes(auth_model.AccessTokenScopeCategoryRepository), repo.ClaimDesktopExecution)
+					m.Get("/claims/{claim}", repo.GetDesktopExecution)
 					m.Post("/claims/{claim}/retire", repo.RetireDesktopExecution)
 				})
 			})

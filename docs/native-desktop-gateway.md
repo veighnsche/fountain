@@ -91,6 +91,7 @@ Paths below are relative to `/{enrollment}` at the enrollment base path.
 | `POST /operations/{grant}/submit` | Existing conditional native effect, with exact `controller_grant_id` and authenticated installation/actor/repository. |
 | `GET /operations/{grant}/journal/{operation}` | Original effect receipt; absence never permits another send. |
 | `POST /operations/{grant}/claims` | Reserve one exact external native execution manifest. Only first admission reports `acquired: true`; replay cannot authorize another launch. |
+| `GET /operations/{grant}/claims/{claim}` | Read the exact original claim, including after expiry/withdrawal, with `acquired: false`. Missing history is 404 and never authorizes another reserve or launch. |
 | `POST /operations/{grant}/claims/{claim}/retire` | Owning profile's exact retirement/no-start receipt digest. Neither expiry nor lookup absence settles an unknown run. |
 
 Selection does not authorize operations, launch a worker or fund inference.
