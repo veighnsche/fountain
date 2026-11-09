@@ -15,6 +15,7 @@ import (
 
 	extension "forgejo.org/extension-sdk"
 	extensionauth_model "forgejo.org/models/extensionauth"
+	"forgejo.org/modules/setting"
 	extensions_service "forgejo.org/services/extensions"
 	nativeoperation_service "forgejo.org/services/nativeoperation"
 )
@@ -221,6 +222,14 @@ func serveBackgroundOperation(w http.ResponseWriter, r *http.Request, manager *e
 	}
 	switch r.URL.Path {
 	case extension.BackgroundIssueIntakePath:
+		// The legacy signed intake callback has no central controller grant.
+		// Configuring Factory's central authority must fence that old writer
+		// too; it cannot compete with a selected desktop. Q22 supplies its
+		// separately admitted controller-aware successor.
+		if setting.OAuth2.FactoryAppliancePackageID != "" && admission.PackageID == setting.OAuth2.FactoryAppliancePackageID {
+			http.Error(w, "controller-aware issue intake required", http.StatusForbidden)
+			return
+		}
 		if _, declared := admission.Capabilities[extension.CapabilityIssueIntake]; !declared {
 			http.Error(w, "issue intake capability not declared", http.StatusForbidden)
 			return
@@ -281,11 +290,14 @@ func serveBackgroundSubmit(w http.ResponseWriter, r *http.Request, admission ext
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	decision, err := verify(ctx, extensionauth_model.SubmissionRequest{
-		InstallationID: admission.InstallationID,
-		TokenSecret:    request.Token,
-		ActorID:        actorID,
-		RepositoryID:   repositoryID,
-		Kind:           request.Kind,
+		InstallationID:    admission.InstallationID,
+		TokenSecret:       request.Token,
+		ActorID:           actorID,
+		RepositoryID:      repositoryID,
+		Kind:              request.Kind,
+		PackageID:         admission.PackageID,
+		ControllerGrantID: request.ControllerGrantID,
+		RequireController: setting.OAuth2.FactoryAppliancePackageID != "" && admission.PackageID == setting.OAuth2.FactoryAppliancePackageID,
 	})
 	if err != nil {
 		var refusal *extensionauth_model.RefusalError

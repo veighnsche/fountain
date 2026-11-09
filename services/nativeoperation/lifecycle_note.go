@@ -103,20 +103,7 @@ func (s *Service) submitLifecycleNote(ctx context.Context, decision extensionaut
 		retire()
 		return sdk.OperationRecord{}, err
 	}
-	op := &nativeoperation_model.Operation{
-		InstallationID:         installationID,
-		OperationID:            intent.OperationID,
-		Kind:                   intent.Kind,
-		ActorID:                decision.ActorID,
-		RepositoryID:           intent.RepositoryID,
-		TokenID:                decision.TokenID,
-		CredentialFingerprint:  decision.CredentialFingerprint,
-		AuthRevision:           intent.AuthRevision,
-		ExpectedNativeRevision: intent.ExpectedNativeRevision,
-		NotAfter:               intent.NotAfter,
-		IntentDigest:           intent.Digest,
-		Intent:                 intent.Canonical,
-	}
+	op := operationForSubmission(decision, installationID, intent)
 	claimed, err := nativeoperation_model.ClaimConditional(ctx, op, owner, encoded, execcontext.Verifier(secret))
 	if err != nil {
 		retire()
@@ -134,7 +121,7 @@ func (s *Service) submitLifecycleNote(ctx context.Context, decision extensionaut
 			return sdk.OperationRecord{}, lookupErr
 		}
 		if existing != nil {
-			return s.reconcileExisting(existing, intent)
+			return s.reconcileSubmission(existing, decision, intent)
 		}
 		return sdk.OperationRecord{}, err
 	}
@@ -197,6 +184,9 @@ func (s *Service) executeLifecycleNote(ctx context.Context, op *nativeoperation_
 		return refuse(nativeoperation_model.ReasonAuthorityLost)
 	}
 	committed, err := nativeoperation_model.CommitLifecycleNotePrimary(owned, op.InstallationID, op.OperationID, owner, s.clock(), func(tx context.Context) (string, error) {
+		if err := s.revalidateSubmission(tx, op); err != nil {
+			return "", err
+		}
 		comment, err := issues_model.CreateComment(tx, &issues_model.CreateCommentOptions{
 			Type:    issues_model.CommentTypeComment,
 			Doer:    doer,

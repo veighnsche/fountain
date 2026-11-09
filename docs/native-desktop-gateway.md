@@ -1,8 +1,8 @@
 # Native desktop enrollment
 
-This first gateway slice supplies a revocable repository-read enrollment. It
-does not admit execution, select a central controller, publish a candidate, or
-expose the private extension callback protocol.
+Read enrollment and privileged controller authority are separate capabilities.
+Read enrollment admits no execution or publication and never exposes the
+private extension callback protocol.
 
 Use a registered **public** OAuth client with S256 PKCE and a current bearer
 authorization. No client secret is needed. The server operator supplies the
@@ -65,6 +65,53 @@ with real keyboard/browser controls, original-command readback, refresh,
 Quit/reopen and irreversible withdrawal. The runner is supplied through the same
 optional check variables; it is not installed by the host or an execution grant.
 
-Factory now exposes those login and read-enrollment controls. Central placement,
-privileged operation journals, candidate transfer and the complete installed
-delivery journey remain separate requirements; read enrollment never admits them.
+## Explicit controller authority
+
+Set `FACTORY_DESKTOP_CONTROL_CLIENT_ID` to a **different** registered public
+application with the same loopback/S256 requirements. Fountain retains one scope
+per account/application grant; control consent must not replace the existing
+read authorization. `GET /api/v1/factory/desktop/oauth/control` advertises
+`write:repository` only when this client and `FACTORY_APPLIANCE_PACKAGE_ID` are
+configured. Factory keeps each application's credential and connection separate.
+Configuring the appliance package opts its private callbacks into central
+admission: unscoped old writes and the legacy signed issue-intake callback refuse.
+Other extensions and ordinary human writes retain their existing permissions.
+Do not enable unattended work until the controller-aware appliance/worker
+consumer is integrated and qualified; that integration remains unfinished.
+
+Paths below are relative to `/{enrollment}` at the enrollment base path.
+
+| Method/path | Result |
+| --- | --- |
+| `GET /placement` | Central repository controller, generation, revision and active/retiring/inactive state. This observation is not a dispatch lease. |
+| `POST /placement` | Finite admin command (`command_id`, `expected_revision`, `action`, `not_after`); activate, withdraw or finish retirement. Exact applied/refused receipts are retained in the existing native operation journal. |
+| `POST /operations` | Separate immutable finite operation grant; binds current control OAuth grant, native profile proof, account, repository, selected runtime/generation and named operations. |
+| `GET, DELETE /operations/{grant}` | Observe or withdraw the grant. Exact replay cannot reactivate it or change its deadline. |
+| `GET /native-revision` | Existing global native mutation revision, idle/inhibited state; it is separate from the repository controller. |
+| `POST /operations/{grant}/submit` | Existing conditional native effect, with exact `controller_grant_id` and authenticated installation/actor/repository. |
+| `GET /operations/{grant}/journal/{operation}` | Original effect receipt; absence never permits another send. |
+| `POST /operations/{grant}/claims` | Reserve one exact external native execution manifest. Only first admission reports `acquired: true`; replay cannot authorize another launch. |
+| `POST /operations/{grant}/claims/{claim}/retire` | Owning profile's exact retirement/no-start receipt digest. Neither expiry nor lookup absence settles an unknown run. |
+
+Selection does not authorize operations, launch a worker or fund inference.
+Withdrawal stops new admission. Retirement waits for claims and native effects
+to settle; no competing runtime takes over an uncertain outcome. Repository
+placement uses its own row gate, never a controller-lifetime global reservation.
+Actual SQL primary commits and Git prepared admission recheck current controller
+authority within their existing transactions. Read-only enrollment, old command
+deadlines and today's login cannot confer historical authority. Reauthorization
+under the same application/account and original native profile proof permits
+history lookup and retirement; new effects still require the **original** OAuth
+grant to remain valid.
+
+`TestNativeDesktopEnrollment/FiniteControllerAuthority` exercises real OAuth,
+PostgreSQL selection/replay/refusal, separate finite grants, a journaled comment,
+claim gating, withdrawal/expiry and provider revocation. Optional
+`FACTORY_FOUNTAIN_CONTROLLER_CHECK`/`FACTORY_FOUNTAIN_CONTROLLER_ROOT` use the
+existing native credential check against TLS, preserving separate actual read
+and control credentials, a lost initial selection reply, native reopen and exact
+replay. The fixture supplies host-exchanged tokens over a private pipe; native
+control consent discovery/URL is checked, but native control code exchange and
+installed UI are not qualified by that mode. Claim probes do not launch workers.
+Actual worker admission, appliance/desktop competition, canonical shared-view
+consumer integration, candidate transfer and installed delivery remain open.

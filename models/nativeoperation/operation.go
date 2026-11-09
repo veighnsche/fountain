@@ -94,6 +94,8 @@ const (
 // when Submitted is false. CredentialFingerprint is private: it detects
 // regeneration of the bound token row and must never appear in receipts.
 type Operation struct {
+	PackageID              string             `xorm:"VARCHAR(255) NOT NULL DEFAULT ''"`
+	ControllerGrantID      string             `xorm:"VARCHAR(32) NOT NULL DEFAULT '' INDEX"`
 	ID                     int64              `xorm:"pk autoincr"`
 	InstallationID         string             `xorm:"VARCHAR(36) NOT NULL index unique(op)"`
 	OperationID            string             `xorm:"VARCHAR(128) NOT NULL index unique(op)"`

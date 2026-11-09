@@ -54,20 +54,7 @@ func (s *Service) submitMerge(ctx context.Context, decision extensionauth_model.
 		retire()
 		return sdk.OperationRecord{}, err
 	}
-	op := &nativeoperation_model.Operation{
-		InstallationID:         installationID,
-		OperationID:            intent.OperationID,
-		Kind:                   intent.Kind,
-		ActorID:                decision.ActorID,
-		RepositoryID:           intent.RepositoryID,
-		TokenID:                decision.TokenID,
-		CredentialFingerprint:  decision.CredentialFingerprint,
-		AuthRevision:           intent.AuthRevision,
-		ExpectedNativeRevision: intent.ExpectedNativeRevision,
-		NotAfter:               intent.NotAfter,
-		IntentDigest:           intent.Digest,
-		Intent:                 intent.Canonical,
-	}
+	op := operationForSubmission(decision, installationID, intent)
 	claimed, err := nativeoperation_model.ClaimConditional(ctx, op, owner, encoded, execcontext.Verifier(secret))
 	if err != nil {
 		retire()
@@ -87,7 +74,7 @@ func (s *Service) submitMerge(ctx context.Context, decision extensionauth_model.
 			return sdk.OperationRecord{}, lookupErr
 		}
 		if existing != nil {
-			return s.reconcileExisting(existing, intent)
+			return s.reconcileSubmission(existing, decision, intent)
 		}
 		return sdk.OperationRecord{}, err
 	}

@@ -106,20 +106,7 @@ func (s *Service) submitLifecycleReview(ctx context.Context, decision extensiona
 		retire()
 		return sdk.OperationRecord{}, err
 	}
-	op := &nativeoperation_model.Operation{
-		InstallationID:         installationID,
-		OperationID:            intent.OperationID,
-		Kind:                   intent.Kind,
-		ActorID:                decision.ActorID,
-		RepositoryID:           intent.RepositoryID,
-		TokenID:                decision.TokenID,
-		CredentialFingerprint:  decision.CredentialFingerprint,
-		AuthRevision:           intent.AuthRevision,
-		ExpectedNativeRevision: intent.ExpectedNativeRevision,
-		NotAfter:               intent.NotAfter,
-		IntentDigest:           intent.Digest,
-		Intent:                 intent.Canonical,
-	}
+	op := operationForSubmission(decision, installationID, intent)
 	claimed, err := nativeoperation_model.ClaimConditional(ctx, op, owner, encoded, execcontext.Verifier(secret))
 	if err != nil {
 		retire()
@@ -137,7 +124,7 @@ func (s *Service) submitLifecycleReview(ctx context.Context, decision extensiona
 			return sdk.OperationRecord{}, lookupErr
 		}
 		if existing != nil {
-			return s.reconcileExisting(existing, intent)
+			return s.reconcileSubmission(existing, decision, intent)
 		}
 		return sdk.OperationRecord{}, err
 	}
@@ -213,6 +200,9 @@ func (s *Service) executeLifecycleReview(ctx context.Context, op *nativeoperatio
 		reviewers = append(reviewers, reviewer)
 	}
 	committed, err := nativeoperation_model.CommitLifecycleReviewPrimary(owned, op.InstallationID, op.OperationID, owner, s.clock(), func(tx context.Context) (string, error) {
+		if err := s.revalidateSubmission(tx, op); err != nil {
+			return "", err
+		}
 		receipt := LifecycleReviewReceipt{IssueID: submit.IssueID}
 		for i, reviewer := range reviewers {
 			comment, err := issues_model.AddReviewRequest(tx, issue, reviewer, doer)

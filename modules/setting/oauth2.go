@@ -92,16 +92,20 @@ func parseScopes(sec ConfigSection, name string) []string {
 }
 
 var OAuth2 = struct {
-	Enabled                     bool
-	AccessTokenExpirationTime   int64
-	RefreshTokenExpirationTime  int64
-	InvalidateRefreshTokens     bool
-	JWTSigningAlgorithm         string `ini:"JWT_SIGNING_ALGORITHM"`
-	JWTSigningPrivateKeyFile    string `ini:"JWT_SIGNING_PRIVATE_KEY_FILE"`
-	MaxTokenLength              int
-	DefaultApplications         []string
-	EnableAdditionalGrantScopes bool
-	FactoryDesktopClientID      string `ini:"FACTORY_DESKTOP_CLIENT_ID"`
+	Enabled                       bool
+	AccessTokenExpirationTime     int64
+	RefreshTokenExpirationTime    int64
+	InvalidateRefreshTokens       bool
+	JWTSigningAlgorithm           string `ini:"JWT_SIGNING_ALGORITHM"`
+	JWTSigningPrivateKeyFile      string `ini:"JWT_SIGNING_PRIVATE_KEY_FILE"`
+	MaxTokenLength                int
+	DefaultApplications           []string
+	EnableAdditionalGrantScopes   bool
+	FactoryDesktopClientID        string `ini:"FACTORY_DESKTOP_CLIENT_ID"`
+	FactoryDesktopControlClientID string `ini:"FACTORY_DESKTOP_CONTROL_CLIENT_ID"`
+	// Identifies the canonical Factory appliance package, including older
+	// callbacks that must not bypass central controller admission.
+	FactoryAppliancePackageID string `ini:"FACTORY_APPLIANCE_PACKAGE_ID"`
 }{
 	Enabled:                     true,
 	AccessTokenExpirationTime:   3600,
@@ -112,6 +116,13 @@ var OAuth2 = struct {
 	MaxTokenLength:              math.MaxInt16,
 	DefaultApplications:         []string{"git-credential-oauth", "git-credential-manager", "tea"},
 	EnableAdditionalGrantScopes: false,
+}
+
+// FactoryControlConfigured keeps privileged admission and public discovery on
+// the same operator-selected boundary. Removing it withdraws new admissions.
+func FactoryControlConfigured() bool {
+	return OAuth2.Enabled && OAuth2.EnableAdditionalGrantScopes && OAuth2.FactoryAppliancePackageID != "" &&
+		OAuth2.FactoryDesktopControlClientID != "" && OAuth2.FactoryDesktopControlClientID != OAuth2.FactoryDesktopClientID
 }
 
 func loadOAuth2From(rootCfg ConfigProvider) {

@@ -28,17 +28,21 @@ var desktopProof = regexp.MustCompile(`^[a-f0-9]{64}$`)
 // DesktopOAuthConfig exposes only the operator-selected public application's
 // identifier. It creates no application, authorization or repository grant.
 func DesktopOAuthConfig(ctx *context.APIContext) {
+	desktopOAuthConfig(ctx, setting.OAuth2.FactoryDesktopClientID, "read:repository")
+}
+
+func desktopOAuthConfig(ctx *context.APIContext, clientID, scope string) {
 	ctx.Resp.Header().Set("Cache-Control", "no-store")
-	if !setting.OAuth2.Enabled || setting.OAuth2.FactoryDesktopClientID == "" || !setting.OAuth2.EnableAdditionalGrantScopes {
+	if !setting.OAuth2.Enabled || clientID == "" || !setting.OAuth2.EnableAdditionalGrantScopes {
 		ctx.NotFound()
 		return
 	}
-	app, err := auth_model.GetOAuth2ApplicationByClientID(ctx, setting.OAuth2.FactoryDesktopClientID)
-	if err != nil || app.ConfidentialClient || !app.ContainsRedirectURI("http://127.0.0.1/") {
+	app, err := auth_model.GetOAuth2ApplicationByClientID(ctx, clientID)
+	if err != nil || app == nil || app.ConfidentialClient || !app.ContainsRedirectURI("http://127.0.0.1/") {
 		ctx.NotFound()
 		return
 	}
-	ctx.JSON(http.StatusOK, map[string]string{"client_id": app.ClientID, "scope": "read:repository"})
+	ctx.JSON(http.StatusOK, map[string]string{"client_id": app.ClientID, "scope": scope})
 }
 
 // DesktopOAuthIdentity verifies the authenticated self without requiring a
@@ -48,7 +52,7 @@ func DesktopOAuthIdentity(ctx *context.APIContext) {
 	if !ok {
 		return
 	}
-	if app.ClientID != setting.OAuth2.FactoryDesktopClientID {
+	if app.ClientID != setting.OAuth2.FactoryDesktopClientID && (setting.OAuth2.FactoryDesktopControlClientID == "" || app.ClientID != setting.OAuth2.FactoryDesktopControlClientID) {
 		ctx.Error(http.StatusForbidden, "desktop identity", errors.New("configured desktop application required"))
 		return
 	}
@@ -79,12 +83,12 @@ func desktopAuthorization(ctx *context.APIContext) (*auth_model.OAuth2Grant, *au
 		return nil, nil, false
 	}
 	grant, err := auth_model.GetOAuth2GrantByID(ctx, identity.OAuth2GrantID())
-	if err != nil || grant.UserID != ctx.Doer().ID {
+	if err != nil || grant == nil || grant.UserID != ctx.Doer().ID {
 		ctx.Error(http.StatusUnauthorized, "desktop authorization", errors.New("OAuth authorization no longer available"))
 		return nil, nil, false
 	}
 	app, err := auth_model.GetOAuth2ApplicationByID(ctx, grant.ApplicationID)
-	if err != nil || app.ConfidentialClient {
+	if err != nil || app == nil || app.ConfidentialClient {
 		ctx.Error(http.StatusForbidden, "desktop authorization", errors.New("public native OAuth client required"))
 		return nil, nil, false
 	}

@@ -10,7 +10,18 @@ import (
 	sdk "forgejo.org/extension-sdk"
 	extensionauth_model "forgejo.org/models/extensionauth"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
+	"forgejo.org/modules/setting"
 )
+
+// All conditional effect kinds capture the same authenticated provenance.
+// Keeping that packet here prevents a newly added credential/grant binding
+// from being lost by an individual publisher, reviewer or issue writer.
+func operationForSubmission(decision extensionauth_model.SubmissionDecision, installation string, intent *ValidIntent) *nativeoperation_model.Operation {
+	return &nativeoperation_model.Operation{InstallationID: installation, OperationID: intent.OperationID, Kind: intent.Kind,
+		ActorID: decision.ActorID, RepositoryID: intent.RepositoryID, TokenID: decision.TokenID, CredentialFingerprint: decision.CredentialFingerprint,
+		PackageID: decision.PackageID, ControllerGrantID: decision.ControllerGrantID, AuthRevision: intent.AuthRevision,
+		ExpectedNativeRevision: intent.ExpectedNativeRevision, NotAfter: intent.NotAfter, IntentDigest: intent.Digest, Intent: intent.Canonical}
+}
 
 // Submit authenticates the installation/principal (already verified by the
 // dispatcher into decision), validates the complete intent and durably claims
@@ -18,8 +29,18 @@ import (
 // return or reconcile the existing record, never start a second execution.
 // Different content under the same ID is intent_conflict.
 func (s *Service) Submit(ctx context.Context, decision extensionauth_model.SubmissionDecision, installationID string, intent *ValidIntent) (sdk.OperationRecord, error) {
-	if intent == nil || intent.Kind == "" {
+	if intent == nil || intent.Kind == "" || decision.ActorID != intent.ActorID {
 		return sdk.OperationRecord{}, ErrInvalidIntent
+	}
+	if setting.OAuth2.FactoryAppliancePackageID != "" && decision.PackageID == setting.OAuth2.FactoryAppliancePackageID && decision.ControllerGrantID == "" {
+		return sdk.OperationRecord{}, ErrAuthorityLost
+	}
+	if decision.ControllerGrantID != "" {
+		if _, err := extensionauth_model.CheckControllerUse(ctx, extensionauth_model.ControllerUse{GrantID: decision.ControllerGrantID, InstallationID: installationID,
+			PackageID: decision.PackageID, ActorID: decision.ActorID, RepositoryID: intent.RepositoryID, TokenID: decision.TokenID,
+			CredentialFingerprint: decision.CredentialFingerprint, Kind: intent.Kind, NotAfter: intent.NotAfter}); err != nil {
+			return sdk.OperationRecord{}, ErrAuthorityLost
+		}
 	}
 	switch intent.Kind {
 	case nativeoperation_model.KindIssueGraph, nativeoperation_model.KindMerge, nativeoperation_model.KindRefPublish, nativeoperation_model.KindPRCreate, nativeoperation_model.KindReviewSubmit, nativeoperation_model.KindThreadResolve, nativeoperation_model.KindLifecycleIssue, nativeoperation_model.KindLifecycleReview, nativeoperation_model.KindLifecycleNote:
@@ -33,7 +54,7 @@ func (s *Service) Submit(ctx context.Context, decision extensionauth_model.Submi
 		return sdk.OperationRecord{}, err
 	}
 	if existing != nil {
-		return s.reconcileExisting(existing, intent)
+		return s.reconcileSubmission(existing, decision, intent)
 	}
 	if intent.Kind == nativeoperation_model.KindIssueGraph {
 		return s.submitIssueGraph(ctx, decision, installationID, intent)
@@ -60,6 +81,16 @@ func (s *Service) Submit(ctx context.Context, decision extensionauth_model.Submi
 		return s.submitLifecycleNote(ctx, decision, installationID, intent)
 	}
 	return s.submitMerge(ctx, decision, installationID, intent)
+}
+
+// Both the initial lookup and a concurrent journal-insert loser must bind the
+// same grant provenance. An identical payload cannot adopt another grant's
+// receipt, while a pre-submit cancellation retains its original meaning.
+func (s *Service) reconcileSubmission(existing *nativeoperation_model.Operation, decision extensionauth_model.SubmissionDecision, intent *ValidIntent) (sdk.OperationRecord, error) {
+	if existing.Submitted && (existing.ControllerGrantID != decision.ControllerGrantID || existing.PackageID != decision.PackageID || existing.ActorID != decision.ActorID) {
+		return sdk.OperationRecord{}, ErrIntentConflict
+	}
+	return s.reconcileExisting(existing, intent)
 }
 
 func (s *Service) reconcileExisting(existing *nativeoperation_model.Operation, intent *ValidIntent) (sdk.OperationRecord, error) {

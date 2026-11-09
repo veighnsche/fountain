@@ -33,24 +33,11 @@ func (s *Service) submitPublish(ctx context.Context, decision extensionauth_mode
 	if intent.Publish == nil {
 		return sdk.OperationRecord{}, ErrInvalidIntent
 	}
-	op := &nativeoperation_model.Operation{
-		InstallationID:         installationID,
-		OperationID:            intent.OperationID,
-		Kind:                   intent.Kind,
-		ActorID:                decision.ActorID,
-		RepositoryID:           intent.RepositoryID,
-		TokenID:                decision.TokenID,
-		CredentialFingerprint:  decision.CredentialFingerprint,
-		AuthRevision:           intent.AuthRevision,
-		ExpectedNativeRevision: intent.ExpectedNativeRevision,
-		NotAfter:               intent.NotAfter,
-		IntentDigest:           intent.Digest,
-		Intent:                 intent.Canonical,
-	}
+	op := operationForSubmission(decision, installationID, intent)
 	recorded, err := nativeoperation_model.InsertWaitingOperation(ctx, op)
 	if err != nil {
 		if errors.Is(err, nativeoperation_model.ErrDuplicateOperation) {
-			return s.reconcileExisting(recorded, intent)
+			return s.reconcileSubmission(recorded, decision, intent)
 		}
 		return sdk.OperationRecord{}, err
 	}

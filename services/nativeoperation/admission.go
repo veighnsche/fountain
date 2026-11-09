@@ -15,6 +15,7 @@ import (
 
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	"forgejo.org/models/desktopgrant"
 	"forgejo.org/models/extensionauth"
 	issues_model "forgejo.org/models/issues"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
@@ -24,6 +25,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	execcontext "forgejo.org/modules/nativeoperation"
+	"forgejo.org/modules/setting"
 )
 
 // ErrAuthorityLost reports that the bound credential generation, binding or
@@ -259,19 +261,25 @@ func (s *Service) admitPrepared(ctx context.Context, reservation *nativeoperatio
 	if checkErr != nil {
 		return TransactionDecision{}, checkErr
 	}
-	if reason == "" {
-		if err := s.revalidateSubmission(ctx, op); err != nil {
-			if errors.Is(err, ErrAuthorityLost) {
-				reason = nativeoperation_model.ReasonAuthorityLost
-			} else {
-				return TransactionDecision{}, err
+	var recorded *nativeoperation_model.Operation
+	var admitted bool
+	err = db.WithTx(ctx, func(ctx context.Context) error {
+		if reason == "" {
+			if err := s.revalidateSubmission(ctx, op); err != nil {
+				if errors.Is(err, ErrAuthorityLost) {
+					reason = nativeoperation_model.ReasonAuthorityLost
+				} else {
+					return err
+				}
 			}
 		}
-	}
-	if reason == "" && s.clock() >= op.NotAfter {
-		reason = nativeoperation_model.ReasonExpiredBeforeAdmission
-	}
-	recorded, admitted, err := nativeoperation_model.RecordAdmissionAttempt(ctx, installationID, operationID, reservation.Owner, reason == "", reason)
+		if reason == "" && s.clock() >= op.NotAfter {
+			reason = nativeoperation_model.ReasonExpiredBeforeAdmission
+		}
+		var err error
+		recorded, admitted, err = nativeoperation_model.RecordAdmissionAttempt(ctx, installationID, operationID, reservation.Owner, reason == "", reason)
+		return err
+	})
 	if err != nil {
 		if errors.Is(err, nativeoperation_model.ErrWrongOwner) {
 			return TransactionDecision{Reason: nativeoperation_model.ReasonWrongOwner}, nil
@@ -584,6 +592,30 @@ func scopePermitsRef(scope Scope, ref string) bool {
 // secret, which was discarded after verification. It mirrors the submission
 // verifier's tail checks; any failure is ErrAuthorityLost.
 func (s *Service) revalidateSubmission(ctx context.Context, op *nativeoperation_model.Operation) error {
+	if op.ControllerGrantID != "" {
+		if _, err := extensionauth.CheckControllerUse(ctx, extensionauth.ControllerUse{GrantID: op.ControllerGrantID, InstallationID: op.InstallationID,
+			PackageID: op.PackageID, ActorID: op.ActorID, RepositoryID: op.RepositoryID, TokenID: op.TokenID, CredentialFingerprint: op.CredentialFingerprint, Kind: op.Kind, NotAfter: op.NotAfter}); err != nil {
+			return ErrAuthorityLost
+		}
+	} else if op.TokenID > 0 {
+		if setting.OAuth2.FactoryAppliancePackageID != "" && op.PackageID == setting.OAuth2.FactoryAppliancePackageID {
+			return ErrAuthorityLost
+		}
+		if op.PackageID == "" {
+			err := desktopgrant.WithPlacement(ctx, op.RepositoryID, func(_ context.Context, p *desktopgrant.Placement) error {
+				if p.Generation > 0 {
+					return ErrAuthorityLost
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if op.ControllerGrantID != "" && op.TokenID == 0 {
+		return nil
+	}
 	if op.TokenID == 0 && op.Kind == nativeoperation_model.KindIssueGraph {
 		return s.revalidateIssueIntake(ctx, op)
 	}

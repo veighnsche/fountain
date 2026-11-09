@@ -103,20 +103,7 @@ func (s *Service) submitLifecycleIssue(ctx context.Context, decision extensionau
 		retire()
 		return sdk.OperationRecord{}, err
 	}
-	op := &nativeoperation_model.Operation{
-		InstallationID:         installationID,
-		OperationID:            intent.OperationID,
-		Kind:                   intent.Kind,
-		ActorID:                decision.ActorID,
-		RepositoryID:           intent.RepositoryID,
-		TokenID:                decision.TokenID,
-		CredentialFingerprint:  decision.CredentialFingerprint,
-		AuthRevision:           intent.AuthRevision,
-		ExpectedNativeRevision: intent.ExpectedNativeRevision,
-		NotAfter:               intent.NotAfter,
-		IntentDigest:           intent.Digest,
-		Intent:                 intent.Canonical,
-	}
+	op := operationForSubmission(decision, installationID, intent)
 	claimed, err := nativeoperation_model.ClaimConditional(ctx, op, owner, encoded, execcontext.Verifier(secret))
 	if err != nil {
 		retire()
@@ -134,7 +121,7 @@ func (s *Service) submitLifecycleIssue(ctx context.Context, decision extensionau
 			return sdk.OperationRecord{}, lookupErr
 		}
 		if existing != nil {
-			return s.reconcileExisting(existing, intent)
+			return s.reconcileSubmission(existing, decision, intent)
 		}
 		return sdk.OperationRecord{}, err
 	}
@@ -221,6 +208,9 @@ func (s *Service) executeLifecycleIssue(ctx context.Context, op *nativeoperation
 		}
 	}
 	committed, err := nativeoperation_model.CommitLifecycleIssuePrimary(owned, op.InstallationID, op.OperationID, owner, s.clock(), func(tx context.Context) (string, error) {
+		if err := s.revalidateSubmission(tx, op); err != nil {
+			return "", err
+		}
 		receipt := LifecycleIssueReceipt{IssueID: submit.IssueID, LabelID: submit.LabelID, AssigneeID: submit.AssigneeID}
 		if label != nil && !issues_model.HasIssueLabel(tx, submit.IssueID, submit.LabelID) {
 			if err := issues_model.NewIssueLabel(tx, issue, label, doer); err != nil {

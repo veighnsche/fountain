@@ -48,11 +48,14 @@ func (err *RefusalError) Error() string { return "background submission refused:
 // host-derived installation identity. TokenSecret is discarded after native
 // verification and never recorded or logged.
 type SubmissionRequest struct {
-	InstallationID string
-	TokenSecret    string
-	ActorID        int64
-	RepositoryID   int64
-	Kind           string
+	InstallationID    string
+	TokenSecret       string
+	ActorID           int64
+	RepositoryID      int64
+	Kind              string
+	PackageID         string
+	ControllerGrantID string
+	RequireController bool
 }
 
 // SubmissionDecision carries the verified submission provenance. The
@@ -62,6 +65,8 @@ type SubmissionDecision struct {
 	TokenID               int64
 	ActorID               int64
 	CredentialFingerprint string
+	PackageID             string
+	ControllerGrantID     string
 }
 
 func refuse(code string, status int) *RefusalError { return &RefusalError{Code: code, Status: status} }
@@ -79,6 +84,9 @@ func CredentialFingerprint(tokenHash, tokenSalt string) string {
 // and the current native account/repository permissions. Manifest capability
 // is enforced by the admission layer, not here.
 func VerifySubmission(ctx context.Context, request SubmissionRequest) (SubmissionDecision, error) {
+	if request.RequireController && request.ControllerGrantID == "" {
+		return SubmissionDecision{}, refuse(RefusalBindingMissing, http.StatusForbidden)
+	}
 	if _, err := uuid.Parse(request.InstallationID); err != nil {
 		return SubmissionDecision{}, refuse(RefusalInvalidIntent, http.StatusBadRequest)
 	}
@@ -172,6 +180,13 @@ func VerifySubmission(ctx context.Context, request SubmissionRequest) (Submissio
 		TokenID:               token.ID,
 		ActorID:               request.ActorID,
 		CredentialFingerprint: CredentialFingerprint(token.TokenHash, token.TokenSalt),
+		PackageID:             request.PackageID, ControllerGrantID: request.ControllerGrantID,
+	}
+	if request.ControllerGrantID != "" {
+		if _, err = CheckControllerUse(ctx, ControllerUse{GrantID: request.ControllerGrantID, InstallationID: request.InstallationID, PackageID: request.PackageID,
+			ActorID: request.ActorID, RepositoryID: request.RepositoryID, TokenID: decision.TokenID, CredentialFingerprint: decision.CredentialFingerprint, Kind: request.Kind}); err != nil {
+			return SubmissionDecision{}, refuse(RefusalBindingMissing, http.StatusForbidden)
+		}
 	}
 	return decision, nil
 }

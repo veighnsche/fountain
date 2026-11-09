@@ -93,6 +93,9 @@ func (path CredentialFile) read() (string, error) {
 // in Unix seconds. Payload carries exactly the selected kind's semantic
 // fields and participates in intent identity.
 type OperationIntent struct {
+	// Required for Factory controller operations; the host verifies the
+	// exact current grant and retains it independently of token renewal.
+	ControllerGrantID      string          `json:"controller_grant_id,omitempty"`
 	OperationID            string          `json:"operation_id"`
 	InstallationID         string          `json:"installation_id,omitempty"`
 	ActorID                string          `json:"actor_id"`
@@ -142,6 +145,7 @@ const (
 // yet. Actor, repository, kind and intent fields stay unavailable on
 // pre-submit cancellation tombstones rather than invented.
 type OperationRecord struct {
+	ControllerGrantID  string          `json:"controller_grant_id,omitempty"`
 	InstallationID     string          `json:"installation_id"`
 	OperationID        string          `json:"operation_id"`
 	Outcome            string          `json:"outcome"`

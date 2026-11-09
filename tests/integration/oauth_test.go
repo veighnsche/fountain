@@ -2024,6 +2024,239 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 	MakeRequest(t, NewRequest(t, http.MethodGet, base+"/"+binding.ID+"/repository").SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusForbidden)
 	require.NotContains(t, bound.Body.String(), proof)
 
+	t.Run("FiniteControllerAuthority", func(t *testing.T) {
+		// Read login and native profile proof still cannot request control.
+		MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/factory/desktop/oauth/control"), http.StatusNotFound)
+		defer test.MockVariableValue(&setting.OAuth2.FactoryAppliancePackageID, "soda")()
+		appResponse := MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, "/api/v1/user/applications/oauth2", api.CreateOAuth2ApplicationOptions{Name: "Factory control fixture", RedirectURIs: []string{redirect}, ConfidentialClient: false}).AddBasicAuth("user2"), http.StatusCreated)
+		var controlApp api.OAuth2Application
+		DecodeJSON(t, appResponse, &controlApp)
+		defer test.MockVariableValue(&setting.OAuth2.FactoryDesktopControlClientID, controlApp.ClientID)()
+		controlDiscovery := MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/factory/desktop/oauth/control"), http.StatusOK)
+		DecodeJSON(t, controlDiscovery, &configured)
+		require.Equal(t, "write:repository", configured["scope"])
+		selected := base + "/" + binding.ID
+		selection := extension.RuntimeSelection{CommandID: strings.Repeat("1", 32), Action: "activate", NotAfter: time.Now().Unix() + 120}
+		MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, selected+"/placement", selection).SetHeader("Authorization", "Bearer "+tokens.AccessToken).SetHeader("X-Factory-Desktop-Proof", proof), http.StatusForbidden)
+		values.Set("scope", "write:repository")
+		values.Set("client_id", controlApp.ClientID)
+		session.MakeRequest(t, NewRequest(t, http.MethodGet, "/login/oauth/authorize?"+values.Encode()), http.StatusOK)
+		consent := session.MakeRequest(t, NewRequestWithValues(t, http.MethodPost, "/login/oauth/grant", map[string]string{"client_id": controlApp.ClientID, "redirect_uri": redirect, "state": "desktop-fixture", "granted": "true", "scope": "write:repository"}), http.StatusSeeOther)
+		location, err := consent.Result().Location()
+		require.NoError(t, err)
+		require.Empty(t, location.Query().Get("error"), location.Query().Get("error_description"))
+		exchange := MakeRequest(t, NewRequestWithValues(t, http.MethodPost, "/login/oauth/access_token", map[string]string{"grant_type": "authorization_code", "client_id": controlApp.ClientID, "redirect_uri": redirect, "code": location.Query().Get("code"), "code_verifier": verifier}), http.StatusOK)
+		var controlTokens struct {
+			AccessToken string `json:"access_token"`
+		}
+		DecodeJSON(t, exchange, &controlTokens)
+		call := func(method, path string, body any, status int) *httptest.ResponseRecorder {
+			var request *RequestWrapper
+			if body == nil {
+				request = NewRequest(t, method, path)
+			} else {
+				request = NewRequestWithJSON(t, method, path, body)
+			}
+			return MakeRequest(t, request.SetHeader("Authorization", "Bearer "+controlTokens.AccessToken).SetHeader("X-Factory-Desktop-Proof", proof), status)
+		}
+		// Control has its own application authorization and bound enrollment;
+		// the original read authorization and enrollment remain intact.
+		controlInput := input
+		controlInput.CommandID = strings.Repeat("e", 32)
+		DecodeJSON(t, call(http.MethodPost, base, controlInput, http.StatusCreated), &binding)
+		selected = base + "/" + binding.ID
+		var selectedReceipt extension.RuntimeSelectionReceipt
+		DecodeJSON(t, call(http.MethodPost, selected+"/placement", selection, http.StatusOK), &selectedReceipt)
+		require.EqualValues(t, 1, selectedReceipt.Placement.Generation)
+		require.Equal(t, "active", selectedReceipt.Placement.State)
+		var replay extension.RuntimeSelectionReceipt
+		DecodeJSON(t, call(http.MethodPost, selected+"/placement", selection, http.StatusOK), &replay)
+		require.Equal(t, selectedReceipt, replay, "lost initial selection reply adopts its exact journal receipt")
+		changed := selection
+		changed.NotAfter++
+		call(http.MethodPost, selected+"/placement", changed, http.StatusConflict)
+		competing := input
+		competing.CommandID = strings.Repeat("2", 32)
+		competing.RuntimeID = strings.Repeat("3", 32)
+		var other extension.DesktopGrant
+		DecodeJSON(t, call(http.MethodPost, base, competing, http.StatusCreated), &other)
+		changed.CommandID = strings.Repeat("4", 32)
+		changed.ExpectedRevision = selectedReceipt.Placement.Revision
+		var refusal extension.RuntimeSelectionReceipt
+		DecodeJSON(t, call(http.MethodPost, base+"/"+other.ID+"/placement", changed, http.StatusOK), &refusal)
+		require.Equal(t, "refused", refusal.Outcome)
+		require.Equal(t, selectedReceipt.Placement, refusal.Placement)
+		authorize := extension.DesktopOperationAuthorization{CommandID: strings.Repeat("5", 32), ExpectedPlacement: selectedReceipt.Placement.Revision, Generation: 1, Operations: []string{"execution.launch", extension.OperationKindLifecycleNote}, NotAfter: time.Now().Unix() + 120}
+		var operationGrant extension.DesktopOperationGrant
+		DecodeJSON(t, call(http.MethodPost, selected+"/operations", authorize, http.StatusOK), &operationGrant)
+		require.True(t, operationGrant.Active)
+		opBase := selected + "/operations/" + operationGrant.ID
+		func() {
+			defer test.MockVariableValue(&setting.OAuth2.FactoryDesktopControlClientID, "")()
+			var unavailable extension.DesktopOperationGrant
+			DecodeJSON(t, call(http.MethodGet, opBase, nil, http.StatusOK), &unavailable)
+			require.False(t, unavailable.Active, "operator configuration withdrawal stops new admission while preserving metadata")
+			call(http.MethodPost, opBase+"/claims", extension.ExecutionClaimRequest{CommandID: strings.Repeat("0", 32), ManifestDigest: strings.Repeat("1", 64), NotAfter: authorize.NotAfter}, http.StatusForbidden)
+		}()
+		claimRequest := extension.ExecutionClaimRequest{CommandID: strings.Repeat("6", 32), ManifestDigest: strings.Repeat("7", 64), NotAfter: authorize.NotAfter}
+		var claim extension.ExecutionClaimReceipt
+		DecodeJSON(t, call(http.MethodPost, opBase+"/claims", claimRequest, http.StatusOK), &claim)
+		require.True(t, claim.Acquired)
+		DecodeJSON(t, call(http.MethodPost, opBase+"/claims", claimRequest, http.StatusOK), &claim)
+		require.False(t, claim.Acquired, "same claim replay never authorizes another native launch")
+		var revision struct {
+			Revision int64 `json:"revision"`
+		}
+		DecodeJSON(t, call(http.MethodGet, selected+"/native-revision", nil, http.StatusOK), &revision)
+		payload, err := json.Marshal(extension.LifecycleNotePayload{IssueID: 5, Content: "Controller qualification receipt", MergeRef: "qualification-no-merge"})
+		require.NoError(t, err)
+		intent := extension.OperationIntent{ControllerGrantID: operationGrant.ID, OperationID: "controller-comment-1", InstallationID: operationGrant.InstallationID, ActorID: binding.Actor.ID, RepositoryID: binding.Repository.ID,
+			Kind: extension.OperationKindLifecycleNote, AuthorizationRevision: operationGrant.ID, ExpectedNativeRevision: revision.Revision, NotAfter: authorize.NotAfter, Payload: payload}
+		var record extension.OperationRecord
+		DecodeJSON(t, call(http.MethodPost, opBase+"/submit", intent, http.StatusOK), &record)
+		require.Equal(t, extension.EffectCommitted, record.EffectState)
+		require.Equal(t, extension.CompletionComplete, record.CompletionState)
+		require.Equal(t, operationGrant.ID, record.ControllerGrantID)
+		var original extension.OperationRecord
+		DecodeJSON(t, call(http.MethodPost, opBase+"/submit", intent, http.StatusOK), &original)
+		require.Equal(t, record, original, "comment publication replays its original receipt without another write")
+		otherAuthorization := authorize
+		otherAuthorization.CommandID = strings.Repeat("f", 32)
+		var otherOperationGrant extension.DesktopOperationGrant
+		DecodeJSON(t, call(http.MethodPost, selected+"/operations", otherAuthorization, http.StatusOK), &otherOperationGrant)
+		changedIntent := intent
+		changedIntent.ControllerGrantID = otherOperationGrant.ID
+		call(http.MethodPost, selected+"/operations/"+otherOperationGrant.ID+"/submit", changedIntent, http.StatusConflict)
+		// A real finite grant expires independently of the still-active
+		// controller. Identical replay observes it; a new deadline conflicts.
+		expiring := authorize
+		expiring.CommandID = strings.Repeat("d", 32)
+		expiring.NotAfter = time.Now().Unix() + 2
+		var expired extension.DesktopOperationGrant
+		DecodeJSON(t, call(http.MethodPost, selected+"/operations", expiring, http.StatusOK), &expired)
+		time.Sleep(time.Until(time.Unix(expiring.NotAfter+1, 0)))
+		DecodeJSON(t, call(http.MethodPost, selected+"/operations", expiring, http.StatusOK), &expired)
+		require.False(t, expired.Active)
+		changedDeadline := expiring
+		changedDeadline.NotAfter = authorize.NotAfter
+		call(http.MethodPost, selected+"/operations", changedDeadline, http.StatusConflict)
+		expiredClaim := extension.ExecutionClaimRequest{CommandID: strings.Repeat("0", 32), ManifestDigest: strings.Repeat("1", 64), NotAfter: authorize.NotAfter}
+		call(http.MethodPost, selected+"/operations/"+expired.ID+"/claims", expiredClaim, http.StatusForbidden)
+		withdraw := extension.RuntimeSelection{CommandID: strings.Repeat("8", 32), ExpectedRevision: selectedReceipt.Placement.Revision, Action: "withdraw", NotAfter: time.Now().Unix() + 120}
+		DecodeJSON(t, call(http.MethodPost, selected+"/placement", withdraw, http.StatusOK), &selectedReceipt)
+		require.Equal(t, "retiring", selectedReceipt.Placement.State)
+		claimRequest.CommandID = strings.Repeat("9", 32)
+		call(http.MethodPost, opBase+"/claims", claimRequest, http.StatusForbidden)
+		retire := extension.RuntimeSelection{CommandID: strings.Repeat("a", 32), ExpectedRevision: selectedReceipt.Placement.Revision, Action: "retire", NotAfter: time.Now().Unix() + 120}
+		DecodeJSON(t, call(http.MethodPost, selected+"/placement", retire, http.StatusOK), &refusal)
+		require.Equal(t, "prior_controller_unsettled", refusal.ReasonCode)
+		// This claim was never connected to a worker. Record exact no-start
+		// evidence; no expiry or empty lookup is used as a retirement shortcut.
+		retirement := extension.ExecutionRetirement{ManifestDigest: claim.ManifestDigest, State: "not_started", ReceiptDigest: strings.Repeat("b", 64)}
+		call(http.MethodPost, opBase+"/claims/"+claim.CommandID+"/retire", retirement, http.StatusOK)
+		DecodeJSON(t, call(http.MethodPost, selected+"/placement", retire, http.StatusOK), &refusal)
+		require.Equal(t, "refused", refusal.Outcome, "settlement never renews a previously refused command")
+		retire.CommandID = strings.Repeat("c", 32)
+		DecodeJSON(t, call(http.MethodPost, selected+"/placement", retire, http.StatusOK), &selectedReceipt)
+		require.Equal(t, "inactive", selectedReceipt.Placement.State)
+		call(http.MethodDelete, opBase, nil, http.StatusOK)
+		var revoked extension.DesktopOperationGrant
+		DecodeJSON(t, call(http.MethodPost, selected+"/operations", authorize, http.StatusOK), &revoked)
+		require.False(t, revoked.Active, "grant replay cannot reactivate withdrawal")
+		var lookup extension.OperationLookup
+		DecodeJSON(t, call(http.MethodGet, opBase+"/journal/"+intent.OperationID, nil, http.StatusOK), &lookup)
+		require.Equal(t, record, *lookup.Record, "withdrawal preserves the original committed effect receipt")
+		if checker := os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_CHECK"); checker != "" {
+			root := os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_ROOT")
+			require.True(t, filepath.IsAbs(root) && strings.HasPrefix(root, "/home/"))
+			pair, err := tls.LoadX509KeyPair(filepath.Join(root, "server.pem"), filepath.Join(root, "server.key"))
+			require.NoError(t, err)
+			var lost atomic.Bool
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/placement") && !lost.Load() {
+					recorder := httptest.NewRecorder()
+					testWebRoutes.ServeHTTP(recorder, r)
+					if recorder.Code == http.StatusOK && lost.CompareAndSwap(false, true) {
+						http.Error(w, "fixture lost initial controller reply", http.StatusServiceUnavailable)
+						return
+					}
+					for key, values := range recorder.Header() {
+						for _, value := range values {
+							w.Header().Add(key, value)
+						}
+					}
+					w.WriteHeader(recorder.Code)
+					_, _ = w.Write(recorder.Body.Bytes())
+					return
+				}
+				testWebRoutes.ServeHTTP(w, r)
+			}))
+			server.TLS = &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS12}
+			server.StartTLS()
+			defer server.Close()
+			command := exec.CommandContext(t.Context(), checker, "--fountain-controller-declared", filepath.Join(root, "profile"), server.URL, controlApp.ClientID)
+			command.Env = append(os.Environ(), "SSL_CERT_FILE="+filepath.Join(root, "ca.pem"))
+			command.Stdin = strings.NewReader(tokens.AccessToken + "\n" + controlTokens.AccessToken)
+			output, err := command.CombinedOutput()
+			t.Log(string(output))
+			require.NoError(t, err)
+			require.True(t, lost.Load())
+		}
+		// Provider-side revocation cannot be replaced by today's login. A
+		// fresh authorization may observe the old profile's exact history,
+		// but cannot dispatch using the old operation grant.
+		var placement extension.RuntimePlacement
+		DecodeJSON(t, call(http.MethodGet, selected+"/placement", nil, http.StatusOK), &placement)
+		freshSelection := extension.RuntimeSelection{CommandID: "19191919191919191919191919191901", ExpectedRevision: placement.Revision, Action: "activate", NotAfter: time.Now().Unix() + 120}
+		DecodeJSON(t, call(http.MethodPost, selected+"/placement", freshSelection, http.StatusOK), &selectedReceipt)
+		freshAuthorization := authorize
+		freshAuthorization.CommandID = "19191919191919191919191919191902"
+		freshAuthorization.ExpectedPlacement = selectedReceipt.Placement.Revision
+		freshAuthorization.Generation = selectedReceipt.Placement.Generation
+		freshAuthorization.NotAfter = time.Now().Unix() + 120
+		var beforeRevocation extension.DesktopOperationGrant
+		DecodeJSON(t, call(http.MethodPost, selected+"/operations", freshAuthorization, http.StatusOK), &beforeRevocation)
+		require.True(t, beforeRevocation.Active)
+		application, err := auth_model.GetOAuth2ApplicationByID(db.DefaultContext, controlApp.ID)
+		require.NoError(t, err)
+		authorization, err := application.GetGrantByUserID(db.DefaultContext, 2)
+		require.NoError(t, err)
+		require.NotNil(t, authorization)
+		session.MakeRequest(t, NewRequest(t, http.MethodPost, fmt.Sprintf("/user/settings/applications/oauth2/%d/revoke/%d", controlApp.ID, authorization.ID)), http.StatusOK)
+		call(http.MethodGet, selected+"/operations/"+beforeRevocation.ID, nil, http.StatusUnauthorized)
+		session.MakeRequest(t, NewRequest(t, http.MethodGet, "/login/oauth/authorize?"+values.Encode()), http.StatusOK)
+		reconsent := session.MakeRequest(t, NewRequestWithValues(t, http.MethodPost, "/login/oauth/grant", map[string]string{"client_id": controlApp.ClientID, "redirect_uri": redirect, "state": "desktop-fixture", "granted": "true", "scope": "write:repository"}), http.StatusSeeOther)
+		relocation, err := reconsent.Result().Location()
+		require.NoError(t, err)
+		require.Empty(t, relocation.Query().Get("error"))
+		reexchange := MakeRequest(t, NewRequestWithValues(t, http.MethodPost, "/login/oauth/access_token", map[string]string{"grant_type": "authorization_code", "client_id": controlApp.ClientID, "redirect_uri": redirect, "code": relocation.Query().Get("code"), "code_verifier": verifier}), http.StatusOK)
+		DecodeJSON(t, reexchange, &controlTokens)
+		var afterRevocation extension.DesktopOperationGrant
+		DecodeJSON(t, call(http.MethodGet, selected+"/operations/"+beforeRevocation.ID, nil, http.StatusOK), &afterRevocation)
+		require.False(t, afterRevocation.Active)
+		DecodeJSON(t, call(http.MethodGet, opBase+"/journal/"+intent.OperationID, nil, http.StatusOK), &lookup)
+		require.Equal(t, record, *lookup.Record)
+		changedIntent = intent
+		changedIntent.ControllerGrantID = beforeRevocation.ID
+		changedIntent.OperationID = "controller-after-reauthorization"
+		changedIntent.NotAfter = freshAuthorization.NotAfter
+		call(http.MethodPost, selected+"/operations/"+beforeRevocation.ID+"/submit", changedIntent, http.StatusForbidden)
+		newEnrollment := input
+		newEnrollment.CommandID = "19191919191919191919191919191903"
+		var newBinding extension.DesktopGrant
+		DecodeJSON(t, call(http.MethodPost, base, newEnrollment, http.StatusCreated), &newBinding)
+		newBase := base + "/" + newBinding.ID
+		freshSelection.CommandID = "19191919191919191919191919191904"
+		freshSelection.ExpectedRevision = selectedReceipt.Placement.Revision
+		freshSelection.Action = "withdraw"
+		DecodeJSON(t, call(http.MethodPost, newBase+"/placement", freshSelection, http.StatusOK), &selectedReceipt)
+		freshSelection.CommandID = "19191919191919191919191919191905"
+		freshSelection.ExpectedRevision = selectedReceipt.Placement.Revision
+		freshSelection.Action = "retire"
+		DecodeJSON(t, call(http.MethodPost, newBase+"/placement", freshSelection, http.StatusOK), &selectedReceipt)
+		require.Equal(t, "inactive", selectedReceipt.Placement.State)
+	})
+
 	if checker := os.Getenv("FACTORY_FOUNTAIN_NATIVE_CHECK"); checker != "" {
 		root := os.Getenv("FACTORY_FOUNTAIN_NATIVE_ROOT")
 		require.True(t, filepath.IsAbs(root) && strings.HasPrefix(root, "/home/"))

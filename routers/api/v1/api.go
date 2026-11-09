@@ -801,6 +801,7 @@ func Routes() *web.Route {
 		m.Delete("/repos/{username}/{reponame}", repoAssignment, repoAccess(), tokenRequiresRepoOwnerScope(), reqOwner(), repo.Delete)
 
 		m.Get("/factory/desktop/oauth", repo.DesktopOAuthConfig)
+		m.Get("/factory/desktop/oauth/control", repo.DesktopControlOAuthConfig)
 		m.Get("/factory/desktop/identity", reqToken(), tokenRequiresReadScopes(auth_model.AccessTokenScopeCategoryRepository), repo.DesktopOAuthIdentity)
 
 		// Repos (requires repo scope)
@@ -810,6 +811,18 @@ func Routes() *web.Route {
 				m.Get("", repo.GetDesktopGrant)
 				m.Delete("", repo.RevokeDesktopGrant)
 				m.Get("/repository", repo.ReadDesktopRepository)
+				m.Get("/placement", repo.GetDesktopPlacement)
+				m.Post("/placement", tokenRequiresWriteScopes(auth_model.AccessTokenScopeCategoryRepository), repo.SelectDesktopRuntime)
+				m.Get("/native-revision", repo.GetDesktopNativeRevision)
+				m.Post("/operations", tokenRequiresWriteScopes(auth_model.AccessTokenScopeCategoryRepository), repo.AuthorizeDesktopOperations)
+				m.Group("/operations/{operation_grant}", func() {
+					m.Get("", repo.GetDesktopOperationGrant)
+					m.Delete("", repo.RevokeDesktopOperationGrant)
+					m.Post("/submit", tokenRequiresWriteScopes(auth_model.AccessTokenScopeCategoryRepository), repo.SubmitDesktopOperation)
+					m.Get("/journal/{operation}", repo.GetDesktopOperation)
+					m.Post("/claims", tokenRequiresWriteScopes(auth_model.AccessTokenScopeCategoryRepository), repo.ClaimDesktopExecution)
+					m.Post("/claims/{claim}/retire", repo.RetireDesktopExecution)
+				})
 			})
 		}, repoAssignment, repoAccess(), checkTokenPublicOnly(), reqToken(), reqRepoReader(unit.TypeCode), tokenRequiresReadScopes(auth_model.AccessTokenScopeCategoryRepository))
 

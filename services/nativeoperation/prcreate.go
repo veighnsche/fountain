@@ -144,20 +144,7 @@ func (s *Service) submitPRCreate(ctx context.Context, decision extensionauth_mod
 		retire()
 		return sdk.OperationRecord{}, err
 	}
-	op := &nativeoperation_model.Operation{
-		InstallationID:         installationID,
-		OperationID:            intent.OperationID,
-		Kind:                   intent.Kind,
-		ActorID:                decision.ActorID,
-		RepositoryID:           intent.RepositoryID,
-		TokenID:                decision.TokenID,
-		CredentialFingerprint:  decision.CredentialFingerprint,
-		AuthRevision:           intent.AuthRevision,
-		ExpectedNativeRevision: intent.ExpectedNativeRevision,
-		NotAfter:               intent.NotAfter,
-		IntentDigest:           intent.Digest,
-		Intent:                 intent.Canonical,
-	}
+	op := operationForSubmission(decision, installationID, intent)
 	claimed, err := nativeoperation_model.ClaimConditional(ctx, op, owner, encoded, execcontext.Verifier(secret))
 	if err != nil {
 		retire()
@@ -177,7 +164,7 @@ func (s *Service) submitPRCreate(ctx context.Context, decision extensionauth_mod
 			return sdk.OperationRecord{}, lookupErr
 		}
 		if existing != nil {
-			return s.reconcileExisting(existing, intent)
+			return s.reconcileSubmission(existing, decision, intent)
 		}
 		return sdk.OperationRecord{}, err
 	}
@@ -308,6 +295,9 @@ func (s *Service) executePRCreate(ctx context.Context, op *nativeoperation_model
 	// cancellation and expiry on the same operation row. No SQL
 	// transaction spans Git or wraps the entire service.
 	committed, err := nativeoperation_model.CommitPRCreatePrimary(owned, op.InstallationID, op.OperationID, owner, s.clock(), func(tx context.Context) (string, error) {
+		if err := s.revalidateSubmission(tx, op); err != nil {
+			return "", err
+		}
 		// The duplicate check re-runs inside the commit as
 		// defense-in-depth: ordinary writers are fenced while this
 		// owner holds the reservation, so a match refuses rather than

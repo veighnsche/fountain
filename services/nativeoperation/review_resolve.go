@@ -191,6 +191,9 @@ func (s *Service) executeThreadResolve(ctx context.Context, op *nativeoperation_
 	// of an already-resolved root is stable: no error, no ownership
 	// change, and the receipt replays exactly.
 	committed, err := nativeoperation_model.CommitReviewSubmitPrimary(owned, op.InstallationID, op.OperationID, owner, s.clock(), func(tx context.Context) (string, error) {
+		if err := s.revalidateSubmission(tx, op); err != nil {
+			return "", err
+		}
 		if err := issues_model.MarkConversation(tx, root, doer, true); err != nil {
 			return "", err
 		}

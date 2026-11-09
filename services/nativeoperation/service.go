@@ -428,6 +428,7 @@ func ToRecord(op *nativeoperation_model.Operation) sdk.OperationRecord {
 		record.ActorID = int64String(op.ActorID)
 		record.RepositoryID = int64String(op.RepositoryID)
 		record.Kind = op.Kind
+		record.ControllerGrantID = op.ControllerGrantID
 		record.CompletionState = op.Completion
 		record.IntentDigest = op.IntentDigest
 		if op.Receipt != "" {
