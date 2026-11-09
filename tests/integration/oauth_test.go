@@ -1999,11 +1999,22 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 	var repository extension.Repository
 	DecodeJSON(t, read, &repository)
 	require.Equal(t, grant.Repository, repository)
+	sourceSelection := map[string]any{"source_commit": "", "source_paths": []string{}, "source_actors": []string{grant.Actor.ID}}
+	sourceReply := MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, base+"/"+grant.ID+"/source", sourceSelection).SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusOK)
+	var source extension.RepositorySource
+	DecodeJSON(t, sourceReply, &source)
+	require.Equal(t, grant.Repository.ID, source.RepositoryID)
+	require.Len(t, source.Commit, 40)
+	require.NotEmpty(t, source.Bundle)
+	require.True(t, source.Writers[grant.Actor.ID])
+	MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, base+"/"+grant.ID+"/source", map[string]any{"source_paths": []string{"../README.md"}}).SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusBadRequest)
+	MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, base+"/"+grant.ID+"/source", map[string]any{"repository_id": "2"}).SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusBadRequest)
 	withdrawn := MakeRequest(t, NewRequest(t, http.MethodDelete, base+"/"+grant.ID).SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusOK)
 	var retired extension.DesktopGrant
 	DecodeJSON(t, withdrawn, &retired)
 	require.False(t, retired.Active)
 	MakeRequest(t, NewRequest(t, http.MethodGet, base+"/"+grant.ID+"/repository").SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusForbidden)
+	MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, base+"/"+grant.ID+"/source", sourceSelection).SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusForbidden)
 	require.False(t, enroll(http.StatusOK).Active)
 	readback := MakeRequest(t, NewRequest(t, http.MethodGet, base+"/"+grant.ID).SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusOK)
 	var retained extension.DesktopGrant
@@ -2024,6 +2035,7 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 		MakeRequest(t, NewRequest(t, method, base+"/"+binding.ID).SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusForbidden)
 	}
 	MakeRequest(t, NewRequest(t, http.MethodGet, base+"/"+binding.ID+"/repository").SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusForbidden)
+	MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, base+"/"+binding.ID+"/source", sourceSelection).SetHeader("Authorization", "Bearer "+tokens.AccessToken), http.StatusForbidden)
 	require.NotContains(t, bound.Body.String(), proof)
 
 	t.Run("FiniteControllerAuthority", func(t *testing.T) {

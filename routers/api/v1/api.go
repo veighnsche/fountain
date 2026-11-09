@@ -811,6 +811,7 @@ func Routes() *web.Route {
 				m.Get("", repo.GetDesktopGrant)
 				m.Delete("", repo.RevokeDesktopGrant)
 				m.Get("/repository", repo.ReadDesktopRepository)
+				m.Post("/source", repo.ReadDesktopSource)
 				m.Get("/placement", repo.GetDesktopPlacement)
 				m.Post("/placement", tokenRequiresWriteScopes(auth_model.AccessTokenScopeCategoryRepository), repo.SelectDesktopRuntime)
 				m.Get("/native-revision", repo.GetDesktopNativeRevision)
