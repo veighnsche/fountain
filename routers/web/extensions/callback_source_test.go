@@ -14182,6 +14182,80 @@ func TestRepositoryIssuesCallbackUsesHumanAccessWithoutFactoryBinding(t *testing
 		return
 	}
 	fixture := newSourceTestFixture(t)
+	if os.Getenv("SODA_FOUNTAIN_ISSUE_ONLY") == "1" {
+		ctx := t.Context()
+		repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 24})
+		actor := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+		// This native organisation fixture keeps its code unit. The user's
+		// issue-writing team remains, while its separate code-reader team is removed.
+		var prior []organization.TeamUnit
+		require.NoError(t, db.GetEngine(ctx).Where("team_id=?", 5).Find(&prior))
+		_, err := db.GetEngine(ctx).Where("team_id=?", 5).Delete(new(organization.TeamUnit))
+		require.NoError(t, err)
+		t.Cleanup(func() { _, e := db.GetEngine(context.Background()).Insert(prior); require.NoError(t, e) })
+		permission, err := access_model.GetUserRepoPermission(ctx, repo, actor)
+		require.NoError(t, err)
+		require.True(t, permission.CanWrite(unit.TypeIssues))
+		require.False(t, permission.CanRead(unit.TypeCode))
+		require.True(t, repo.UnitEnabled(ctx, unit.TypeCode))
+		entry := nativeAdmissions.get(fixture.token)
+		delete(entry.capabilities, extension.CapabilityRepositoryRead)
+		entry.capabilities[extension.CapabilityRepositoryIssuesRead] = struct{}{}
+		id := strconv.FormatInt(repo.ID, 10)
+		call := func(q extension.CallbackRequest) extension.CallbackResponse {
+			t.Helper()
+			q.Authority, q.RepositoryID = fixture.authority, id
+			raw, e := json.Marshal(q)
+			require.NoError(t, e)
+			r := httptest.NewRequest(http.MethodPost, extension.NativeCallbackPath, bytes.NewReader(raw))
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set(extension.AdmissionHeader, fixture.token)
+			w := httptest.NewRecorder()
+			CallbackHandlerForInstance("source-test").ServeHTTP(w, r)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			var result extension.CallbackResponse
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+			return result
+		}
+		metadata := call(extension.CallbackRequest{Operation: extension.OperationRepository})
+		require.NotNil(t, metadata.Repository)
+		require.Equal(t, "issues", metadata.Repository.Permission)
+		_, status := resolveRepository(ctx, entry, id)
+		require.Equal(t, http.StatusNotFound, status)
+		snapshot := call(extension.CallbackRequest{Operation: extension.OperationRepositoryIssueCreateSnapshot}).IssueCreateSnapshot
+		require.NotNil(t, snapshot)
+		require.Equal(t, "allowed", snapshot.Action.State)
+		admit := func(tx context.Context) error {
+			u, s := resolveCurrentUser(tx, entry)
+			if s != http.StatusOK || u.ID != actor.ID {
+				return nativeoperation_service.ErrAuthorityLost
+			}
+			return nil
+		}
+		service := nativeoperation_service.NewService()
+		q := extension.HumanIssueCreateRequest{OperationID: "q20-issue-only-create", Expected: *snapshot, NotAfter: time.Now().Add(time.Minute).Unix(), Title: "Issue-only native collaboration", Body: "Original human Markdown preserved.\n"}
+		const installation = "11111111-2222-4333-8444-555555555555"
+		created, err := service.SubmitHumanIssueCreate(ctx, installation, q, admit)
+		require.NoError(t, err)
+		require.Equal(t, extension.EffectCommitted, created.EffectState)
+		replayed, err := service.SubmitHumanIssueCreate(ctx, installation, q, admit)
+		require.NoError(t, err)
+		require.Equal(t, created.Receipt, replayed.Receipt)
+		var receipt extension.HumanIssueCreateReceipt
+		require.NoError(t, json.Unmarshal(created.Receipt, &receipt))
+		page := call(extension.CallbackRequest{Operation: extension.OperationRepositoryIssues, Query: strconv.FormatInt(receipt.Index, 10), Limit: 1}).Issues
+		require.NotNil(t, page)
+		require.Len(t, page.Items, 1)
+		delete(entry.capabilities, extension.CapabilityRepositoryIssuesRead)
+		_, status = resolveIssueRepository(ctx, entry, id)
+		require.Equal(t, http.StatusNotFound, status)
+		permission, err = access_model.GetUserRepoPermission(ctx, repo, actor)
+		require.NoError(t, err)
+		require.False(t, permission.CanRead(unit.TypeCode))
+		require.True(t, permission.CanWrite(unit.TypeIssues))
+		t.Log("PASS: actual native organisation/team issue writer without code read, explicit issue metadata/create snapshot/read callback, journaled native issue creation/replay, code refusal and capability withdrawal; source/native scope only")
+		return
+	}
 	if os.Getenv("SODA_FOUNTAIN_REVIEW_REQUEST_SDK_PROBE") != "" || os.Getenv("SODA_FOUNTAIN_REVIEW_REQUEST_SNAPSHOT_PROBE") != "" || (os.Getenv("SODA_FOUNTAIN_REVIEW_REQUEST_PRIMARY") == "1" || os.Getenv("SODA_FOUNTAIN_REVIEW_REQUEST_NATIVE") == "1") {
 		runReviewSnapshot(t, fixture, "")
 		return

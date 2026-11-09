@@ -693,7 +693,7 @@ func (m *Manager) startOne(packageDir, dirName string) (_ *running, err error) {
 func needsNativeCallback(capabilities []string) bool {
 	for _, capability := range capabilities {
 		switch capability {
-		case sdk.CapabilityActorRead, sdk.CapabilityRepositoryRead, sdk.CapabilityRuntimeControl,
+		case sdk.CapabilityActorRead, sdk.CapabilityRepositoryRead, sdk.CapabilityRepositoryIssuesRead, sdk.CapabilityRuntimeControl,
 			sdk.CapabilityOwnedRepositoriesSearch, sdk.CapabilityOrganizationOwnership,
 			sdk.CapabilityPublicKeysRead, sdk.CapabilityBackgroundOperations,
 			sdk.CapabilityExtensionLifecycle, sdk.CapabilityHumanComments, sdk.CapabilityHumanEdits:

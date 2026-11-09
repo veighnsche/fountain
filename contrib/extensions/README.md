@@ -99,13 +99,13 @@ accounts. Pages use the corresponding native layout and navigation:
 | --- | --- | --- |
 | `global` | omitted | `/workspace`, `/feed`, `/applications`, `/tailnet` |
 | `user` | `user` | `/user/settings/workspace`, `/user/settings/identity` |
-| `repository` | `read`, `write`, or `admin` | `/OWNER/REPO/workspace` |
+| `repository` | `issues`, `read`, `write`, or `admin` | `/OWNER/REPO/workspace` |
 | `admin` | `admin` | `/admin/workspace` |
 
 Every route requires a native signed-in browser session and the existing native
 account-state checks. Tokens, Basic authentication and reverse-proxy login are
 not accepted as extension credentials. Repository contributions use native code
-unit read/write permission or repository administration, and inaccessible pages
+unit read/write permission, explicit `issues` unit read permission, or repository administration, and inaccessible pages
 are omitted from navigation and rejected by direct requests. Repository `admin`
 pages use the native repository settings layout. Site administration requires a
 site administrator.
@@ -342,6 +342,15 @@ current native reads; each callback is checked by the host against its private
 admission and current session. Enforce endpoint-specific policy in
 the extension: a read page does not make every backend operation appropriate for
 a reader. Partition private state by authoritative IDs rather than browser input.
+
+An extension may separately declare `native.repository.issues.read` and a repository
+page with permission `issues`. This admits ordinary issue metadata, lists and issue
+preparation snapshots without code-unit read. Repository metadata reports permission
+`issues`; it supplies no code, PR, check, intake, execution or publication authority.
+Issue writes still need their own declared capability and current native human
+permission. Every read rechecks the exact account and repository; withdrawal takes
+effect during I/O. Code-reader pages and capabilities retain their existing scope.
+Native desktop enrollment remains governed by its separate gateway grants.
 
 The proxy supports ordinary GET, HEAD, POST, PUT, PATCH and DELETE requests,
 forwards Accept, Accept-Language and Content-Type, and preserves the relative

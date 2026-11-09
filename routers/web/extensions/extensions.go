@@ -178,6 +178,8 @@ func allowed(ctx *context.Context, p extension.Page) bool {
 			return false
 		}
 		switch p.Permission {
+		case "issues":
+			return ctx.Repo.CanRead(unit.TypeIssues)
 		case "read":
 			return ctx.Repo.CanRead(unit.TypeCode)
 		case "write":
@@ -265,7 +267,7 @@ func pageSubroute(scope, route string) func(*context.Context) {
 }
 
 func repositorySubroute(ctx *context.Context) {
-	if !ctx.Repo.CanRead(unit.TypeCode) {
+	if !ctx.Repo.CanRead(unit.TypeCode) && !ctx.Repo.CanRead(unit.TypeIssues) {
 		ctx.NotFound("Feed", nil)
 		return
 	}
@@ -305,7 +307,7 @@ func findRoute(ctx *context.Context, scope, route string) (extensions_service.De
 
 // repositoryFeed serves the repository-scoped feed.
 func repositoryFeed(ctx *context.Context) {
-	if !ctx.Repo.CanRead(unit.TypeCode) {
+	if !ctx.Repo.CanRead(unit.TypeCode) && !ctx.Repo.CanRead(unit.TypeIssues) {
 		ctx.NotFound("Feed", nil)
 		return
 	}

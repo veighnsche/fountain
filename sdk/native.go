@@ -890,7 +890,7 @@ func validCallbackResult(result CallbackResponse, request CallbackRequest) bool 
 			return false
 		}
 		switch result.Repository.Permission {
-		case "read", "write", "admin":
+		case "read", "issues", "write", "admin":
 			return true
 		default:
 			return false

@@ -19,7 +19,11 @@ import (
 // Load the current parent and its own unit permission for each bracket side.
 // PR discussion is not authorized merely by access to ordinary repository issues.
 func discussionParent(ctx context.Context, admission *callbackAdmission, repository string, q extension.RepositoryCommentsRequest) (*issues_model.Issue, string, int) {
-	if _, status := resolveRepository(ctx, admission, repository); status != http.StatusOK {
+	resolve := resolveRepository
+	if q.Subject == "issue" {
+		resolve = resolveIssueRepository
+	}
+	if _, status := resolve(ctx, admission, repository); status != http.StatusOK {
 		return nil, "", status
 	}
 	return issueOrPullParent(ctx, admission, repository, q)

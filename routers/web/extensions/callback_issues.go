@@ -17,7 +17,7 @@ import (
 )
 
 func resolveRepositoryIssues(ctx context.Context, admission *callbackAdmission, request extension.CallbackRequest) (*extension.RepositoryIssuePage, int) {
-	if _, status := resolveRepository(ctx, admission, request.RepositoryID); status != http.StatusOK {
+	if _, status := resolveIssueRepository(ctx, admission, request.RepositoryID); status != http.StatusOK {
 		return nil, status
 	}
 	user, status := resolveCurrentUser(ctx, admission)
@@ -114,7 +114,7 @@ func resolveRepositoryIssues(ctx context.Context, admission *callbackAdmission, 
 		page.Items = append(page.Items, item)
 	}
 	// Session and repository visibility must still hold after native I/O.
-	if _, status := resolveRepository(ctx, admission, request.RepositoryID); status != http.StatusOK {
+	if _, status := resolveIssueRepository(ctx, admission, request.RepositoryID); status != http.StatusOK {
 		return nil, status
 	}
 	current, status := resolveCurrentUser(ctx, admission)

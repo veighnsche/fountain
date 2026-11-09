@@ -311,7 +311,7 @@ func callbackHandler(instanceID string, service bool) http.Handler {
 			http.Error(w, "unsupported native capability", http.StatusNotImplemented)
 			return
 		}
-		if _, declared := entry.capabilities[capability]; !declared {
+		if _, declared := entry.capabilities[capability]; !declared && !issueReadDeclared(entry, request) {
 			http.Error(w, "native capability not declared", http.StatusForbidden)
 			return
 		}
@@ -1069,7 +1069,7 @@ func callbackHandler(instanceID string, service bool) http.Handler {
 			}
 			response.Actor = &actor
 		case extension.OperationRepository:
-			response.Repository, status = resolveRepository(callbackCtx, entry, request.RepositoryID)
+			response.Repository, status = resolveCollaborationRepository(callbackCtx, entry, request.RepositoryID)
 			if status != http.StatusOK {
 				http.Error(w, "native repository is unavailable", status)
 				return
@@ -1315,7 +1315,51 @@ func resolveCurrentActor(ctx context.Context, admission *callbackAdmission) (ext
 	return extension.Actor{ID: strconv.FormatInt(user.ID, 10), Username: user.Name, SiteAdmin: user.IsAdmin}, http.StatusOK
 }
 
+// This capability permits only issue metadata and ordinary issue discussion.
+// Code, PR data, checks, intake and runtime authority keep their own gates.
+func issueReadDeclared(admission *callbackAdmission, request extension.CallbackRequest) bool {
+	if _, ok := admission.capabilities[extension.CapabilityRepositoryIssuesRead]; !ok {
+		return false
+	}
+	switch request.Operation {
+	case extension.OperationRepository, extension.OperationReadableRepositories, extension.OperationRepositoryIssues, extension.OperationRepositoryIssueCreateSnapshot:
+		return true
+	case extension.OperationRepositoryComments:
+		return request.Comments != nil && request.Comments.Subject == "issue"
+	case extension.OperationRepositoryCommentSnapshot:
+		return request.CommentSnapshot != nil && request.CommentSnapshot.Subject == "issue"
+	case extension.OperationRepositoryEditSnapshot:
+		return request.EditSnapshot != nil && request.EditSnapshot.Subject == "issue"
+	case extension.OperationRepositoryStateSnapshot:
+		return request.StateSnapshot != nil && request.StateSnapshot.Subject == "issue"
+	case extension.OperationRepositoryLockSnapshot:
+		return request.LockSnapshot != nil && request.LockSnapshot.Subject == "issue"
+	}
+	return false
+}
+
+func resolveCollaborationRepository(ctx context.Context, admission *callbackAdmission, repositoryID string) (*extension.Repository, int) {
+	if _, ok := admission.capabilities[extension.CapabilityRepositoryRead]; ok {
+		repository, status := resolveRepository(ctx, admission, repositoryID)
+		if status != http.StatusNotFound {
+			return repository, status
+		}
+	}
+	return resolveIssueRepository(ctx, admission, repositoryID)
+}
+
+func resolveIssueRepository(ctx context.Context, admission *callbackAdmission, repositoryID string) (*extension.Repository, int) {
+	if _, ok := admission.capabilities[extension.CapabilityRepositoryIssuesRead]; !ok {
+		return resolveRepository(ctx, admission, repositoryID)
+	}
+	return resolveRepositoryUnit(ctx, admission, repositoryID, unit.TypeIssues)
+}
+
 func resolveRepository(ctx context.Context, admission *callbackAdmission, repositoryID string) (*extension.Repository, int) {
+	return resolveRepositoryUnit(ctx, admission, repositoryID, unit.TypeCode)
+}
+
+func resolveRepositoryUnit(ctx context.Context, admission *callbackAdmission, repositoryID string, required unit.Type) (*extension.Repository, int) {
 	user, status := resolveCurrentUser(ctx, admission)
 	if status != http.StatusOK {
 		return nil, status
@@ -1341,7 +1385,7 @@ func resolveRepository(ctx context.Context, admission *callbackAdmission, reposi
 	if err != nil {
 		return nil, http.StatusServiceUnavailable
 	}
-	if !permission.CanRead(unit.TypeCode) {
+	if !permission.CanRead(required) || required == unit.TypeIssues && !repository.UnitEnabled(ctx, unit.TypeIssues) {
 		return nil, http.StatusNotFound
 	}
 	if err := repository.LoadOwner(ctx); err != nil {
@@ -1350,11 +1394,14 @@ func resolveRepository(ctx context.Context, admission *callbackAdmission, reposi
 		}
 		return nil, http.StatusServiceUnavailable
 	}
-	level := "read"
-	if permission.IsAdmin() {
-		level = "admin"
-	} else if permission.CanWrite(unit.TypeCode) {
-		level = "write"
+	level := "issues"
+	if required == unit.TypeCode {
+		level = "read"
+		if permission.IsAdmin() {
+			level = "admin"
+		} else if permission.CanWrite(unit.TypeCode) {
+			level = "write"
+		}
 	}
 	return &extension.Repository{ID: strconv.FormatInt(repository.ID, 10), Owner: repository.Owner.Name, Name: repository.Name, Permission: level, DefaultBranch: repository.DefaultBranch}, http.StatusOK
 }

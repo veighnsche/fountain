@@ -33,7 +33,7 @@ func validRepositoryCatalog(p *RepositoryPage, q RepositoryCatalogRequest) bool 
 			return false
 		}
 		switch r.Permission {
-		case "read", "write", "admin":
+		case "read", "issues", "write", "admin":
 		default:
 			return false
 		}

@@ -45,11 +45,30 @@ func readableRepositoryCatalog(ctx context.Context, admission *callbackAdmission
 	}
 	// Native access predicates include owned, collaboration, organisation-team
 	// and public visibility. Administrators retain native all-repository access.
-	condition := builder.NewCond()
-	if !user.IsAdmin {
-		condition = repo_model.AccessibleRepositoryCondition(user, unit.TypeCode)
+	accessibleUnit := func(kind unit.Type) builder.Cond {
+		condition := builder.NewCond()
+		if !user.IsAdmin {
+			condition = repo_model.AccessibleRepositoryCondition(user, kind)
+		}
+		return condition.And(builder.In("repository.id", builder.Select("repo_id").From("repo_unit").Where(builder.Eq{"type": kind})))
 	}
-	condition = condition.And(builder.Gt{"repository.id": after}).And(builder.In("repository.id", builder.Select("repo_id").From("repo_unit").Where(builder.Eq{"type": unit.TypeCode})))
+	condition := builder.NewCond()
+	_, codeRead := admission.capabilities[extension.CapabilityRepositoryRead]
+	_, issueRead := admission.capabilities[extension.CapabilityRepositoryIssuesRead]
+	if codeRead {
+		condition = accessibleUnit(unit.TypeCode)
+	}
+	if issueRead {
+		if codeRead {
+			condition = condition.Or(accessibleUnit(unit.TypeIssues))
+		} else {
+			condition = accessibleUnit(unit.TypeIssues)
+		}
+	}
+	if !codeRead && !issueRead {
+		return nil, http.StatusForbidden
+	}
+	condition = condition.And(builder.Gt{"repository.id": after})
 	if query := strings.ToLower(strings.TrimSpace(q.Query)); query != "" {
 		if owner, name, found := strings.Cut(query, "/"); found {
 			condition = condition.And(builder.Like{"repository.owner_name", owner}, builder.Like{"repository.lower_name", name})
@@ -67,7 +86,7 @@ func readableRepositoryCatalog(ctx context.Context, admission *callbackAdmission
 		rows = rows[:q.Limit]
 	}
 	for _, row := range rows {
-		repository, status := resolveRepository(ctx, admission, strconv.FormatInt(row.ID, 10))
+		repository, status := resolveCollaborationRepository(ctx, admission, strconv.FormatInt(row.ID, 10))
 		if status == http.StatusNotFound {
 			continue
 		}
@@ -79,7 +98,7 @@ func readableRepositoryCatalog(ctx context.Context, admission *callbackAdmission
 	// Re-resolve selected resources after assembly: no cached unit/permission
 	// view may disclose a repository after its current access is withdrawn.
 	for _, item := range result.Items {
-		after, status := resolveRepository(ctx, admission, item.ID)
+		after, status := resolveCollaborationRepository(ctx, admission, item.ID)
 		if status == http.StatusNotFound || status == http.StatusOK && *after != item {
 			return nil, http.StatusConflict
 		}

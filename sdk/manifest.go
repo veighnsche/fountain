@@ -164,7 +164,7 @@ func (m Manifest) Validate() error {
 				return fmt.Errorf("admin page %q requires admin permission", p.ID)
 			}
 		case "repository":
-			if p.Permission != "read" && p.Permission != "write" && p.Permission != "admin" {
+			if p.Permission != "read" && p.Permission != "issues" && p.Permission != "write" && p.Permission != "admin" {
 				return fmt.Errorf("repository page %q has invalid permission", p.ID)
 			}
 		default:

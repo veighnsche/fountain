@@ -18,6 +18,7 @@ const (
 
 	CapabilityActorRead               = "native.actor.read"
 	CapabilityRepositoryRead          = "native.repository.read"
+	CapabilityRepositoryIssuesRead    = "native.repository.issues.read"
 	CapabilityOwnedRepositoriesSearch = "native.repositories.owned.search"
 	CapabilityOrganizationOwnership   = "native.organization.ownership"
 	CapabilityPublicKeysRead          = "native.user.public_keys.read"

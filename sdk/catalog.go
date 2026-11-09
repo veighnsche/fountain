@@ -102,6 +102,7 @@ func catalogCapabilities() map[string]bool {
 	return map[string]bool{
 		CapabilityActorRead:               true,
 		CapabilityRepositoryRead:          true,
+		CapabilityRepositoryIssuesRead:    true,
 		CapabilityOwnedRepositoriesSearch: true,
 		CapabilityOrganizationOwnership:   true,
 		CapabilityPublicKeysRead:          true,
