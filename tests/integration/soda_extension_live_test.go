@@ -12,11 +12,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	extension "forgejo.org/extension-sdk"
+	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/desktopgrant"
+	"forgejo.org/models/extensionauth"
+	native_model "forgejo.org/models/nativeoperation"
 	packages "forgejo.org/modules/extensions"
 	"forgejo.org/modules/setting"
 	web_extensions "forgejo.org/routers/web/extensions"
@@ -171,6 +176,41 @@ func TestSodaExtensionLiveBridge(t *testing.T) {
 		receipt := request(owner, http.MethodPost, path, ownerGeneration, command, http.StatusOK)
 		require.Equal(t, "applied", receipt["outcome"])
 		require.Equal(t, receipt, request(owner, http.MethodPost, path, ownerGeneration, command, http.StatusOK))
+		role := &auth_model.AccessToken{UID: 2, Name: "Q19 finite role fixture", Scope: auth_model.AccessTokenScopeWriteRepository, ResourceAllRepos: true}
+		require.NoError(t, auth_model.NewAccessToken(t.Context(), role))
+		installation := view["installation_id"].(string)
+		_, err := extensionauth.EnrollBinding(t.Context(), installation, role.ID, 2, 2, extensionauth.KindLifecycleNote)
+		require.NoError(t, err)
+		view = request(owner, http.MethodGet, path, ownerGeneration, nil, http.StatusOK)
+		require.Len(t, view["actors"], 1)
+		grantCommand := map[string]any{"command_id": "19191919191919191919191919191964", "expected_placement": receipt["placement"].(map[string]any)["revision"], "generation": receipt["placement"].(map[string]any)["generation"], "operations": []string{extensionauth.KindLifecycleNote}, "not_after": time.Now().Unix() + 120, "installation_id": installation, "runtime_id": view["runtime_id"], "actor_id": "2", "token_id": strconv.FormatInt(role.ID, 10)}
+		grant := request(owner, http.MethodPost, path+"/operations", ownerGeneration, grantCommand, http.StatusOK)
+		require.Equal(t, true, grant["active"])
+		require.Equal(t, grant, request(owner, http.MethodPost, path+"/operations", ownerGeneration, grantCommand, http.StatusOK))
+		grantJournal, err := native_model.LookupOperation(t.Context(), installation, grant["id"].(string))
+		require.NoError(t, err)
+		require.NotNil(t, grantJournal)
+		require.EqualValues(t, 2, grantJournal.ActorID)
+		require.Equal(t, "runtime.controller.authorize", grantJournal.Kind)
+		require.Equal(t, grant["id"], grantJournal.ControllerGrantID)
+		use := extensionauth.SubmissionRequest{InstallationID: installation, PackageID: "soda", ActorID: 2, RepositoryID: 2, TokenSecret: role.Token, Kind: extensionauth.KindLifecycleNote, ControllerGrantID: grant["id"].(string), RequireController: true}
+		_, err = extensionauth.VerifySubmission(t.Context(), use)
+		require.NoError(t, err)
+		use.Kind = extensionauth.KindExecutionLaunch
+		_, err = extensionauth.VerifySubmission(t.Context(), use)
+		require.Error(t, err, "a note binding/grant must not admit worker execution")
+		grantCommand["command_id"] = "19191919191919191919191919191965"
+		grantCommand["operations"] = []string{extensionauth.KindExecutionLaunch}
+		request(owner, http.MethodPost, path+"/operations", ownerGeneration, grantCommand, http.StatusServiceUnavailable)
+		_, err = desktopgrant.GetOperationGrant(t.Context(), grantCommand["command_id"].(string))
+		require.ErrorIs(t, err, desktopgrant.ErrNotFound, "refused scope must roll back the inserted grant")
+		_, err = extensionauth.EnrollBinding(t.Context(), installation, role.ID, 2, 2, extensionauth.KindExecutionLaunch)
+		require.NoError(t, err)
+		grantCommand["command_id"] = "19191919191919191919191919191966"
+		executionGrant := request(owner, http.MethodPost, path+"/operations", ownerGeneration, grantCommand, http.StatusOK)
+		use.ControllerGrantID = executionGrant["id"].(string)
+		_, err = extensionauth.VerifySubmission(t.Context(), use)
+		require.NoError(t, err)
 		request(other, http.MethodPost, path, otherGeneration, command, http.StatusNotFound)
 		request(owner, http.MethodGet, path, otherGeneration, nil, http.StatusConflict)
 		for i, action := range []string{"withdraw", "retire"} {
@@ -181,6 +221,15 @@ func TestSodaExtensionLiveBridge(t *testing.T) {
 			require.Equal(t, "applied", receipt["outcome"])
 		}
 		require.Equal(t, "inactive", receipt["placement"].(map[string]any)["state"])
+		_, err = extensionauth.VerifySubmission(t.Context(), use)
+		require.Error(t, err, "withdrawal must fence role grant use")
+		replayed := request(owner, http.MethodPost, path+"/operations", ownerGeneration, grantCommand, http.StatusOK)
+		require.Equal(t, false, replayed["active"])
+		require.Equal(t, executionGrant["not_after"], replayed["not_after"])
+		require.NoError(t, auth_model.DeleteAccessTokenByID(t.Context(), role.ID, 2))
+		replayed = request(owner, http.MethodPost, path+"/operations", ownerGeneration, grantCommand, http.StatusOK)
+		require.Equal(t, false, replayed["active"])
+		require.Equal(t, executionGrant["id"], replayed["id"])
 		t.Log("PASS: actual canonical Factory service and Soda bridge with native human login, repository mapping, host controller selection/exact replay, other-actor and stale-session refusal, withdrawal and retirement; development fixture, no worker or installed claim")
 	}
 

@@ -6,13 +6,23 @@ package extensions
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 )
 
+func sameRuntimeOperations(a, b []string) bool {
+	a = slices.Clone(a)
+	b = slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(a, b)
+}
+
 const (
-	CapabilityRuntimeControl         = "native.repository.runtime.control"
-	OperationRuntimeControllerRead   = "repository.runtime.controller.read"
-	OperationRuntimeControllerSelect = "repository.runtime.controller.select"
+	CapabilityRuntimeControl            = "native.repository.runtime.control"
+	OperationRuntimeControllerRead      = "repository.runtime.controller.read"
+	OperationRuntimeControllerSelect    = "repository.runtime.controller.select"
+	OperationRuntimeControllerAuthorize = "repository.runtime.controller.authorize"
 )
 
 type ApplianceRuntimeSelection struct {
@@ -26,6 +36,51 @@ type RuntimeControllerView struct {
 	RuntimeID      string           `json:"runtime_id"`
 	CanSelect      bool             `json:"can_select"`
 	Placement      RuntimePlacement `json:"placement"`
+	Actors         []RuntimeActor   `json:"actors"`
+}
+
+type RuntimeActor struct {
+	TokenID    string   `json:"token_id"`
+	ActorID    string   `json:"actor_id"`
+	Operations []string `json:"operations"`
+}
+
+type ApplianceOperationAuthorization struct {
+	DesktopOperationAuthorization
+	InstallationID string `json:"installation_id"`
+	RuntimeID      string `json:"runtime_id"`
+	TokenID        string `json:"token_id"`
+	ActorID        string `json:"actor_id"`
+}
+
+type ApplianceOperationGrant struct {
+	ID                string   `json:"id"`
+	InstallationID    string   `json:"installation_id"`
+	RuntimeID         string   `json:"runtime_id"`
+	RepositoryID      string   `json:"repository_id"`
+	TokenID           string   `json:"token_id"`
+	ActorID           string   `json:"actor_id"`
+	Generation        int64    `json:"generation,string"`
+	SelectionRevision string   `json:"selection_revision"`
+	Operations        []string `json:"operations"`
+	NotAfter          int64    `json:"not_after"`
+	Revoked           bool     `json:"revoked"`
+	Active            bool     `json:"active"`
+}
+
+func ValidApplianceOperationAuthorization(q ApplianceOperationAuthorization) bool {
+	return validInstallationID(q.InstallationID) && runtimeHex(q.RuntimeID) && runtimeHex(q.CommandID) && runtimeHex(q.ExpectedPlacement) && decimalID(q.TokenID) && decimalID(q.ActorID) && q.Generation > 0 && q.NotAfter > 0 && len(q.Operations) > 0 && len(q.Operations) <= 10
+}
+
+func (a Authority) AuthorizeRuntimeOperations(ctx context.Context, repository string, q ApplianceOperationAuthorization) (ApplianceOperationGrant, error) {
+	if !decimalID(repository) || !ValidApplianceOperationAuthorization(q) {
+		return ApplianceOperationGrant{}, errors.New("invalid runtime authorization")
+	}
+	r, err := a.nativeClient().call(ctx, CallbackRequest{Operation: OperationRuntimeControllerAuthorize, RepositoryID: repository, RuntimeAuthorization: &q})
+	if err != nil {
+		return ApplianceOperationGrant{}, err
+	}
+	return *r.RuntimeGrant, nil
 }
 
 func runtimeHex(value string) bool {

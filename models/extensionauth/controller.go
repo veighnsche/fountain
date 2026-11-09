@@ -94,16 +94,9 @@ func CheckControllerUse(ctx context.Context, use ControllerUse) (*desktopgrant.O
 			if err != nil || !allowed {
 				return desktopgrant.ErrController
 			}
-			if use.Kind == desktopgrant.ExecutionLaunch {
-				bound, err := HasAnyBinding(ctx, g.InstallationID, g.TokenID, g.ActorID, g.RepositoryID)
-				if err != nil || !bound {
-					return desktopgrant.ErrController
-				}
-			} else {
-				binding, err := FindBinding(ctx, g.InstallationID, g.TokenID, g.ActorID, g.RepositoryID, use.Kind)
-				if err != nil || binding == nil {
-					return desktopgrant.ErrController
-				}
+			binding, err := FindBinding(ctx, g.InstallationID, g.TokenID, g.ActorID, g.RepositoryID, use.Kind)
+			if err != nil || binding == nil {
+				return desktopgrant.ErrController
 			}
 			publicOnly, err := token.Scope.PublicOnly()
 			if err != nil {

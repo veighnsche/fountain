@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"slices"
+	"strconv"
 	"strings"
 
 	sdk "forgejo.org/extension-sdk"
@@ -276,6 +277,80 @@ func (s *Service) AuthorizeDesktopOperations(ctx context.Context, enrollment str
 		}
 		result, err = desktopgrant.EnrollOperationGrant(ctx, requested)
 		return err
+	})
+	return result, err
+}
+
+// AuthorizeApplianceOperations is separate human consent for one previously
+// enrolled role credential. The browser supplies IDs, never the credential.
+// Current token, binding and permissions are checked inside the placement gate;
+// transaction rollback removes a grant if any requested operation is refused.
+func (s *Service) AuthorizeApplianceOperations(ctx context.Context, installation, packageID string, repository, humanID int64, q sdk.ApplianceOperationAuthorization, admit func(context.Context) error) (*desktopgrant.OperationGrant, error) {
+	if humanID <= 0 || !sdk.ValidApplianceOperationAuthorization(q) || q.InstallationID != installation || q.RuntimeID != desktopgrant.ApplianceRuntime(installation) || packageID == "" || packageID != setting.OAuth2.FactoryAppliancePackageID || admit == nil {
+		return nil, ErrInvalidIntent
+	}
+	operations := slices.Clone(q.Operations)
+	slices.Sort(operations)
+	for i, kind := range operations {
+		if !extensionauth.ValidKind(kind) || i > 0 && kind == operations[i-1] {
+			return nil, ErrInvalidIntent
+		}
+	}
+	tokenID, _ := strconv.ParseInt(q.TokenID, 10, 64)
+	actorID, _ := strconv.ParseInt(q.ActorID, 10, 64)
+	var result *desktopgrant.OperationGrant
+	err := desktopgrant.WithPlacement(ctx, repository, func(ctx context.Context, p *desktopgrant.Placement) error {
+		if err := admit(ctx); err != nil {
+			return ErrAuthorityLost
+		}
+		requested := &desktopgrant.OperationGrant{ID: q.CommandID, CredentialKind: desktopgrant.CredentialPAT, TokenID: tokenID, InstallationID: installation, PackageID: packageID, ActorID: actorID, RepositoryID: repository, RuntimeID: q.RuntimeID, Generation: q.Generation, SelectionRevision: q.ExpectedPlacement, Operations: strings.Join(operations, ","), NotAfter: q.NotAfter}
+		old, err := desktopgrant.GetOperationGrant(ctx, q.CommandID)
+		if err == nil {
+			// History adoption uses original provenance, even after token removal.
+			// It never re-enrolls or renews the original grant.
+			requested.TokenFingerprint = old.TokenFingerprint
+			if old.Fingerprint() != requested.Fingerprint() {
+				return ErrIntentConflict
+			}
+			result = old
+			return nil
+		}
+		if err != desktopgrant.ErrNotFound {
+			return err
+		}
+		token := new(auth_model.AccessToken)
+		found, err := db.GetEngine(ctx).ID(tokenID).NoAutoCondition().Get(token)
+		if err != nil {
+			return err
+		}
+		if !found || token.UID != actorID {
+			return ErrAuthorityLost
+		}
+		requested.TokenFingerprint = extensionauth.CredentialFingerprint(token.TokenHash, token.TokenSalt)
+		if p.State != desktopgrant.ControllerActive || p.OwnerKind != desktopgrant.ControllerAppliance || p.OwnerID != installation || p.RuntimeID != q.RuntimeID || p.Generation != q.Generation || p.Revision != q.ExpectedPlacement || q.NotAfter <= s.clock() || q.NotAfter > s.clock()+int64(MaxOperationLifetime.Seconds()) {
+			return ErrAuthorityLost
+		}
+		result, err = desktopgrant.EnrollOperationGrant(ctx, requested)
+		if err != nil {
+			return err
+		}
+		for _, kind := range operations {
+			if _, err := extensionauth.CheckControllerUse(ctx, extensionauth.ControllerUse{GrantID: result.ID, InstallationID: installation, PackageID: packageID, ActorID: actorID, RepositoryID: repository, TokenID: tokenID, CredentialFingerprint: result.TokenFingerprint, Kind: kind}); err != nil {
+				return ErrAuthorityLost
+			}
+		}
+		raw, err := json.Marshal(q)
+		if err != nil {
+			return err
+		}
+		digest := sha256.Sum256(raw)
+		body, err := json.Marshal(struct {
+			GrantID string `json:"grant_id"`
+		}{result.ID})
+		if err != nil {
+			return err
+		}
+		return db.Insert(ctx, &native_model.Operation{InstallationID: installation, OperationID: q.CommandID, Kind: "runtime.controller.authorize", ActorID: humanID, RepositoryID: repository, PackageID: packageID, ControllerGrantID: result.ID, NotAfter: q.NotAfter, IntentDigest: hex.EncodeToString(digest[:]), Intent: string(raw), Submitted: true, Admitted: true, EffectState: native_model.EffectCommitted, Completion: native_model.CompletionComplete, Cancellation: native_model.CancellationNone, Receipt: string(body)})
 	})
 	return result, err
 }

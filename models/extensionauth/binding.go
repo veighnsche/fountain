@@ -32,6 +32,7 @@ const (
 	KindLifecycleIssue  = "issue.lifecycle.apply"
 	KindLifecycleReview = "pull_request.review.request"
 	KindLifecycleNote   = "issue.comment.publish"
+	KindExecutionLaunch = "execution.launch"
 )
 
 // ActorBinding is one administrator approval binding an installation UUID to
@@ -55,7 +56,7 @@ func init() {
 // ValidKind reports whether kind is a supported background operation kind.
 func ValidKind(kind string) bool {
 	switch kind {
-	case KindIssueGraph, KindRefPublish, KindPRCreate, KindReviewSubmit, KindThreadResolve, KindMerge, KindLifecycleIssue, KindLifecycleReview, KindLifecycleNote:
+	case KindIssueGraph, KindRefPublish, KindPRCreate, KindReviewSubmit, KindThreadResolve, KindMerge, KindLifecycleIssue, KindLifecycleReview, KindLifecycleNote, KindExecutionLaunch:
 		return true
 	default:
 		return false

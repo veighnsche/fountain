@@ -48,6 +48,7 @@ const (
 // CallbackRequest is sent only on the private host socket.
 // The host resolves the actor from the admission, never from this body.
 type CallbackRequest struct {
+	RuntimeAuthorization        *ApplianceOperationAuthorization        `json:"runtime_authorization,omitempty"`
 	RuntimeSelection            *ApplianceRuntimeSelection              `json:"runtime_selection,omitempty"`
 	HumanPullCreate             *HumanPullCreateRequest                 `json:"human_pull_create,omitempty"`
 	PullCreateOperationID       string                                  `json:"pull_create_operation_id,omitempty"`
@@ -121,6 +122,7 @@ type CallbackRequest struct {
 }
 
 type CallbackResponse struct {
+	RuntimeGrant          *ApplianceOperationGrant         `json:"runtime_grant,omitempty"`
 	RuntimeController     *RuntimeControllerView           `json:"runtime_controller,omitempty"`
 	RuntimeSelection      *RuntimeSelectionReceipt         `json:"runtime_selection,omitempty"`
 	HumanPullCreate       *OperationLookup                 `json:"human_pull_create,omitempty"`
@@ -750,6 +752,9 @@ func validCallbackResult(result CallbackResponse, request CallbackRequest) bool 
 	if result.RuntimeSelection != nil {
 		fields++
 	}
+	if result.RuntimeGrant != nil {
+		fields++
+	}
 	if result.HumanPullCreate != nil {
 		fields++
 	}
@@ -785,6 +790,9 @@ func validCallbackResult(result CallbackResponse, request CallbackRequest) bool 
 	case OperationRuntimeControllerSelect:
 		q, r := request.RuntimeSelection, result.RuntimeSelection
 		return q != nil && r != nil && r.CommandID == q.CommandID && (r.Outcome == "applied" || r.Outcome == "refused") && ValidRuntimePlacement(r.Placement, request.RepositoryID)
+	case OperationRuntimeControllerAuthorize:
+		q, r := request.RuntimeAuthorization, result.RuntimeGrant
+		return q != nil && r != nil && r.ID == q.CommandID && r.InstallationID == q.InstallationID && r.RuntimeID == q.RuntimeID && r.RepositoryID == request.RepositoryID && r.ActorID == q.ActorID && r.TokenID == q.TokenID && r.Generation == q.Generation && r.SelectionRevision == q.ExpectedPlacement && r.NotAfter == q.NotAfter && sameRuntimeOperations(q.Operations, r.Operations)
 	case OperationHumanMergeSubmit, OperationHumanMergeGet, OperationHumanMergeCancel:
 		return validHumanMergeResult(result.HumanMerge, request)
 	case OperationHumanPullCreateSubmit, OperationHumanPullCreateGet, OperationHumanPullCreateCancel:
