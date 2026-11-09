@@ -22,8 +22,8 @@ package repo
 //     rejects every push option, which also keeps policy push options from
 //     smuggling intent past the registered tuple.
 //
-// The operation binding travels in two request headers on the supported
-// receive-pack route, alongside the native PAT basic authentication:
+// Appliance operation binding travels in two request headers on the supported
+// receive-pack route, alongside native PAT basic authentication:
 //   - PublishOperationHeader carries the registered operation ID.
 //   - The background admission header (sdk.AdmissionHeader) carries the
 //     current installation runtime/service admission.
@@ -33,6 +33,11 @@ package repo
 // Forgejo implements no such protocol: it ignores both headers and serves
 // an ordinary push. The admission value is a bearer secret: it must never
 // appear in command arguments, child environments, logs or diagnostics.
+//
+// Desktop publication uses OAuth bearer authentication, the registered
+// operation header, sdk.PublishDesktopGrantHeader and the original native
+// profile proof. It never accepts appliance admission. Both paths share the
+// same conditional receiver, reservation, hook checks and causal journal.
 
 import (
 	"errors"

@@ -15,6 +15,11 @@ import (
 // the native PAT. Unmodified Forgejo implements no such protocol.
 const PublishOperationHeader = "X-Forgejo-Operation"
 
+// PublishDesktopGrantHeader selects the public desktop conditional receive.
+// It accompanies OAuth bearer authentication, PublishOperationHeader and the
+// original X-Factory-Desktop-Proof; appliance admission cannot be mixed with it.
+const PublishDesktopGrantHeader = "X-Factory-Operation-Grant"
+
 // PublishExpectedOldAbsent is the explicit expected_old value for branch
 // creation. Creation never uses an omitted or wildcard lease.
 const PublishExpectedOldAbsent = "absent"

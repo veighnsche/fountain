@@ -5,7 +5,9 @@ package nativeoperation
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
 	"errors"
 	"os"
@@ -13,6 +15,7 @@ import (
 
 	sdk "forgejo.org/extension-sdk"
 	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/desktopgrant"
 	extensionauth_model "forgejo.org/models/extensionauth"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	repo_model "forgejo.org/models/repo"
@@ -113,6 +116,37 @@ const (
 //
 //nolint:nilnil // Prepared requests and reported outcomes are mutually exclusive.
 func (s *Service) PreparePublishReceive(ctx context.Context, req PublishReceiveRequest) (*PreparedPublishReceive, *PublishReceiveOutcome, error) {
+	return s.preparePublishReceive(ctx, req, func(ctx context.Context, op *nativeoperation_model.Operation) error {
+		return s.verifyReceiveCredential(ctx, op, req.TokenSecret)
+	})
+}
+
+// PrepareDesktopPublishReceive authenticates the desktop's original operation
+// grant and native profile proof. It shares the conditional receive owner and
+// journal with appliance publication, without accepting appliance admission.
+func (s *Service) PrepareDesktopPublishReceive(ctx context.Context, grantID, operationID, proof string, actorID, repositoryID, oauthGrantID int64) (*PreparedPublishReceive, *PublishReceiveOutcome, error) {
+	if !validHex(grantID, 16) || !validHex(proof, 32) {
+		return nil, &PublishReceiveOutcome{Status: 403, Code: PublishReceiveCredentialMismatch}, nil
+	}
+	grant, err := desktopgrant.GetOperationGrant(ctx, grantID)
+	digest := sha256.Sum256([]byte(proof))
+	if err != nil || grant == nil || grant.CredentialKind != desktopgrant.CredentialOAuth || grant.OAuthGrantID != oauthGrantID || oauthGrantID <= 0 ||
+		grant.ActorID != actorID || grant.RepositoryID != repositoryID || !validHex(proof, 32) ||
+		subtle.ConstantTimeCompare([]byte(hex.EncodeToString(digest[:])), []byte(grant.ProofSHA256)) != 1 {
+		return nil, &PublishReceiveOutcome{Status: 403, Code: PublishReceiveCredentialMismatch}, nil
+	}
+	req := PublishReceiveRequest{InstallationID: grant.InstallationID, OperationID: operationID, ActorID: actorID, RepositoryID: repositoryID}
+	return s.preparePublishReceive(ctx, req, func(ctx context.Context, op *nativeoperation_model.Operation) error {
+		if op.ControllerGrantID != grant.ID || op.TokenID != 0 || op.PackageID != "" || op.CredentialFingerprint != grant.Fingerprint() {
+			return ErrAuthorityLost
+		}
+		// The shared owner rechecks current grant, placement, OAuth application,
+		// permission, expiry and withdrawal again before its conditional claim.
+		return s.revalidateSubmission(ctx, op)
+	})
+}
+
+func (s *Service) preparePublishReceive(ctx context.Context, req PublishReceiveRequest, verifyCredential func(context.Context, *nativeoperation_model.Operation) error) (*PreparedPublishReceive, *PublishReceiveOutcome, error) {
 	now := s.clock()
 	op, err := nativeoperation_model.LookupOperation(ctx, req.InstallationID, req.OperationID)
 	if err != nil {
@@ -144,7 +178,7 @@ func (s *Service) PreparePublishReceive(ctx context.Context, req PublishReceiveR
 	if op.ActorID != req.ActorID {
 		return nil, &PublishReceiveOutcome{Status: 403, Code: PublishReceiveActorMismatch}, nil
 	}
-	if err := s.verifyReceiveCredential(ctx, op, req.TokenSecret); err != nil {
+	if err := verifyCredential(ctx, op); err != nil {
 		if errors.Is(err, ErrAuthorityLost) {
 			return nil, &PublishReceiveOutcome{Status: 403, Code: PublishReceiveCredentialMismatch}, nil
 		}

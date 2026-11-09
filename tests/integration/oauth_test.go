@@ -25,10 +25,12 @@ import (
 	extension "forgejo.org/extension-sdk"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
+	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
+	repo_module "forgejo.org/modules/repository"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"
 	"forgejo.org/modules/test"
@@ -2087,10 +2089,82 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 		require.Equal(t, "refused", refusal.Outcome)
 		require.Equal(t, selectedReceipt.Placement, refusal.Placement)
 		authorize := extension.DesktopOperationAuthorization{CommandID: strings.Repeat("5", 32), ExpectedPlacement: selectedReceipt.Placement.Revision, Generation: 1, Operations: []string{"execution.launch", extension.OperationKindLifecycleNote}, NotAfter: time.Now().Unix() + 120}
+		publishCheck := os.Getenv("FACTORY_FOUNTAIN_PUBLISH_CHECK") == "1"
+		if publishCheck {
+			authorize.Operations = []string{extension.OperationKindRefPublish}
+		}
 		var operationGrant extension.DesktopOperationGrant
 		DecodeJSON(t, call(http.MethodPost, selected+"/operations", authorize, http.StatusOK), &operationGrant)
 		require.True(t, operationGrant.Active)
 		opBase := selected + "/operations/" + operationGrant.ID
+		if publishCheck {
+			repo, err := repo_model.GetRepositoryByID(t.Context(), 1)
+			require.NoError(t, err)
+			require.NoError(t, repo.LoadOwner(t.Context()))
+			server := httptest.NewServer(testWebRoutes)
+			defer server.Close()
+			configuration, err := setting.NewConfigProviderFromFile(setting.CustomConf)
+			require.NoError(t, err)
+			configuration.Section("server").Key("LOCAL_ROOT_URL").SetValue(server.URL + "/")
+			configuration.Section("repository").Key("ROOT").SetValue(setting.RepoRootPath)
+			configuration.Section("security").Key("INTERNAL_TOKEN").SetValue(setting.InternalToken)
+			configuration.Section("security").DeleteKey("INTERNAL_TOKEN_URI")
+			hookConfig := filepath.Join(t.TempDir(), "hooks.ini")
+			require.NoError(t, configuration.SaveTo(hookConfig))
+			require.NoError(t, os.Chmod(hookConfig, 0o600))
+			binary := os.Getenv("FACTORY_FOUNTAIN_PUBLISH_BINARY")
+			require.True(t, filepath.IsAbs(binary))
+			defer test.MockVariableValue(&setting.AppPath, binary)()
+			defer test.MockVariableValue(&setting.CustomConf, hookConfig)()
+			require.NoError(t, repo_module.CreateDelegateHooks(repo.RepoPath()))
+			client := filepath.Join(t.TempDir(), "candidate.git")
+			output, err := exec.Command("git", "clone", "--bare", repo.RepoPath(), client).CombinedOutput()
+			require.NoError(t, err, string(output))
+			git := func(arguments ...string) []byte {
+				t.Helper()
+				out, e := exec.Command("git", append([]string{"-C", client}, arguments...)...).CombinedOutput()
+				require.NoError(t, e, string(out))
+				return bytes.TrimSpace(out)
+			}
+			baseOID := string(git("rev-parse", "refs/heads/master"))
+			tree := string(git("rev-parse", "refs/heads/master^{tree}"))
+			candidate := string(git("-c", "user.name=Native publish fixture", "-c", "user.email=publish@example.invalid", "commit-tree", tree, "-p", baseOID, "-m", "Q21 exact candidate"))
+			var revision struct {
+				Revision int64 `json:"revision"`
+			}
+			DecodeJSON(t, call(http.MethodGet, selected+"/native-revision", nil, http.StatusOK), &revision)
+			payload, err := json.Marshal(extension.PublishPayload{Ref: "refs/heads/q21-public-grant", ExpectedOld: extension.PublishExpectedOldAbsent, NewOID: candidate, ComparisonRef: "refs/heads/master", ExpectedComparisonOID: baseOID})
+			require.NoError(t, err)
+			intent := extension.OperationIntent{ControllerGrantID: operationGrant.ID, OperationID: "q21-public-grant-1", InstallationID: operationGrant.InstallationID, ActorID: binding.Actor.ID, RepositoryID: binding.Repository.ID, Kind: extension.OperationKindRefPublish, AuthorizationRevision: operationGrant.ID, ExpectedNativeRevision: revision.Revision, NotAfter: authorize.NotAfter, Payload: payload}
+			var registered extension.OperationRecord
+			DecodeJSON(t, call(http.MethodPost, opBase+"/submit", intent, http.StatusOK), &registered)
+			require.Equal(t, extension.EffectPending, registered.EffectState)
+			packCommand := exec.Command("git", "-C", client, "pack-objects", "--stdout", "--revs")
+			packCommand.Stdin = strings.NewReader(candidate + "\n^" + baseOID + "\n")
+			pack, err := packCommand.Output()
+			require.NoError(t, err)
+			line := strings.Repeat("0", 40) + " " + candidate + " refs/heads/q21-public-grant\x00report-status\n"
+			wire := append([]byte(fmt.Sprintf("%04x%s0000", len(line)+4, line)), pack...)
+			receive := func(nativeProof string, status int) *httptest.ResponseRecorder {
+				r := NewRequestWithBody(t, http.MethodPost, "/user2/repo1.git/git-receive-pack", bytes.NewReader(wire)).SetHeader("Content-Type", "application/x-git-receive-pack-request").SetHeader("Authorization", "Bearer "+controlTokens.AccessToken).SetHeader("X-Factory-Operation-Grant", operationGrant.ID).SetHeader("X-Forgejo-Operation", intent.OperationID).SetHeader("X-Factory-Desktop-Proof", nativeProof)
+				return MakeRequest(t, r, status)
+			}
+			receive(strings.Repeat("f", 64), http.StatusForbidden)
+			response := receive(proof, http.StatusOK)
+			var lookup struct {
+				Record extension.OperationRecord `json:"record"`
+			}
+			DecodeJSON(t, call(http.MethodGet, opBase+"/journal/"+intent.OperationID, nil, http.StatusOK), &lookup)
+			t.Logf("Original conditional receive: effect=%s completion=%s reason=%s receipt=%s", lookup.Record.EffectState, lookup.Record.CompletionState, lookup.Record.ReasonCode, lookup.Record.Receipt)
+			require.Contains(t, response.Body.String(), "ok refs/heads/q21-public-grant")
+			require.Equal(t, extension.EffectCommitted, lookup.Record.EffectState)
+			require.Equal(t, extension.CompletionComplete, lookup.Record.CompletionState)
+			require.Contains(t, string(lookup.Record.Receipt), candidate)
+			replay := receive(proof, http.StatusConflict)
+			require.Contains(t, replay.Body.String(), "already_committed")
+			t.Log("PASS: real OAuth/native proof/controller grant conditional Git receive, exact head/base, wrong-profile refusal, committed host receipt and replay without a second receiver; local candidate declared, no worker or inference")
+			return
+		}
 		func() {
 			defer test.MockVariableValue(&setting.OAuth2.FactoryDesktopControlClientID, "")()
 			var unavailable extension.DesktopOperationGrant
