@@ -101,6 +101,7 @@ var OAuth2 = struct {
 	MaxTokenLength              int
 	DefaultApplications         []string
 	EnableAdditionalGrantScopes bool
+	FactoryDesktopClientID      string `ini:"FACTORY_DESKTOP_CLIENT_ID"`
 }{
 	Enabled:                     true,
 	AccessTokenExpirationTime:   3600,

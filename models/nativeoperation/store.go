@@ -6,6 +6,7 @@ package nativeoperation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -111,18 +112,24 @@ func ReadReservation(ctx context.Context) (*Reservation, error) {
 	if has {
 		return reservation, nil
 	}
-	reservation = &Reservation{ID: 1, Revision: 1}
-	if err := db.Insert(ctx, reservation); err != nil {
-		// A concurrent first read may win the insert; reread its row.
-		existing := new(Reservation)
-		has, getErr := db.GetEngine(ctx).ID(1).NoAutoCondition().Get(existing)
-		if getErr != nil {
-			return nil, getErr
-		}
-		if has {
-			return existing, nil
-		}
+	// A duplicate INSERT aborts a PostgreSQL caller transaction, so catching
+	// its error and rereading cannot recover a concurrent first read. Preserve
+	// the winning row without changing revision, ownership or generation.
+	conflict := " ON CONFLICT (id) DO NOTHING"
+	if setting.Database.Type.IsMySQL() {
+		conflict = " ON DUPLICATE KEY UPDATE id=id"
+	}
+	query := fmt.Sprintf("INSERT INTO `%s` (id,revision,owner,generation,owner_kind,verifier,scope,updated_unix) VALUES (1,1,'',0,'','','',?)%s", db.TableName(new(Reservation)), conflict)
+	if _, err := db.GetEngine(ctx).Exec(query, timeutil.TimeStampNow()); err != nil {
 		return nil, err
+	}
+	reservation = new(Reservation)
+	has, err = db.GetEngine(ctx).ID(1).NoAutoCondition().Get(reservation)
+	if err != nil {
+		return nil, err
+	}
+	if !has {
+		return nil, errors.New("native reservation initialization was not observed")
 	}
 	return reservation, nil
 }

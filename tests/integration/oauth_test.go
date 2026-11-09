@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1949,6 +1950,13 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 	defer test.MockVariableValue(&setting.OAuth2.EnableAdditionalGrantScopes, true)()
 	clientID := "ce5a1322-42a7-11ed-b878-0242ac120002"
 	redirect := "http://127.0.0.1/"
+	MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/factory/desktop/oauth"), http.StatusNotFound)
+	defer test.MockVariableValue(&setting.OAuth2.FactoryDesktopClientID, clientID)()
+	discovery := MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/factory/desktop/oauth"), http.StatusOK)
+	var configured map[string]string
+	DecodeJSON(t, discovery, &configured)
+	require.Equal(t, clientID, configured["client_id"])
+	require.Equal(t, "read:repository", configured["scope"])
 	verifier := strings.Repeat("v", 43)
 	digest := sha256.Sum256([]byte(verifier))
 	scope := "read:repository"
@@ -2021,10 +2029,119 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 		require.True(t, filepath.IsAbs(root) && strings.HasPrefix(root, "/home/"))
 		keyPair, err := tls.LoadX509KeyPair(filepath.Join(root, "server.pem"), filepath.Join(root, "server.key"))
 		require.NoError(t, err)
-		server := httptest.NewUnstartedServer(testWebRoutes)
+		var enrollmentSends atomic.Int32
+		var lostEnrollment atomic.Bool
+		var refreshSends atomic.Int32
+		if os.Getenv("FACTORY_FOUNTAIN_NATIVE_OAUTH") == "1" {
+			defer test.MockVariableValue(&setting.OAuth2.AccessTokenExpirationTime, int64(5))()
+		}
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if os.Getenv("FACTORY_FOUNTAIN_NATIVE_OAUTH") == "1" && r.Method == http.MethodPost && r.URL.Path == base {
+				enrollmentSends.Add(1)
+				if lostEnrollment.CompareAndSwap(false, true) {
+					written := httptest.NewRecorder()
+					testWebRoutes.ServeHTTP(written, r)
+					if written.Code != http.StatusCreated {
+						w.WriteHeader(written.Code)
+						return
+					}
+					// The actual host transaction committed; lose only its reply.
+					connection, _, err := w.(http.Hijacker).Hijack()
+					if err == nil {
+						_ = connection.Close()
+					}
+					return
+				}
+			}
+			if os.Getenv("FACTORY_FOUNTAIN_NATIVE_OAUTH") == "1" && r.URL.Path == "/login/oauth/access_token" {
+				if err := r.ParseForm(); err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				if r.Form.Get("grant_type") == "refresh_token" && refreshSends.Add(1) == 2 {
+					written := httptest.NewRecorder()
+					testWebRoutes.ServeHTTP(written, r)
+					if written.Code != http.StatusOK {
+						w.WriteHeader(written.Code)
+						return
+					}
+					if err := os.WriteFile(filepath.Join(root, "refresh-entered"), []byte("committed"), 0o600); err != nil {
+						w.WriteHeader(http.StatusInternalServerError)
+						return
+					}
+					deadline := time.Now().Add(6 * time.Second)
+					for {
+						if _, err := os.Stat(filepath.Join(root, "refresh-release")); err == nil {
+							break
+						}
+						if time.Now().After(deadline) {
+							w.WriteHeader(http.StatusGatewayTimeout)
+							return
+						}
+						time.Sleep(20 * time.Millisecond)
+					}
+					for key, values := range written.Header() {
+						w.Header()[key] = values
+					}
+					w.WriteHeader(written.Code)
+					_, _ = w.Write(written.Body.Bytes())
+					return
+				}
+			}
+			testWebRoutes.ServeHTTP(w, r)
+		})
+		server := httptest.NewUnstartedServer(handler)
 		server.TLS = &tls.Config{Certificates: []tls.Certificate{keyPair}, MinVersion: tls.VersionTLS12}
 		server.StartTLS()
 		defer server.Close()
+		if os.Getenv("FACTORY_FOUNTAIN_NATIVE_OAUTH") == "1" {
+			backend, payload := os.Getenv("FACTORY_FOUNTAIN_NATIVE_BACKEND"), os.Getenv("FACTORY_FOUNTAIN_NATIVE_POSTGRES")
+			require.True(t, filepath.IsAbs(backend) && filepath.IsAbs(payload))
+			command := exec.CommandContext(t.Context(), checker, "--fountain-desktop-login", filepath.Join(root, "profile"), server.URL, clientID, backend, payload)
+			command.Env = append(os.Environ(), "SSL_CERT_FILE="+filepath.Join(root, "ca.pem"), "SODA_FOUNTAIN_LOST_ENROLLMENT=1", "SODA_FOUNTAIN_REFRESH_RACE=1")
+			var output bytes.Buffer
+			command.Stdout, command.Stderr = &output, &output
+			require.NoError(t, command.Start())
+			waited := false
+			defer func() {
+				if !waited {
+					_ = command.Process.Kill()
+					_ = command.Wait()
+				}
+				_ = os.WriteFile(filepath.Join(root, "native-check.log"), output.Bytes(), 0o600)
+			}()
+			var authorization []byte
+			require.Eventually(t, func() bool {
+				var err error
+				authorization, err = os.ReadFile(filepath.Join(root, "fountain-authorize-uri"))
+				return err == nil && len(authorization) > 0
+			}, 30*time.Second, 20*time.Millisecond)
+			authorize, err := url.Parse(string(authorization))
+			require.NoError(t, err)
+			require.Equal(t, server.URL, authorize.Scheme+"://"+authorize.Host)
+			query := authorize.Query()
+			require.Equal(t, "S256", query.Get("code_challenge_method"))
+			require.Equal(t, clientID, query.Get("client_id"))
+			session.MakeRequest(t, NewRequest(t, http.MethodGet, authorize.RequestURI()), http.StatusOK)
+			consent := session.MakeRequest(t, NewRequestWithValues(t, http.MethodPost, "/login/oauth/grant", map[string]string{"client_id": clientID, "redirect_uri": query.Get("redirect_uri"), "state": query.Get("state"), "granted": "true", "scope": query.Get("scope")}), http.StatusSeeOther)
+			callback, err := consent.Result().Location()
+			require.NoError(t, err)
+			require.Empty(t, callback.Query().Get("error"), "native consent error: %s", callback.Query().Get("error_description"))
+			require.Equal(t, query.Get("state"), callback.Query().Get("state"))
+			browser := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+			reply, err := browser.Get(callback.String())
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, reply.StatusCode)
+			_ = reply.Body.Close()
+			err = command.Wait()
+			waited = true
+			t.Log(output.String())
+			require.NoError(t, err)
+			require.True(t, lostEnrollment.Load())
+			require.EqualValues(t, 2, refreshSends.Load(), "expiry refresh and single in-flight withdrawal; no replay")
+			require.EqualValues(t, 3, enrollmentSends.Load(), "original send plus exact replay after refresh and withdrawal; recovery lookup must not dispatch")
+			return
+		}
 		command := exec.CommandContext(t.Context(), checker, "--fountain-desktop-declared", filepath.Join(root, "profile"), server.URL, clientID)
 		command.Env = append(os.Environ(), "SSL_CERT_FILE="+filepath.Join(root, "ca.pem"))
 		command.Stdin = strings.NewReader(tokens.AccessToken)

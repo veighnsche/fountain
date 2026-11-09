@@ -800,6 +800,9 @@ func Routes() *web.Route {
 		// `AccessTokenScopeCategoryRepository`; it's protected by either the User or Organization scope.
 		m.Delete("/repos/{username}/{reponame}", repoAssignment, repoAccess(), tokenRequiresRepoOwnerScope(), reqOwner(), repo.Delete)
 
+		m.Get("/factory/desktop/oauth", repo.DesktopOAuthConfig)
+		m.Get("/factory/desktop/identity", reqToken(), tokenRequiresReadScopes(auth_model.AccessTokenScopeCategoryRepository), repo.DesktopOAuthIdentity)
+
 		// Repos (requires repo scope)
 		m.Group("/repos/{username}/{reponame}/factory/desktop/grants", func() {
 			m.Post("", repo.EnrollDesktopGrant)

@@ -604,8 +604,51 @@ func winnersOf(results []raceResult) []raceResult {
 }
 
 func TestConcurrentOrdinaryClaimOnPostgres(t *testing.T) {
-	useDisposablePostgres(t)
+	engine := useDisposablePostgres(t)
 	ctx := context.Background()
+	// Hold both first INSERTs after their empty reads. A duplicate must not
+	// abort either caller's surrounding transaction or change the idle row.
+	blocked, barrier, err := db.TxContext(ctx)
+	require.NoError(t, err)
+	defer barrier.Close()
+	_, err = db.GetEngine(blocked).Exec("LOCK TABLE `reservation` IN SHARE MODE")
+	require.NoError(t, err)
+	type firstRead struct {
+		reservation *nativeoperation_model.Reservation
+		err         error
+	}
+	reads := make(chan firstRead, 2)
+	for range 2 {
+		go func() {
+			transaction, commit, err := db.TxContext(ctx)
+			if err != nil {
+				reads <- firstRead{err: err}
+				return
+			}
+			defer commit.Close()
+			reservation, err := nativeoperation_model.ReadReservation(transaction)
+			if err == nil {
+				_, err = db.GetEngine(transaction).Exec("SELECT 1")
+			}
+			if err == nil {
+				err = commit.Commit()
+			}
+			reads <- firstRead{reservation, err}
+		}()
+	}
+	require.Eventually(t, func() bool {
+		var count int64
+		_, err := engine.SQL("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'INSERT INTO %reservation%'").Get(&count)
+		return err == nil && count == 2
+	}, 10*time.Second, 10*time.Millisecond)
+	require.NoError(t, barrier.Commit())
+	for range 2 {
+		got := <-reads
+		require.NoError(t, got.err)
+		require.EqualValues(t, 1, got.reservation.Revision)
+		require.Empty(t, got.reservation.Owner)
+		require.Zero(t, got.reservation.Generation)
+	}
 
 	start, err := nativeoperation_model.ReadReservation(ctx)
 	require.NoError(t, err)

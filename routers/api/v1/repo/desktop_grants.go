@@ -18,11 +18,42 @@ import (
 	extension "forgejo.org/extension-sdk"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/desktopgrant"
+	"forgejo.org/modules/setting"
 	"forgejo.org/services/context"
 )
 
 var desktopID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 var desktopProof = regexp.MustCompile(`^[a-f0-9]{64}$`)
+
+// DesktopOAuthConfig exposes only the operator-selected public application's
+// identifier. It creates no application, authorization or repository grant.
+func DesktopOAuthConfig(ctx *context.APIContext) {
+	ctx.Resp.Header().Set("Cache-Control", "no-store")
+	if !setting.OAuth2.Enabled || setting.OAuth2.FactoryDesktopClientID == "" || !setting.OAuth2.EnableAdditionalGrantScopes {
+		ctx.NotFound()
+		return
+	}
+	app, err := auth_model.GetOAuth2ApplicationByClientID(ctx, setting.OAuth2.FactoryDesktopClientID)
+	if err != nil || app.ConfidentialClient || !app.ContainsRedirectURI("http://127.0.0.1/") {
+		ctx.NotFound()
+		return
+	}
+	ctx.JSON(http.StatusOK, map[string]string{"client_id": app.ClientID, "scope": "read:repository"})
+}
+
+// DesktopOAuthIdentity verifies the authenticated self without requiring a
+// broader user scope or any repository's code-unit permission.
+func DesktopOAuthIdentity(ctx *context.APIContext) {
+	_, app, ok := desktopAuthorization(ctx)
+	if !ok {
+		return
+	}
+	if app.ClientID != setting.OAuth2.FactoryDesktopClientID {
+		ctx.Error(http.StatusForbidden, "desktop identity", errors.New("configured desktop application required"))
+		return
+	}
+	ctx.JSON(http.StatusOK, extension.Actor{ID: strconv.FormatInt(ctx.Doer().ID, 10), Username: ctx.Doer().Name})
+}
 
 // OAuth grants can be shared by several devices. Only this profile knows the
 // preimage; metadata and a shared account token cannot adopt its enrollment.
