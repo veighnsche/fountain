@@ -18,8 +18,12 @@ func capabilityFact(state, reason string) extension.RepositoryActionCapability {
 }
 
 func readRepositoryCapabilities(ctx context.Context, admission *callbackAdmission, repository string, q extension.RepositoryCapabilitiesRequest) (*extension.RepositoryCapabilities, int) {
-	if _, status := resolveRepository(ctx, admission, repository); status != http.StatusOK {
+	metadata, status := resolveCollaborationRepository(ctx, admission, repository)
+	if status != http.StatusOK {
 		return nil, status
+	}
+	if metadata.Permission == "issues" && q.Subject == "pull" {
+		return nil, http.StatusNotFound
 	}
 	user, status := resolveCurrentUser(ctx, admission)
 	if status != http.StatusOK {
@@ -43,6 +47,9 @@ func readRepositoryCapabilities(ctx context.Context, admission *callbackAdmissio
 		return capabilityFact("allowed", "unit_read")
 	}
 	issues, pulls, jobs := unitRead(unit.TypeIssues), unitRead(unit.TypePullRequests), unitRead(unit.TypeActions)
+	if metadata.Permission == "issues" {
+		pulls, jobs = capabilityFact("denied", "code_read_required"), capabilityFact("denied", "code_read_required")
+	}
 	if !setting.Actions.Enabled {
 		jobs = capabilityFact("unsupported", "actions_disabled")
 	}

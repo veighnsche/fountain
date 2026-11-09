@@ -1326,6 +1326,8 @@ func issueReadDeclared(admission *callbackAdmission, request extension.CallbackR
 		return true
 	case extension.OperationRepositoryComments:
 		return request.Comments != nil && request.Comments.Subject == "issue"
+	case extension.OperationRepositoryCapabilities:
+		return request.Capabilities != nil && (request.Capabilities.Subject == "repository" || request.Capabilities.Subject == "issue")
 	case extension.OperationRepositoryCommentSnapshot:
 		return request.CommentSnapshot != nil && request.CommentSnapshot.Subject == "issue"
 	case extension.OperationRepositoryEditSnapshot:

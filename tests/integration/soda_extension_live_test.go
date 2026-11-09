@@ -8,9 +8,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
+	"fmt"
 	"forgejo.org/models/db"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -25,6 +27,11 @@ import (
 	"forgejo.org/models/desktopgrant"
 	"forgejo.org/models/extensionauth"
 	native_model "forgejo.org/models/nativeoperation"
+	"forgejo.org/models/organization"
+	access_model "forgejo.org/models/perm/access"
+	repo_model "forgejo.org/models/repo"
+	"forgejo.org/models/unit"
+	user_model "forgejo.org/models/user"
 	packages "forgejo.org/modules/extensions"
 	"forgejo.org/modules/setting"
 	web_extensions "forgejo.org/routers/web/extensions"
@@ -52,6 +59,12 @@ func TestSodaExtensionLiveBridge(t *testing.T) {
 	appURL, err := url.Parse(previousAppURL)
 	require.NoError(t, err)
 	appURL.Scheme = "https"
+	if os.Getenv("SODA_C03_BROWSER") != "" {
+		server := httptest.NewTLSServer(testWebRoutes)
+		t.Cleanup(server.Close)
+		appURL, err = url.Parse(server.URL + "/")
+		require.NoError(t, err)
+	}
 	setting.AppURL = appURL.String()
 	t.Cleanup(func() { setting.AppURL = previousAppURL })
 	for _, binary := range []string{backend, dashboard} {
@@ -62,9 +75,16 @@ func TestSodaExtensionLiveBridge(t *testing.T) {
 	require.NoError(t, os.MkdirAll(artifactRoot, 0o700))
 	root, err := os.MkdirTemp(artifactRoot, "c-")
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, os.RemoveAll(root)) })
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("Retained live bridge artifacts: %s", root)
+			return
+		}
+		require.NoError(t, os.RemoveAll(root))
+	})
 	socket := filepath.Join(root, "s")
 	factoryBinary := os.Getenv("SODA_C03_FACTORY")
+	issueOnly := os.Getenv("SODA_FOUNTAIN_ISSUE_ONLY") == "1"
 	factorySocket := filepath.Join(root, "f")
 
 	packageDir := filepath.Join(root, "p", "soda")
@@ -77,17 +97,25 @@ func TestSodaExtensionLiveBridge(t *testing.T) {
 		Pages:  []extension.Page{{ID: "spaces", Title: "Spaces", Scope: "global", Entry: "spaces.js"}},
 		Panels: []extension.Panel{{ID: "workspace", Title: "Spaces", Entry: "workspace.js"}},
 	}
-	if factoryBinary != "" {
+	if factoryBinary != "" && !issueOnly {
 		manifest.Capabilities = append(manifest.Capabilities, extension.CapabilityRepositoryRead, extension.CapabilityRuntimeControl, extension.CapabilityBackgroundOperations)
 		previous := setting.OAuth2.FactoryAppliancePackageID
 		setting.OAuth2.FactoryAppliancePackageID = "soda"
 		t.Cleanup(func() { setting.OAuth2.FactoryAppliancePackageID = previous })
+	}
+	if issueOnly {
+		manifest.Capabilities = append(manifest.Capabilities, extension.CapabilityRepositoryIssuesRead, extension.CapabilityOrganizationOwnership, extension.CapabilityHumanComments, extension.CapabilityHumanIssueCreate, extension.CapabilityHumanEdits, extension.CapabilityHumanStates, extension.CapabilityHumanLocks)
+		manifest.Pages = append(manifest.Pages, extension.Page{ID: "repository-feed", Route: "feed", Title: "Feed", Scope: "repository", Permission: "issues", Entry: "soda-repository-entry.js", Subroutes: []extension.Subroute{{Pattern: "work/{kind}", Title: "Work"}, {Pattern: "work/{kind}/{item}", Title: "Work"}}})
 	}
 	encoded, err := json.Marshal(manifest)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(packageDir, "extension.json"), encoded, 0o600))
 	for _, name := range []string{"spaces.js", "workspace.js"} {
 		require.NoError(t, os.WriteFile(filepath.Join(packageDir, "assets", name), []byte("export function mount() {}\n"), 0o600))
+	}
+	if assets := os.Getenv("SODA_C03_ASSETS"); assets != "" {
+		require.True(t, filepath.IsAbs(assets))
+		require.NoError(t, os.CopyFS(filepath.Join(packageDir, "assets"), os.DirFS(assets)))
 	}
 	// Ordinary admission opens only after durable activation: record the
 	// next-start desired state through the shared package store before
@@ -120,7 +148,8 @@ func TestSodaExtensionLiveBridge(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Logf("live bridge Observe(soda): %+v", manager.Observe("soda"))
+			observed := manager.Observe("soda")
+			t.Logf("live bridge state=%s error=%+v", observed.State, observed.Error)
 			t.Fatalf("live bridge soda package did not start within 25s")
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -170,6 +199,117 @@ func TestSodaExtensionLiveBridge(t *testing.T) {
 	}
 	panelRequest := func(session *TestSession, method, endpoint, generation string, body any, status int) map[string]any {
 		return requestAt(panelBase, session, method, endpoint, generation, body, status)
+	}
+	if issueOnly {
+		ctx := t.Context()
+		repository, err := repo_model.GetRepositoryByID(ctx, 24)
+		require.NoError(t, err)
+		actor, err := user_model.GetUserByID(ctx, 2)
+		require.NoError(t, err)
+		var original []organization.TeamUnit
+		require.NoError(t, db.GetEngine(ctx).Where("team_id=?", 5).Find(&original))
+		_, err = db.GetEngine(ctx).Where("team_id=?", 5).Delete(new(organization.TeamUnit))
+		require.NoError(t, err)
+		t.Cleanup(func() { _, e := db.GetEngine(context.Background()).Insert(original); require.NoError(t, e) })
+		checkPermission := func() {
+			permission, e := access_model.GetUserRepoPermission(ctx, repository, actor)
+			require.NoError(t, e)
+			require.True(t, permission.CanWrite(unit.TypeIssues))
+			require.False(t, permission.CanRead(unit.TypeCode))
+			require.True(t, repository.UnitEnabled(ctx, unit.TypeCode))
+		}
+		checkPermission()
+		if os.Getenv("SODA_C03_BROWSER") != "" {
+			require.NoError(t, repository.LoadOwner(ctx))
+			initialize := exec.CommandContext(ctx, "git", "init", "--bare", "--initial-branch=main", repository.RepoPath())
+			output, e := initialize.CombinedOutput()
+			require.NoError(t, e, string(output))
+			tree, e := exec.CommandContext(ctx, "git", "-C", repository.RepoPath(), "mktree").Output()
+			require.NoError(t, e)
+			commit, e := exec.CommandContext(ctx, "git", "-C", repository.RepoPath(), "-c", "user.name=Issue-only fixture", "-c", "user.email=issue-only@example.invalid", "commit-tree", strings.TrimSpace(string(tree)), "-m", "Issue-only code unit fixture").Output()
+			require.NoError(t, e)
+			output, e = exec.CommandContext(ctx, "git", "-C", repository.RepoPath(), "update-ref", "refs/heads/main", strings.TrimSpace(string(commit))).CombinedOutput()
+			require.NoError(t, e, string(output))
+		}
+		identity := request(owner, http.MethodPost, "factory/native-repositories/resolve", ownerGeneration, map[string]string{"repository": "24"}, http.StatusOK)
+		local := identity["repository"].(string)
+		access := request(owner, http.MethodGet, "repositories/"+local+"/factory/access", ownerGeneration, nil, http.StatusOK)
+		require.Equal(t, false, access["viewer"].(map[string]any)["code_write"])
+		base := "factory/collaboration/repositories/" + local
+		capabilities := request(owner, http.MethodGet, base+"/capabilities", ownerGeneration, nil, http.StatusOK)
+		require.Equal(t, "allowed", capabilities["actions"].(map[string]any)["issue.create"].(map[string]any)["state"])
+		require.Equal(t, "denied", capabilities["actions"].(map[string]any)["pulls.read"].(map[string]any)["state"])
+		const body = "## Issue-only human content\n\n完整 Markdown preserved.\n"
+		create := map[string]string{"command_id": "20202020202020202020202020202001", "title": "Issue-only live host collaboration", "body": body}
+		created := request(owner, http.MethodPost, base+"/issues", ownerGeneration, create, http.StatusOK)
+		require.Equal(t, "committed", created["effect"])
+		require.Equal(t, true, created["finished"])
+		ref := created["issue"].(map[string]any)
+		number := ref["number"].(string)
+		require.Equal(t, created, request(owner, http.MethodPost, base+"/issues", ownerGeneration, create, http.StatusOK))
+		issuePath := base + "/issues/" + number
+		issue := request(owner, http.MethodGet, issuePath, ownerGeneration, nil, http.StatusOK)
+		require.Equal(t, body, issue["body"])
+		issueCapabilities := request(owner, http.MethodGet, issuePath+"/capabilities", ownerGeneration, nil, http.StatusOK)
+		require.Equal(t, "allowed", issueCapabilities["actions"].(map[string]any)["issue.edit"].(map[string]any)["state"])
+		edit := map[string]string{"command_id": "20202020202020202020202020202003", "title": "Issue-only live host refined title"}
+		edited := request(owner, http.MethodPost, issuePath+"/edits", ownerGeneration, edit, http.StatusOK)
+		require.Equal(t, "committed", edited["effect"])
+		require.Equal(t, edited, request(owner, http.MethodPost, issuePath+"/edits", ownerGeneration, edit, http.StatusOK))
+		require.Equal(t, body, request(owner, http.MethodGet, issuePath, ownerGeneration, nil, http.StatusOK)["body"])
+		comment := map[string]string{"command_id": "20202020202020202020202020202002", "body": "Append-only human reply.\n"}
+		commented := request(owner, http.MethodPost, issuePath+"/comments", ownerGeneration, comment, http.StatusOK)
+		require.Equal(t, "committed", commented["effect"])
+		require.Equal(t, commented, request(owner, http.MethodPost, issuePath+"/comments", ownerGeneration, comment, http.StatusOK))
+		comments := request(owner, http.MethodGet, issuePath+"/comments", ownerGeneration, nil, http.StatusOK)
+		require.Len(t, comments["items"], 1)
+		for index, state := range []string{"closed", "open"} {
+			command := map[string]any{"command_id": fmt.Sprintf("202020202020202020202020202020%02d", index+4), "close": state == "closed"}
+			changed := request(owner, http.MethodPost, issuePath+"/state", ownerGeneration, command, http.StatusOK)
+			require.Equal(t, "committed", changed["effect"])
+			require.Equal(t, state, request(owner, http.MethodGet, issuePath, ownerGeneration, nil, http.StatusOK)["state"])
+		}
+		for index, lock := range []bool{true, false} {
+			command := map[string]any{"command_id": fmt.Sprintf("202020202020202020202020202020%02d", index+6), "lock": lock}
+			if lock {
+				command["reason"] = "Resolved"
+			}
+			changed := request(owner, http.MethodPost, issuePath+"/locks", ownerGeneration, command, http.StatusOK)
+			require.Equal(t, "committed", changed["effect"])
+		}
+		request(owner, http.MethodGet, base+"/pulls", ownerGeneration, nil, http.StatusServiceUnavailable)
+		request(other, http.MethodGet, issuePath, otherGeneration, nil, http.StatusNotFound)
+		request(owner, http.MethodGet, issuePath, otherGeneration, nil, http.StatusConflict)
+		// Withdraw only the issue team. Code remains unreadable and no runtime
+		// or background-operation capability has been declared by this package.
+		var issueUnits []organization.TeamUnit
+		require.NoError(t, db.GetEngine(ctx).Where("team_id=? AND type=?", 8, unit.TypeIssues).Find(&issueUnits))
+		require.NotEmpty(t, issueUnits)
+		_, err = db.GetEngine(ctx).Where("team_id=? AND type=?", 8, unit.TypeIssues).Delete(new(organization.TeamUnit))
+		require.NoError(t, err)
+		withdrawn := true
+		t.Cleanup(func() {
+			if withdrawn {
+				_, e := db.GetEngine(context.Background()).Insert(issueUnits)
+				require.NoError(t, e)
+			}
+		})
+		request(owner, http.MethodGet, issuePath, ownerGeneration, nil, http.StatusNotFound)
+		_, err = db.GetEngine(ctx).Insert(issueUnits)
+		require.NoError(t, err)
+		withdrawn = false
+		checkPermission()
+		require.Equal(t, body, request(owner, http.MethodGet, issuePath, ownerGeneration, nil, http.StatusOK)["body"])
+		if browser := os.Getenv("SODA_C03_BROWSER"); browser != "" {
+			require.True(t, filepath.IsAbs(browser))
+			command := exec.CommandContext(ctx, browser, setting.AppURL, repository.FullName(), artifactRoot)
+			output, e := command.CombinedOutput()
+			t.Log(string(output))
+			require.NoError(t, e)
+			checkPermission()
+		}
+		t.Log("PASS: live native host/PostgreSQL/private SDK/Factory API issue-only create, read, comment, exact command replay, actor/session/PR/withdrawal refusal and restored permissions; no code read, runtime grant or inference")
+		return
 	}
 	if factoryBinary != "" {
 		identity := request(owner, http.MethodPost, "factory/native-repositories/resolve", ownerGeneration, map[string]string{"repository": "2"}, http.StatusOK)
