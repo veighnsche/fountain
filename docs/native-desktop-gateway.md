@@ -6,9 +6,17 @@ expose the private extension callback protocol.
 
 Use a registered **public** OAuth client with S256 PKCE and a current bearer
 authorization. No client secret is needed. The server operator supplies the
-public client ID and allowed loopback redirect. A `read:repository` token is
+public client ID and allowed loopback redirect. Set `[oauth2]`
+`FACTORY_DESKTOP_CLIENT_ID` to that existing public application and explicitly
+enable `ENABLE_ADDITIONAL_GRANT_SCOPES`. Discovery stays unavailable otherwise;
+it creates no OAuth application or grant. A `read:repository` token is
 sufficient; the current account must also have code-read access to the repository.
 The normal OAuth expiry, revocation and repository permission checks still apply.
+
+The desktop discovers the selected client at `GET /api/v1/factory/desktop/oauth`.
+After S256/loopback exchange, `GET /api/v1/factory/desktop/identity` verifies the
+current immutable actor under that same scope and configured public application.
+This endpoint grants no code read or execution authority.
 
 Base path: `/api/v1/repos/{owner}/{repository}/factory/desktop/grants`.
 
@@ -49,5 +57,14 @@ inactive readback using fixture accounts and PostgreSQL. Optional
 native credential check through a private CA/server-leaf TLS fixture and isolated
 OS keyring. That check covers enrollment/read, profile-key reopen, exact replay,
 withdrawal and refusal; the host check also refuses missing-proof requests.
-This is component evidence. User-facing desktop login, central placement, operation journals,
-candidate transfer, withdrawal races and installed qualification remain open.
+`FACTORY_FOUNTAIN_NATIVE_OAUTH=1` joins the actual configured-host native login
+and encrypted credential owner: old-format migration, refresh, access expiry,
+withdrawal during refresh I/O and a committed enrollment with a lost reply.
+`FACTORY_FOUNTAIN_NATIVE_UI=1` uses an explicit installed-app runner instead,
+with real keyboard/browser controls, original-command readback, refresh,
+Quit/reopen and irreversible withdrawal. The runner is supplied through the same
+optional check variables; it is not installed by the host or an execution grant.
+
+Factory now exposes those login and read-enrollment controls. Central placement,
+privileged operation journals, candidate transfer and the complete installed
+delivery journey remain separate requirements; read enrollment never admits them.

@@ -2032,7 +2032,8 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 		var enrollmentSends atomic.Int32
 		var lostEnrollment atomic.Bool
 		var refreshSends atomic.Int32
-		if os.Getenv("FACTORY_FOUNTAIN_NATIVE_OAUTH") == "1" {
+		uiFlow := os.Getenv("FACTORY_FOUNTAIN_NATIVE_UI") == "1"
+		if os.Getenv("FACTORY_FOUNTAIN_NATIVE_OAUTH") == "1" && !uiFlow {
 			defer test.MockVariableValue(&setting.OAuth2.AccessTokenExpirationTime, int64(5))()
 		}
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2058,7 +2059,7 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 					w.WriteHeader(http.StatusBadRequest)
 					return
 				}
-				if r.Form.Get("grant_type") == "refresh_token" && refreshSends.Add(1) == 2 {
+				if r.Form.Get("grant_type") == "refresh_token" && refreshSends.Add(1) == 2 && !uiFlow {
 					written := httptest.NewRecorder()
 					testWebRoutes.ServeHTTP(written, r)
 					if written.Code != http.StatusOK {
@@ -2111,11 +2112,15 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 				_ = os.WriteFile(filepath.Join(root, "native-check.log"), output.Bytes(), 0o600)
 			}()
 			var authorization []byte
+			loginWait := 30 * time.Second
+			if uiFlow {
+				loginWait = 5 * time.Minute
+			}
 			require.Eventually(t, func() bool {
 				var err error
 				authorization, err = os.ReadFile(filepath.Join(root, "fountain-authorize-uri"))
 				return err == nil && len(authorization) > 0
-			}, 30*time.Second, 20*time.Millisecond)
+			}, loginWait, 20*time.Millisecond)
 			authorize, err := url.Parse(string(authorization))
 			require.NoError(t, err)
 			require.Equal(t, server.URL, authorize.Scheme+"://"+authorize.Host)
@@ -2138,7 +2143,11 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 			t.Log(output.String())
 			require.NoError(t, err)
 			require.True(t, lostEnrollment.Load())
-			require.EqualValues(t, 2, refreshSends.Load(), "expiry refresh and single in-flight withdrawal; no replay")
+			if uiFlow {
+				require.EqualValues(t, 1, refreshSends.Load(), "installed UI explicit refresh")
+			} else {
+				require.EqualValues(t, 2, refreshSends.Load(), "expiry refresh and single in-flight withdrawal; no replay")
+			}
 			require.EqualValues(t, 3, enrollmentSends.Load(), "original send plus exact replay after refresh and withdrawal; recovery lookup must not dispatch")
 			return
 		}
