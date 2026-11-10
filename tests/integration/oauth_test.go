@@ -2532,6 +2532,16 @@ jobs:
 							var recorded extension.OperationRecord
 							require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &recorded))
 							if recorded.EffectState == extension.EffectCommitted && recorded.CompletionState == extension.CompletionComplete {
+								var original struct {
+									Number int64  `json:"pr_number"`
+									Head   string `json:"head_oid"`
+								}
+								require.NoError(t, json.Unmarshal(recorded.Receipt, &original))
+								inline := call(http.MethodPost, fmt.Sprintf("/api/v1/repos/user2/repo1/pulls/%d/reviews", original.Number), map[string]any{"event": "COMMENT", "body": "Native discussion fixture; preserve this exact text.\n", "commit_id": original.Head, "comments": []map[string]any{
+									{"path": "native-publication-fixture.txt", "new_position": 1, "body": "First recorded native observation.\n"},
+									{"path": "native-publication-fixture.txt", "new_position": 1, "body": "Second recorded native observation.\n"},
+								}}, http.StatusOK)
+								require.NoError(t, os.WriteFile(filepath.Join(root, "native-discussion-review.json"), inline.Body.Bytes(), 0600))
 								require.NoError(t, os.WriteFile(filepath.Join(root, "ci", "review-receipt-ready"), []byte(recorded.OperationID), 0600))
 							}
 						}
