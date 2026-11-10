@@ -1966,6 +1966,11 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 	verifier := strings.Repeat("v", 43)
 	digest := sha256.Sum256([]byte(verifier))
 	scope := "read:repository"
+	if os.Getenv("FACTORY_FOUNTAIN_NATIVE_UI") == "1" {
+		// The installed reader explicitly requests protocol 2's issue scope.
+		// Use the same fixture consent without broadening any retained grant.
+		scope = "read:repository read:issue"
+	}
 	values := url.Values{"client_id": {clientID}, "redirect_uri": {redirect}, "response_type": {"code"}, "scope": {scope}, "state": {"desktop-fixture"}, "code_challenge_method": {"S256"}, "code_challenge": {base64.RawURLEncoding.EncodeToString(digest[:])}}
 	session := loginUser(t, "user2")
 	session.MakeRequest(t, NewRequest(t, http.MethodGet, "/login/oauth/authorize?"+values.Encode()), http.StatusOK)
@@ -2546,6 +2551,11 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, http.StatusOK, reply.StatusCode)
 			_ = reply.Body.Close()
+			if uiFlow {
+				// Browser consent uses the fixture origin above; subsequent native
+				// repository pagination must advertise this actual TLS host.
+				defer test.MockVariableValue(&setting.AppURL, server.URL+"/")()
+			}
 			err = command.Wait()
 			waited = true
 			t.Log(output.String())
