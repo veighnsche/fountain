@@ -2622,6 +2622,19 @@ func testNativeDesktopEnrollment(t *testing.T) {
 	if checker := os.Getenv("FACTORY_FOUNTAIN_NATIVE_CHECK"); checker != "" {
 		root := os.Getenv("FACTORY_FOUNTAIN_NATIVE_ROOT")
 		require.True(t, filepath.IsAbs(root) && strings.HasPrefix(root, "/home/"))
+		nativeClientID := clientID
+		if os.Getenv("FACTORY_FOUNTAIN_NATIVE_CONTROL_UI") == "1" {
+			response := MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, "/api/v1/user/applications/oauth2", api.CreateOAuth2ApplicationOptions{Name: "Factory installed control fixture", RedirectURIs: []string{redirect}, ConfidentialClient: false}).AddBasicAuth("user2"), http.StatusCreated)
+			var control api.OAuth2Application
+			DecodeJSON(t, response, &control)
+			nativeClientID = control.ClientID
+			defer test.MockVariableValue(&setting.OAuth2.FactoryDesktopControlClientID, nativeClientID)()
+			defer test.MockVariableValue(&setting.OAuth2.FactoryAppliancePackageID, "soda")()
+			var configured map[string]string
+			DecodeJSON(t, MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/factory/desktop/oauth/control").SetHeader("X-Factory-Desktop-Protocol", "2"), http.StatusOK), &configured)
+			require.Equal(t, nativeClientID, configured["client_id"])
+			require.Equal(t, "write:repository write:issue", configured["scope"])
+		}
 		nativeBase := base
 		if os.Getenv("FACTORY_FOUNTAIN_NATIVE_PRODUCT_UI") == "1" {
 			// The historical fixture marks PR2 merged while its issue remains
@@ -2720,7 +2733,7 @@ func testNativeDesktopEnrollment(t *testing.T) {
 		if os.Getenv("FACTORY_FOUNTAIN_NATIVE_OAUTH") == "1" {
 			backend, payload := os.Getenv("FACTORY_FOUNTAIN_NATIVE_BACKEND"), os.Getenv("FACTORY_FOUNTAIN_NATIVE_POSTGRES")
 			require.True(t, filepath.IsAbs(backend) && filepath.IsAbs(payload))
-			command := exec.CommandContext(t.Context(), checker, "--fountain-desktop-login", filepath.Join(root, "profile"), server.URL, clientID, backend, payload)
+			command := exec.CommandContext(t.Context(), checker, "--fountain-desktop-login", filepath.Join(root, "profile"), server.URL, nativeClientID, backend, payload)
 			command.Env = append(os.Environ(), "SSL_CERT_FILE="+filepath.Join(root, "ca.pem"), "SODA_FOUNTAIN_LOST_ENROLLMENT=1", "SODA_FOUNTAIN_REFRESH_RACE=1")
 			var output bytes.Buffer
 			command.Stdout, command.Stderr = &output, &output
@@ -2748,9 +2761,9 @@ func testNativeDesktopEnrollment(t *testing.T) {
 			require.Equal(t, server.URL, authorize.Scheme+"://"+authorize.Host)
 			query := authorize.Query()
 			require.Equal(t, "S256", query.Get("code_challenge_method"))
-			require.Equal(t, clientID, query.Get("client_id"))
+			require.Equal(t, nativeClientID, query.Get("client_id"))
 			session.MakeRequest(t, NewRequest(t, http.MethodGet, authorize.RequestURI()), http.StatusOK)
-			consent := session.MakeRequest(t, NewRequestWithValues(t, http.MethodPost, "/login/oauth/grant", map[string]string{"client_id": clientID, "redirect_uri": query.Get("redirect_uri"), "state": query.Get("state"), "granted": "true", "scope": query.Get("scope")}), http.StatusSeeOther)
+			consent := session.MakeRequest(t, NewRequestWithValues(t, http.MethodPost, "/login/oauth/grant", map[string]string{"client_id": nativeClientID, "redirect_uri": query.Get("redirect_uri"), "state": query.Get("state"), "granted": "true", "scope": query.Get("scope")}), http.StatusSeeOther)
 			callback, err := consent.Result().Location()
 			require.NoError(t, err)
 			require.Empty(t, callback.Query().Get("error"), "native consent error: %s", callback.Query().Get("error_description"))
