@@ -1309,11 +1309,18 @@ func TestFailedFinalObserveKeepsAdmissionClosed(t *testing.T) {
 // recovers completes on the same instance with the same token.
 func TestPersistFailureKeepsAdmissionClosed(t *testing.T) {
 	h := startControllerHarness(t, "", testFixtureKnobs{}, testFixtureKnobs{Role: "controller", SlowObserveMs: 2000}, true)
+	stateDir := controllerStateDir(h)
+	observes := readObserveCount(stateDir)
 	requestEnabledAccept(t, h.m, "sample", "0", h.sha, true)
 	waitBackendRegistered(t, h.m, "sample")
 	instanceID, installation := registeredInstance(t, h.m, "sample")
 	token, err := h.m.IssueRuntimeAdmission("sample", installation, instanceID, []string{"native.actor.read"})
 	require.NoError(t, err)
+	// The final observation verifies its call against the stored intent
+	// before it sleeps, and the fixture counts it only once verified.
+	// Wait for both enable observations so the broken storage below
+	// fails the completion write, not the confirmation itself.
+	require.Eventually(t, func() bool { return readObserveCount(stateDir) >= observes+2 }, 10*time.Second, 5*time.Millisecond)
 	// Break the completion write while the final observation sleeps:
 	// replace the intent file with a directory so the durable write
 	// cannot land.
