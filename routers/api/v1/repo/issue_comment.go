@@ -58,6 +58,14 @@ func ListIssueComments(ctx *context.APIContext) {
 	//   description: if provided, only comments updated before the provided time are returned.
 	//   type: string
 	//   format: date-time
+	// - name: page
+	//   in: query
+	//   description: page number of results (when explicitly paginating)
+	//   type: integer
+	// - name: limit
+	//   in: query
+	//   description: page size of results (when explicitly paginating)
+	//   type: integer
 	// responses:
 	//   "200":
 	//     "$ref": "#/responses/CommentList"
@@ -95,6 +103,10 @@ func ListIssueComments(ctx *context.APIContext) {
 		Before:  before,
 		Type:    issues_model.CommentTypeComment,
 	}
+	paginated := ctx.Req.URL.Query().Has("page") || ctx.Req.URL.Query().Has("limit")
+	if paginated {
+		opts.ListOptions = utils.GetListOptions(ctx)
+	}
 
 	comments, err := issues_model.FindComments(ctx, opts)
 	if err != nil {
@@ -125,6 +137,9 @@ func ListIssueComments(ctx *context.APIContext) {
 	}
 
 	ctx.SetTotalCountHeader(totalCount)
+	if paginated {
+		ctx.SetLinkHeader(int(totalCount), opts.PageSize)
+	}
 	ctx.JSON(http.StatusOK, &apiComments)
 }
 

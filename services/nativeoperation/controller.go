@@ -46,8 +46,8 @@ func desktopControllerAuthority(ctx context.Context, enrollment string, admin bo
 	if err != nil || app == nil || app.ConfidentialClient || setting.OAuth2.FactoryDesktopControlClientID == "" || app.ClientID != setting.OAuth2.FactoryDesktopControlClientID {
 		return nil, nil, ErrAuthorityLost
 	}
-	allowed, err := auth_model.AccessTokenScope(authorization.Scope).HasScope(auth_model.AccessTokenScopeWriteRepository)
-	if err != nil || !allowed {
+	// OAuth scopes are space-delimited; the PAT bitmap parser takes commas.
+	if !authorization.ScopeContains(string(auth_model.AccessTokenScopeWriteRepository)) && !authorization.ScopeContains(string(auth_model.AccessTokenScopeAll)) {
 		return nil, nil, ErrAuthorityLost
 	}
 	actor, err := user_model.GetUserByID(ctx, g.ActorID)

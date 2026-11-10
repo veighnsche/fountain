@@ -73,8 +73,7 @@ func CheckControllerUse(ctx context.Context, use ControllerUse) (*desktopgrant.O
 			if err != nil || app == nil || app.ConfidentialClient || setting.OAuth2.FactoryDesktopControlClientID == "" || app.ClientID != setting.OAuth2.FactoryDesktopControlClientID {
 				return desktopgrant.ErrController
 			}
-			allowed, err := auth_model.AccessTokenScope(authorization.Scope).HasScope(auth_model.AccessTokenScopeWriteRepository)
-			if err != nil || !allowed {
+			if !authorization.ScopeContains(string(auth_model.AccessTokenScopeWriteRepository)) && !authorization.ScopeContains(string(auth_model.AccessTokenScopeAll)) {
 				return desktopgrant.ErrController
 			}
 		case desktopgrant.CredentialPAT:

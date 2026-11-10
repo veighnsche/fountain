@@ -33,6 +33,20 @@ func DesktopOAuthConfig(ctx *context.APIContext) {
 
 func desktopOAuthConfig(ctx *context.APIContext, clientID, scope string) {
 	ctx.Resp.Header().Set("Cache-Control", "no-store")
+	// Existing installed clients keep their original consent contract. New
+	// clients explicitly request repository and issue collaboration scopes;
+	// this public discovery never changes a retained OAuth grant.
+	if versions := ctx.Req.Header.Values("X-Factory-Desktop-Protocol"); len(versions) != 0 {
+		if len(versions) != 1 || versions[0] != "2" {
+			ctx.Error(http.StatusBadRequest, "desktop configuration", errors.New("unsupported desktop protocol"))
+			return
+		}
+		if scope == "read:repository" {
+			scope += " read:issue"
+		} else if scope == "write:repository" {
+			scope += " write:issue"
+		}
+	}
 	if !setting.OAuth2.Enabled || clientID == "" || !setting.OAuth2.EnableAdditionalGrantScopes {
 		ctx.NotFound()
 		return
