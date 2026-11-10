@@ -81,3 +81,14 @@ func (a Authority) RepositoryPullCreateSnapshot(ctx context.Context, repository 
 	}
 	return *r.PullCreateSnapshot, nil
 }
+
+func pullCreateSnapshotCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:    ErrPullCreateSnapshotQuery,
+		unprocessable: ErrPullCreateSnapshotQuery,
+		admission:     ErrPullCreateSnapshotAdmission,
+		notFound:      ErrRepositoryNotVisible,
+		conflict:      ErrPullCreateSnapshotChanged,
+		otherwise:     ErrPullCreateSnapshotUnavailable,
+	}).forStatus(status)
+}

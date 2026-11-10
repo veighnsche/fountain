@@ -88,6 +88,7 @@ func ValidRepositoryPullFiles(p *RepositoryPullFiles, repository string, q Repos
 	}
 	return true
 }
+
 func (a Authority) RepositoryPullFiles(ctx context.Context, repository string, q RepositoryPullFilesRequest) (RepositoryPullFiles, error) {
 	if !positivePullID(repository) || !ValidRepositoryPullFilesRequest(q) {
 		return RepositoryPullFiles{}, errors.New("invalid pull files query")
@@ -97,4 +98,13 @@ func (a Authority) RepositoryPullFiles(ctx context.Context, repository string, q
 		return RepositoryPullFiles{}, err
 	}
 	return *result.PullFiles, nil
+}
+
+func pullFilesCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest: ErrPullFilesQuery,
+		conflict:   ErrPullFilesChanged,
+		tooLarge:   ErrPullFilesTooLarge,
+		notFound:   ErrRepositoryNotVisible,
+	}).forStatus(status)
 }

@@ -66,3 +66,10 @@ func (a Authority) RepositoryStateSnapshot(ctx context.Context, repository strin
 	}
 	return *r.StateSnapshot, nil
 }
+
+func stateSnapshotCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		conflict: ErrStateSnapshotChanged,
+		notFound: ErrRepositoryNotVisible,
+	}).forStatus(status)
+}

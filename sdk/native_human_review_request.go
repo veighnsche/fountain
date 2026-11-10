@@ -5,13 +5,12 @@ package extensions
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"reflect"
 	"strconv"
-	"strings"
+
+	"forgejo.org/extension-sdk/operationcontract"
 )
 
 const OperationKindHumanReviewRequest = "pull_request.human_review_request.apply"
@@ -124,27 +123,11 @@ func validHumanReviewRequestTransition(r HumanReviewRequestReceipt, requested bo
 // HumanReviewRequestOperationID binds the owning application's durable command to
 // its actor/repository. Persist it before dispatch; reuse it for lookup/cancel.
 func HumanReviewRequestOperationID(actor, repository, command string) (string, error) {
-	if !positivePullID(actor) || !positivePullID(repository) || !validOperationID(command) {
-		return "", ErrHumanReviewRequestQuery
-	}
-	sum := sha256.Sum256([]byte(command))
-	return "human-review-request:" + actor + ":" + repository + ":" + hex.EncodeToString(sum[:]), nil
+	return humanOperationID(operationcontract.HumanReviewRequestPrefix, actor, repository, command, ErrHumanReviewRequestQuery)
 }
 
 func ValidHumanReviewRequestOperationID(id, actor, repository string) bool {
-	if !positivePullID(actor) || !positivePullID(repository) {
-		return false
-	}
-	prefix := "human-review-request:" + actor + ":" + repository + ":"
-	if !strings.HasPrefix(id, prefix) || len(id) != len(prefix)+64 {
-		return false
-	}
-	for _, b := range []byte(strings.TrimPrefix(id, prefix)) {
-		if !(b >= '0' && b <= '9' || b >= 'a' && b <= 'f') {
-			return false
-		}
-	}
-	return validOperationID(id)
+	return validHumanOperationID(operationcontract.HumanReviewRequestPrefix, id, actor, repository)
 }
 
 // ValidHumanReviewRequestInstallationID validates a captured equality condition;
@@ -195,44 +178,15 @@ func validHumanReviewRequestResult(result *OperationLookup, request CallbackRequ
 	if request.HumanReviewRequest != nil {
 		id = request.HumanReviewRequest.OperationID
 	}
-	if result == nil || !validInstallationID(result.InstallationID) || result.OperationID != id || request.Operation != OperationHumanReviewRequestGet && result.InstallationID != request.ReviewRequestInstallationID {
-		return false
+	r, valid := validHumanOperationResult(result, request, humanOperationResult{
+		operationID: id, installationID: request.ReviewRequestInstallationID,
+		kind: OperationKindHumanReviewRequest, getOperation: OperationHumanReviewRequestGet,
+		strictDigest: true, allowIntervention: true,
+	}, request.HumanReviewRequest, CanonicalHumanReviewRequestIntent)
+	if !valid || r == nil {
+		return valid
 	}
-	if result.Status == BackgroundOutcomeNotObserved {
-		return request.Operation == OperationHumanReviewRequestGet && result.Record == nil
-	}
-	r := result.Record
-	if r == nil || r.InstallationID != result.InstallationID || r.OperationID != id || r.Outcome != r.EffectState || r.EffectState != result.Status {
-		return false
-	}
-	switch r.EffectState {
-	case EffectPending, EffectNotCommitted, EffectCommitted, EffectIndeterminate:
-	default:
-		return false
-	}
-	switch r.CancellationStatus {
-	case CancellationNone, CancellationPending, CancellationCancelled, CancellationTooLate, CancellationIndeterminate:
-	default:
-		return false
-	}
-	if r.Kind == "" {
-		return r.ActorID == "" && r.RepositoryID == "" && r.IntentDigest == "" && len(r.Receipt) == 0 && r.CompletionState == "" && r.EffectState == EffectNotCommitted && r.CancellationStatus == CancellationCancelled
-	}
-	if r.Kind != OperationKindHumanReviewRequest || r.ActorID != request.Authority.Actor.ID || r.RepositoryID != request.RepositoryID || !validHumanReviewDigest(r.IntentDigest) {
-		return false
-	}
-	if q := request.HumanReviewRequest; q != nil {
-		_, digest, err := CanonicalHumanReviewRequestIntent(*q)
-		if err != nil || digest != r.IntentDigest {
-			return false
-		}
-	}
-	if r.EffectState != EffectCommitted {
-		return len(r.Receipt) == 0 && r.CompletionState == ""
-	}
-	if r.CompletionState != CompletionPending && r.CompletionState != CompletionComplete && r.CompletionState != CompletionNeedsIntervention {
-		return false
-	}
+
 	var receipt HumanReviewRequestReceipt
 	if json.Unmarshal(r.Receipt, &receipt) != nil || strconv.FormatInt(receipt.RepositoryID, 10) != request.RepositoryID || strconv.FormatInt(receipt.ActorID, 10) != request.Authority.Actor.ID || receipt.PullID < 1 || receipt.IssueID < 1 || receipt.Index < 1 || !validHumanReviewRequestTransition(receipt, len(receipt.After.RequestIDs) > 0) {
 		return false
@@ -241,4 +195,14 @@ func validHumanReviewRequestResult(result *OperationLookup, request CallbackRequ
 		return ValidHumanReviewRequestReceipt(receipt, *q)
 	}
 	return true
+}
+
+func humanReviewRequestCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:  ErrHumanReviewRequestQuery,
+		admission:   ErrHumanReviewRequestAdmission,
+		notFound:    ErrRepositoryNotVisible,
+		conflict:    ErrHumanReviewRequestConflict,
+		unavailable: ErrHumanReviewRequestUnavailable,
+	}).forStatus(status)
 }

@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	sdk "forgejo.org/extension-sdk"
+	"forgejo.org/extension-sdk/wirejson"
 
 	"github.com/google/uuid"
 )
@@ -152,89 +153,14 @@ var intentRequiredFields = []string{
 // one JSON object, no duplicate keys at any depth, and every required
 // top-level field present. Wrong scalar types fail in the typed decode.
 func checkIntentDocument(data []byte) error {
-	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 || trimmed[0] != '{' {
+	fields, err := wirejson.ObjectFields(data, "extension intent")
+	if err != nil {
 		return errors.New("extension intent is invalid")
 	}
-	if err := rejectDuplicateKeys(trimmed); err != nil {
-		return err
-	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(trimmed, &raw); err != nil {
-		return errors.New("extension intent is invalid")
-	}
-	for _, field := range intentRequiredFields {
-		if _, ok := raw[field]; !ok {
-			return errors.New("extension intent is invalid")
-		}
-	}
-	// desired_enabled must be an explicit JSON boolean: encoding/json
-	// decodes null into false, which would silently manufacture disabled
-	// state. pending_operation stays nullable by contract.
-	if string(bytes.TrimSpace(raw["desired_enabled"])) == "null" {
+	if err := wirejson.RequireFields(fields, "extension intent", intentRequiredFields, []string{"desired_enabled"}); err != nil {
 		return errors.New("extension intent is invalid")
 	}
 	return nil
-}
-
-// rejectDuplicateKeys refuses any repeated object key in a JSON document,
-// so a persisted intent cannot hide two values for one field. Keys
-// compare by their decoded spelling: an escaped key ("desired_\u0065nabled")
-// equals its plain spelling ("desired_enabled").
-func rejectDuplicateKeys(data []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	return checkDuplicateValue(decoder)
-}
-
-// checkDuplicateValue walks one JSON value with the standard decoder,
-// rejecting duplicate keys in every object by decoded name.
-func checkDuplicateValue(decoder *json.Decoder) error {
-	invalid := errors.New("extension intent is invalid")
-	token, err := decoder.Token()
-	if err != nil {
-		return invalid
-	}
-	delimiter, ok := token.(json.Delim)
-	if !ok {
-		return nil
-	}
-	switch delimiter {
-	case '{':
-		seen := make(map[string]struct{})
-		for decoder.More() {
-			keyToken, err := decoder.Token()
-			if err != nil {
-				return invalid
-			}
-			key, ok := keyToken.(string)
-			if !ok {
-				return invalid
-			}
-			if _, duplicate := seen[key]; duplicate {
-				return invalid
-			}
-			seen[key] = struct{}{}
-			if err := checkDuplicateValue(decoder); err != nil {
-				return err
-			}
-		}
-		if _, err := decoder.Token(); err != nil {
-			return invalid
-		}
-		return nil
-	case '[':
-		for decoder.More() {
-			if err := checkDuplicateValue(decoder); err != nil {
-				return err
-			}
-		}
-		if _, err := decoder.Token(); err != nil {
-			return invalid
-		}
-		return nil
-	default:
-		return invalid
-	}
 }
 
 // validateIntent checks strict fields, the generation shape, pending

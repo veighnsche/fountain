@@ -9,6 +9,8 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+
+	"forgejo.org/extension-sdk/gitsyntax"
 )
 
 // Snapshot conversion for authoritative native reads (FT10, early start).
@@ -422,16 +424,7 @@ func NewDependencyPage(issueID int64, items []DependencySnapshot, total int, com
 }
 
 func validFullOID(oid string) bool {
-	if len(oid) != 40 && len(oid) != 64 {
-		return false
-	}
-	for _, c := range oid {
-		if c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' {
-			continue
-		}
-		return false
-	}
-	return true
+	return gitsyntax.FullOID(oid)
 }
 
 // PullSnapshot is the permission-checked view of one native pull request.

@@ -10,6 +10,7 @@ package nativeoperation
 import (
 	"slices"
 
+	"forgejo.org/extension-sdk/operationcontract"
 	"forgejo.org/models/db"
 	"forgejo.org/modules/timeutil"
 )
@@ -18,15 +19,15 @@ import (
 // and are not advertised for background enrollment. Authorization for one kind
 // never grants another; each executes through its own guarded native boundary.
 const (
-	KindIssueGraph      = "issue.graph.mutate"
-	KindRefPublish      = "git.ref.publish"
-	KindPRCreate        = "pull_request.create"
-	KindReviewSubmit    = "pull_request.review.submit"
-	KindThreadResolve   = "pull_request.review.thread.resolve"
-	KindMerge           = "pull_request.merge"
-	KindLifecycleIssue  = "issue.lifecycle.apply"
-	KindLifecycleReview = "pull_request.review.request"
-	KindLifecycleNote   = "issue.comment.publish"
+	KindIssueGraph      = operationcontract.KindIssueGraph
+	KindRefPublish      = operationcontract.KindRefPublish
+	KindPRCreate        = operationcontract.KindPRCreate
+	KindReviewSubmit    = operationcontract.KindReviewSubmit
+	KindThreadResolve   = operationcontract.KindThreadResolve
+	KindMerge           = operationcontract.KindMerge
+	KindLifecycleIssue  = operationcontract.KindLifecycleIssue
+	KindLifecycleReview = operationcontract.KindLifecycleReview
+	KindLifecycleNote   = operationcontract.KindLifecycleNote
 	// Human comments use live request admission, never background enrollment.
 	KindHumanComment       = "discussion.comment.create"
 	KindHumanEdit          = "discussion.edit"
@@ -128,17 +129,7 @@ func init() {
 
 // supportedKinds is the single source of supported background operation
 // kinds, sorted for stable generation digests and handshake responses.
-var supportedKinds = []string{
-	KindRefPublish,      // git.ref.publish
-	KindLifecycleNote,   // issue.comment.publish
-	KindIssueGraph,      // issue.graph.mutate
-	KindLifecycleIssue,  // issue.lifecycle.apply
-	KindPRCreate,        // pull_request.create
-	KindMerge,           // pull_request.merge
-	KindLifecycleReview, // pull_request.review.request
-	KindReviewSubmit,    // pull_request.review.submit
-	KindThreadResolve,   // pull_request.review.thread.resolve
-}
+var supportedKinds = operationcontract.BackgroundKinds()
 
 // SupportedKinds returns a copy of the sorted supported operation kinds.
 func SupportedKinds() []string {

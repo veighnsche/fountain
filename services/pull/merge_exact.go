@@ -36,6 +36,7 @@ import (
 	"errors"
 	"strings"
 
+	"forgejo.org/extension-sdk/gitsyntax"
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
@@ -184,12 +185,5 @@ func MergeExactFastForward(ctx context.Context, pr *issues_model.PullRequest, do
 
 // isExactMergeBranchRef reports whether ref is a full native branch ref.
 func isExactMergeBranchRef(ref string) bool {
-	if !strings.HasPrefix(ref, git.BranchPrefix) || len(ref) > 512 {
-		return false
-	}
-	name := strings.TrimSpace(ref)
-	if name != ref || strings.ContainsAny(ref, " ~^:?*\\") || strings.Contains(ref, "..") {
-		return false
-	}
-	return len(strings.TrimPrefix(ref, git.BranchPrefix)) > 0
+	return gitsyntax.BranchRef(ref)
 }

@@ -42,3 +42,10 @@ func (a Authority) RepositoryIssueCreateSnapshot(ctx context.Context, repository
 	}
 	return *r.IssueCreateSnapshot, nil
 }
+
+func issueCreateSnapshotCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		conflict: ErrIssueCreateSnapshotChanged,
+		notFound: ErrRepositoryNotVisible,
+	}).forStatus(status)
+}

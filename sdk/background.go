@@ -16,20 +16,23 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"forgejo.org/extension-sdk/operationcontract"
+	"forgejo.org/extension-sdk/wirejson"
 )
 
 // Background operation kinds from the conditional-native-mutations contract.
 // Authorization for one kind never grants another.
 const (
-	OperationKindIssueGraph      = "issue.graph.mutate"
-	OperationKindRefPublish      = "git.ref.publish"
-	OperationKindPRCreate        = "pull_request.create"
-	OperationKindReviewSubmit    = "pull_request.review.submit"
-	OperationKindThreadResolve   = "pull_request.review.thread.resolve"
-	OperationKindMerge           = "pull_request.merge"
-	OperationKindLifecycleIssue  = "issue.lifecycle.apply"
-	OperationKindLifecycleReview = "pull_request.review.request"
-	OperationKindLifecycleNote   = "issue.comment.publish"
+	OperationKindIssueGraph      = operationcontract.KindIssueGraph
+	OperationKindRefPublish      = operationcontract.KindRefPublish
+	OperationKindPRCreate        = operationcontract.KindPRCreate
+	OperationKindReviewSubmit    = operationcontract.KindReviewSubmit
+	OperationKindThreadResolve   = operationcontract.KindThreadResolve
+	OperationKindMerge           = operationcontract.KindMerge
+	OperationKindLifecycleIssue  = operationcontract.KindLifecycleIssue
+	OperationKindLifecycleReview = operationcontract.KindLifecycleReview
+	OperationKindLifecycleNote   = operationcontract.KindLifecycleNote
 )
 
 // Background dispatcher outcomes returned with HTTP 200 once the caller is
@@ -262,22 +265,7 @@ func BootstrapServiceBackground(ctx context.Context, options ServiceBridgeOption
 	if options.SocketPath == "" || len(options.SocketPath) > 4096 {
 		return nil, errors.New("service callback socket is not configured")
 	}
-	transport := &http.Transport{DialContext: func(dialCtx context.Context, _, _ string) (net.Conn, error) {
-		conn, err := (&net.Dialer{}).DialContext(dialCtx, "unix", options.SocketPath)
-		if err != nil {
-			return nil, err
-		}
-		peer, err := PeerCredential(conn)
-		if err != nil {
-			_ = conn.Close()
-			return nil, err
-		}
-		if peer.UID != options.ExpectedHostUID {
-			_ = conn.Close()
-			return nil, errors.New("service callback host peer is not permitted")
-		}
-		return conn, nil
-	}}
+	transport := backgroundTransport(options.SocketPath, &options.ExpectedHostUID)
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport}
 	body, err := json.Marshal(struct {
@@ -310,6 +298,9 @@ func BootstrapServiceBackground(ctx context.Context, options ServiceBridgeOption
 		Admission      string `json:"admission"`
 		InstallationID string `json:"installation_id"`
 	}
+	if _, err := wirejson.ObjectFields(data, "background bootstrap response"); err != nil {
+		return nil, errors.New("invalid background bootstrap response")
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&bootstrap); err != nil {
@@ -324,13 +315,31 @@ func BootstrapServiceBackground(ctx context.Context, options ServiceBridgeOption
 	if options.InstallationID != "" && options.InstallationID != bootstrap.InstallationID {
 		return nil, errors.New("background bootstrap installation mismatch")
 	}
-	return &backgroundClient{socket: options.SocketPath, admission: bootstrap.Admission, installation: bootstrap.InstallationID}, nil
+	return &backgroundClient{socket: options.SocketPath, admission: bootstrap.Admission, installation: bootstrap.InstallationID, expectedHostUID: &options.ExpectedHostUID}, nil
 }
 
 type backgroundClient struct {
-	socket       string
-	admission    string
-	installation string
+	expectedHostUID *uint32
+	socket          string
+	admission       string
+	installation    string
+}
+
+func backgroundTransport(socket string, expectedHostUID *uint32) *http.Transport {
+	return &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		conn, err := (&net.Dialer{}).DialContext(ctx, "unix", socket)
+		if err != nil {
+			return nil, err
+		}
+		if expectedHostUID != nil {
+			peer, err := PeerCredential(conn)
+			if err != nil || peer.UID != *expectedHostUID {
+				_ = conn.Close()
+				return nil, errors.New("service callback host peer is not permitted")
+			}
+		}
+		return conn, nil
+	}}
 }
 
 func (c *backgroundClient) post(ctx context.Context, path string, payload any, target any) error {
@@ -338,9 +347,7 @@ func (c *backgroundClient) post(ctx context.Context, path string, payload any, t
 	if err != nil {
 		return err
 	}
-	transport := &http.Transport{DialContext: func(dialCtx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(dialCtx, "unix", c.socket)
-	}}
+	transport := backgroundTransport(c.socket, c.expectedHostUID)
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://extensionHost"+path, bytes.NewReader(data))
@@ -364,6 +371,9 @@ func (c *backgroundClient) post(ctx context.Context, path string, payload any, t
 	if err != nil || len(body) > maxBackgroundBodyBytes {
 		return errors.New("invalid background response")
 	}
+	if _, err := wirejson.ObjectFields(body, "background response"); err != nil {
+		return errors.New("invalid background response")
+	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
@@ -376,16 +386,7 @@ func (c *backgroundClient) post(ctx context.Context, path string, payload any, t
 }
 
 func validOperationID(id string) bool {
-	if id == "" || len(id) > 128 {
-		return false
-	}
-	for _, c := range id {
-		if c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.' || c == ':' {
-			continue
-		}
-		return false
-	}
-	return true
+	return operationcontract.ValidID(id)
 }
 
 func (c *backgroundClient) SubmitOperation(ctx context.Context, credential CredentialFile, intent OperationIntent) (OperationRecord, error) {

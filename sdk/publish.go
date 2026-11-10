@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"forgejo.org/extension-sdk/gitsyntax"
 )
 
 // PublishOperationHeader carries the registered operation ID of a
@@ -52,27 +54,11 @@ type PublishPayload struct {
 var ErrInvalidPublishPayload = errors.New("invalid publish payload")
 
 func validPublishPayloadOID(oid string) bool {
-	if len(oid) != 40 && len(oid) != 64 {
-		return false
-	}
-	for _, c := range oid {
-		if c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' {
-			continue
-		}
-		return false
-	}
-	return true
+	return gitsyntax.FullOID(oid)
 }
 
 func validPublishPayloadRef(ref string) bool {
-	if !strings.HasPrefix(ref, "refs/heads/") || len(ref) > 512 {
-		return false
-	}
-	name := strings.TrimSpace(ref)
-	if name != ref || strings.ContainsAny(ref, " ~^:?*\\") || strings.Contains(ref, "..") {
-		return false
-	}
-	return len(strings.TrimPrefix(ref, "refs/heads/")) > 0
+	return gitsyntax.BranchRef(ref)
 }
 
 // ValidatePublishPayload checks the structural publish intent rules: full

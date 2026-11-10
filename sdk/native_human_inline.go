@@ -5,13 +5,13 @@ package extensions
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"forgejo.org/extension-sdk/operationcontract"
 )
 
 const OperationKindHumanInline = "pull_request.human_inline.create"
@@ -124,27 +124,11 @@ func ValidHumanInlineReceipt(r HumanInlineReceipt, q HumanInlineRequest) bool {
 // HumanInlineOperationID binds the owning application's durable command to
 // its actor/repository. Persist it before dispatch; reuse it for lookup/cancel.
 func HumanInlineOperationID(actor, repository, command string) (string, error) {
-	if !positivePullID(actor) || !positivePullID(repository) || !validOperationID(command) {
-		return "", ErrHumanInlineQuery
-	}
-	sum := sha256.Sum256([]byte(command))
-	return "human-inline:" + actor + ":" + repository + ":" + hex.EncodeToString(sum[:]), nil
+	return humanOperationID(operationcontract.HumanInlinePrefix, actor, repository, command, ErrHumanInlineQuery)
 }
 
 func ValidHumanInlineOperationID(id, actor, repository string) bool {
-	if !positivePullID(actor) || !positivePullID(repository) {
-		return false
-	}
-	prefix := "human-inline:" + actor + ":" + repository + ":"
-	if !strings.HasPrefix(id, prefix) || len(id) != len(prefix)+64 {
-		return false
-	}
-	for _, b := range []byte(strings.TrimPrefix(id, prefix)) {
-		if !(b >= '0' && b <= '9' || b >= 'a' && b <= 'f') {
-			return false
-		}
-	}
-	return validOperationID(id)
+	return validHumanOperationID(operationcontract.HumanInlinePrefix, id, actor, repository)
 }
 
 // ValidHumanInlineInstallationID validates a captured equality condition;
@@ -195,44 +179,15 @@ func validHumanInlineResult(result *OperationLookup, request CallbackRequest) bo
 	if request.HumanInline != nil {
 		id = request.HumanInline.OperationID
 	}
-	if result == nil || !validInstallationID(result.InstallationID) || result.OperationID != id || request.Operation != OperationHumanInlineGet && result.InstallationID != request.InlineInstallationID {
-		return false
+	r, valid := validHumanOperationResult(result, request, humanOperationResult{
+		operationID: id, installationID: request.InlineInstallationID,
+		kind: OperationKindHumanInline, getOperation: OperationHumanInlineGet,
+		strictDigest: true, allowIntervention: true,
+	}, request.HumanInline, CanonicalHumanInlineIntent)
+	if !valid || r == nil {
+		return valid
 	}
-	if result.Status == BackgroundOutcomeNotObserved {
-		return request.Operation == OperationHumanInlineGet && result.Record == nil
-	}
-	r := result.Record
-	if r == nil || r.InstallationID != result.InstallationID || r.OperationID != id || r.Outcome != r.EffectState || r.EffectState != result.Status {
-		return false
-	}
-	switch r.EffectState {
-	case EffectPending, EffectNotCommitted, EffectCommitted, EffectIndeterminate:
-	default:
-		return false
-	}
-	switch r.CancellationStatus {
-	case CancellationNone, CancellationPending, CancellationCancelled, CancellationTooLate, CancellationIndeterminate:
-	default:
-		return false
-	}
-	if r.Kind == "" {
-		return r.ActorID == "" && r.RepositoryID == "" && r.IntentDigest == "" && len(r.Receipt) == 0 && r.CompletionState == "" && r.EffectState == EffectNotCommitted && r.CancellationStatus == CancellationCancelled
-	}
-	if r.Kind != OperationKindHumanInline || r.ActorID != request.Authority.Actor.ID || r.RepositoryID != request.RepositoryID || !validHumanReviewDigest(r.IntentDigest) {
-		return false
-	}
-	if q := request.HumanInline; q != nil {
-		_, digest, err := CanonicalHumanInlineIntent(*q)
-		if err != nil || digest != r.IntentDigest {
-			return false
-		}
-	}
-	if r.EffectState != EffectCommitted {
-		return len(r.Receipt) == 0 && r.CompletionState == ""
-	}
-	if r.CompletionState != CompletionPending && r.CompletionState != CompletionComplete && r.CompletionState != CompletionNeedsIntervention {
-		return false
-	}
+
 	var receipt HumanInlineReceipt
 	if json.Unmarshal(r.Receipt, &receipt) != nil || strconv.FormatInt(receipt.RepositoryID, 10) != request.RepositoryID || strconv.FormatInt(receipt.ActorID, 10) != request.Authority.Actor.ID || receipt.PullID < 1 || receipt.IssueID < 1 || receipt.Index < 1 || receipt.ReviewID < 1 || receipt.CommentID < 1 || receipt.Official || !validHumanReviewDigest(receipt.BodyDigest) || !validHumanReviewDigest(receipt.ReviewDigest) || !ValidRepositoryInlineAnchor(receipt.Anchor) || !ValidPullDiffCommit(receipt.EntryOID) || receipt.EntryKind != "blob" && (receipt.EntryKind != "commit" || receipt.Anchor.Scope != "file") || !validHumanReviewDigest(receipt.DiffDigest) || receipt.CommentsCount < 1 || !validHumanReviewDigest(receipt.CommentsDigest) {
 		return false
@@ -248,4 +203,14 @@ func validHumanInlineResult(result *OperationLookup, request CallbackRequest) bo
 		return ValidHumanInlineReceipt(receipt, *q)
 	}
 	return true
+}
+
+func humanInlineCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:  ErrHumanInlineQuery,
+		admission:   ErrHumanInlineAdmission,
+		notFound:    ErrRepositoryNotVisible,
+		conflict:    ErrHumanInlineConflict,
+		unavailable: ErrHumanInlineUnavailable,
+	}).forStatus(status)
 }

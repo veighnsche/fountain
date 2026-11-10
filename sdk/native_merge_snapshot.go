@@ -79,3 +79,13 @@ func (a Authority) RepositoryMergeSnapshot(ctx context.Context, repository strin
 	}
 	return *r.MergeSnapshot, nil
 }
+
+func mergeSnapshotCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest: ErrMergeSnapshotQuery,
+		admission:  ErrMergeSnapshotAdmission,
+		notFound:   ErrRepositoryNotVisible,
+		conflict:   ErrMergeSnapshotChanged,
+		otherwise:  ErrMergeSnapshotUnavailable,
+	}).forStatus(status)
+}

@@ -118,6 +118,7 @@ func ValidRepositoryThreadPage(p *RepositoryThreadPage, repo string, q Repositor
 	}
 	return p.NextCursor == "" || last != "" && p.NextCursor == last
 }
+
 func (a Authority) RepositoryThreads(ctx context.Context, repo string, q RepositoryThreadsRequest) (RepositoryThreadPage, error) {
 	if !positivePullID(repo) || !ValidRepositoryThreadsRequest(q) {
 		return RepositoryThreadPage{}, ErrThreadQuery
@@ -127,4 +128,13 @@ func (a Authority) RepositoryThreads(ctx context.Context, repo string, q Reposit
 		return RepositoryThreadPage{}, err
 	}
 	return *r.Threads, nil
+}
+
+func threadsCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest: ErrThreadQuery,
+		conflict:   ErrThreadChanged,
+		tooLarge:   ErrThreadsTooLarge,
+		notFound:   ErrRepositoryNotVisible,
+	}).forStatus(status)
 }

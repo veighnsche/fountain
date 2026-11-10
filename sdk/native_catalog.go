@@ -52,3 +52,10 @@ func (a Authority) ReadableRepositories(ctx context.Context, q RepositoryCatalog
 	}
 	return *r.Page, nil
 }
+
+func repositoryCatalogCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest: ErrRepositoryCatalogQuery,
+		conflict:   ErrRepositoryCatalogChanged,
+	}).forStatus(status)
+}

@@ -89,3 +89,15 @@ func (a Authority) RepositoryThreadSnapshot(ctx context.Context, repository stri
 func validHumanThreadEvidence(t HumanThreadEvidence) bool {
 	return !(!positivePullID(t.RootCommentID) || !positivePullID(t.ReviewID) || t.MemberCount < 1 || t.MemberCount > MaxThreadSnapshotMembers || !validHumanReviewDigest(t.ConversationDigest) || !validHumanReviewDigest(t.EvidenceDigest) || t.OriginalAnchor != nil && !ValidRepositoryInlineAnchor(*t.OriginalAnchor) || t.Resolved != (t.ResolverID != "") || t.ResolverID != "" && !positivePullID(t.ResolverID))
 }
+
+func threadSnapshotCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:    ErrThreadSnapshotQuery,
+		admission:     ErrThreadSnapshotAdmission,
+		notFound:      ErrRepositoryNotVisible,
+		conflict:      ErrThreadSnapshotChanged,
+		unprocessable: ErrThreadSnapshotTarget,
+		tooLarge:      ErrThreadSnapshotTooLarge,
+		unavailable:   ErrThreadSnapshotUnavailable,
+	}).forStatus(status)
+}

@@ -67,3 +67,10 @@ func (a Authority) RepositoryEditSnapshot(ctx context.Context, repository string
 	}
 	return *r.EditSnapshot, nil
 }
+
+func editSnapshotCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		conflict: ErrEditSnapshotChanged,
+		notFound: ErrRepositoryNotVisible,
+	}).forStatus(status)
+}

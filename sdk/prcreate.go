@@ -6,6 +6,8 @@ package extensions
 import (
 	"errors"
 	"strings"
+
+	"forgejo.org/extension-sdk/gitsyntax"
 )
 
 // PRCreatePayload is the pull_request.create intent payload: one
@@ -32,27 +34,11 @@ const MaxPRCreateTitle = 255
 var ErrInvalidPRCreatePayload = errors.New("invalid pr-create payload")
 
 func validPRCreatePayloadOID(oid string) bool {
-	if len(oid) != 40 && len(oid) != 64 {
-		return false
-	}
-	for _, c := range oid {
-		if c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' {
-			continue
-		}
-		return false
-	}
-	return true
+	return gitsyntax.FullOID(oid)
 }
 
 func validPRCreatePayloadRef(ref string) bool {
-	if !strings.HasPrefix(ref, "refs/heads/") || len(ref) > 512 {
-		return false
-	}
-	name := strings.TrimSpace(ref)
-	if name != ref || strings.ContainsAny(ref, " ~^:?*\\") || strings.Contains(ref, "..") {
-		return false
-	}
-	return len(strings.TrimPrefix(ref, "refs/heads/")) > 0
+	return gitsyntax.BranchRef(ref)
 }
 
 // ValidatePRCreatePayload checks the structural PR-create intent rules:

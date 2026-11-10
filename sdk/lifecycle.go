@@ -12,6 +12,8 @@ import (
 	"io"
 	"strconv"
 	"strings"
+
+	"forgejo.org/extension-sdk/wirejson"
 )
 
 // Generic extension lifecycle wire (RCX-2 F01 frozen contract). The manager
@@ -386,7 +388,11 @@ func decodeLifecycleValue[T any](data []byte, what string, required []string) (T
 	if trimmed[0] != '{' {
 		return zero, fmt.Errorf("%s must be an object", what)
 	}
-	if err := rejectDuplicateKeys(trimmed, what); err != nil {
+	fields, err := wirejson.ObjectFields(trimmed, what)
+	if err != nil {
+		return zero, err
+	}
+	if err := wirejson.RequireFields(fields, what, required, []string{"admission_ready", "desired_enabled"}); err != nil {
 		return zero, err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(trimmed))
@@ -397,15 +403,6 @@ func decodeLifecycleValue[T any](data []byte, what string, required []string) (T
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return zero, fmt.Errorf("%s must contain one object", what)
-	}
-	present, err := objectKeys(trimmed)
-	if err != nil {
-		return zero, err
-	}
-	for _, field := range required {
-		if !present[field] {
-			return zero, fmt.Errorf("%s is missing required field %q", what, field)
-		}
 	}
 	return value, nil
 }

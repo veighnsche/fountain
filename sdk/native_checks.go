@@ -125,6 +125,7 @@ func ValidRepositoryChecks(p *RepositoryChecks, repository string, q RepositoryC
 	}
 	return true
 }
+
 func (a Authority) RepositoryChecks(ctx context.Context, repo string, q RepositoryChecksRequest) (RepositoryChecks, error) {
 	if !positivePullID(repo) || !ValidRepositoryChecksRequest(q) {
 		return RepositoryChecks{}, ErrChecksQuery
@@ -134,4 +135,13 @@ func (a Authority) RepositoryChecks(ctx context.Context, repo string, q Reposito
 		return RepositoryChecks{}, err
 	}
 	return *r.Checks, nil
+}
+
+func checksCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest: ErrChecksQuery,
+		conflict:   ErrChecksChanged,
+		tooLarge:   ErrChecksTooLarge,
+		notFound:   ErrRepositoryNotVisible,
+	}).forStatus(status)
 }

@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"forgejo.org/extension-sdk/operationcontract"
 )
 
 const OperationKindHumanEdit = "discussion.edit"
@@ -99,27 +101,11 @@ func CanonicalHumanEditIntent(q HumanEditRequest) (string, string, error) {
 // repository. Persist the returned ID before dispatch; reuse it for get/cancel.
 // Installation is supplied by the live host, never selected by this helper.
 func HumanEditOperationID(actor, repository, command string) (string, error) {
-	if !positivePullID(actor) || !positivePullID(repository) || !validOperationID(command) {
-		return "", ErrHumanEditQuery
-	}
-	sum := sha256.Sum256([]byte(command))
-	return "human-edit:" + actor + ":" + repository + ":" + hex.EncodeToString(sum[:]), nil
+	return humanOperationID(operationcontract.HumanEditPrefix, actor, repository, command, ErrHumanEditQuery)
 }
 
 func ValidHumanEditOperationID(id, actor, repository string) bool {
-	if !positivePullID(actor) || !positivePullID(repository) {
-		return false
-	}
-	prefix := "human-edit:" + actor + ":" + repository + ":"
-	if !strings.HasPrefix(id, prefix) || len(id) != len(prefix)+64 {
-		return false
-	}
-	for _, b := range []byte(strings.TrimPrefix(id, prefix)) {
-		if !(b >= '0' && b <= '9' || b >= 'a' && b <= 'f') {
-			return false
-		}
-	}
-	return validOperationID(id)
+	return validHumanOperationID(operationcontract.HumanEditPrefix, id, actor, repository)
 }
 
 // ValidHumanEditInstallationID validates the captured namespace condition.
@@ -174,46 +160,13 @@ func validHumanEditResult(result *OperationLookup, request CallbackRequest) bool
 	if request.HumanEdit != nil {
 		id = request.HumanEdit.OperationID
 	}
-	if result == nil || !validInstallationID(result.InstallationID) || result.OperationID != id {
-		return false
-	}
-	if request.Operation != OperationHumanEditGet && result.InstallationID != request.EditInstallationID {
-		return false
-	}
-	if result.Status == BackgroundOutcomeNotObserved {
-		return request.Operation == OperationHumanEditGet && result.Record == nil
-	}
-	r := result.Record
-	if r == nil || r.InstallationID != result.InstallationID || r.OperationID != id || r.Outcome != r.EffectState || r.EffectState != result.Status {
-		return false
-	}
-	switch r.EffectState {
-	case EffectPending, EffectNotCommitted, EffectCommitted, EffectIndeterminate:
-	default:
-		return false
-	}
-	switch r.CancellationStatus {
-	case CancellationNone, CancellationPending, CancellationCancelled, CancellationTooLate, CancellationIndeterminate:
-	default:
-		return false
-	}
-	if r.Kind == "" {
-		return r.ActorID == "" && r.RepositoryID == "" && r.IntentDigest == "" && len(r.Receipt) == 0 && r.CompletionState == "" && r.EffectState == EffectNotCommitted && r.CancellationStatus == CancellationCancelled
-	}
-	if r.Kind != OperationKindHumanEdit || r.ActorID != request.Authority.Actor.ID || r.RepositoryID != request.RepositoryID || len(r.IntentDigest) != 64 {
-		return false
-	}
-	if q := request.HumanEdit; q != nil {
-		_, digest, err := CanonicalHumanEditIntent(*q)
-		if err != nil || digest != r.IntentDigest {
-			return false
-		}
-	}
-	if r.EffectState != EffectCommitted {
-		return len(r.Receipt) == 0 && r.CompletionState == ""
-	}
-	if r.CompletionState != CompletionPending && r.CompletionState != CompletionComplete && r.CompletionState != CompletionNeedsIntervention {
-		return false
+	r, valid := validHumanOperationResult(result, request, humanOperationResult{
+		operationID: id, installationID: request.EditInstallationID,
+		kind: OperationKindHumanEdit, getOperation: OperationHumanEditGet,
+		strictDigest: false, allowIntervention: true,
+	}, request.HumanEdit, CanonicalHumanEditIntent)
+	if !valid || r == nil {
+		return valid
 	}
 
 	var receipt HumanEditReceipt
@@ -252,4 +205,14 @@ func ValidHumanEditReceipt(receipt HumanEditReceipt, q HumanEditRequest) bool {
 		digest = next
 	}
 	return strconv.FormatInt(receipt.RepositoryID, 10) == q.Expected.RepositoryID && strconv.FormatInt(receipt.ActorID, 10) == q.Expected.ActorID && receipt.Subject == q.Expected.Subject && strconv.FormatInt(receipt.SubjectID, 10) == q.Expected.SubjectID && strconv.FormatInt(receipt.IssueID, 10) == q.Expected.IssueID && strconv.FormatInt(receipt.Index, 10) == q.Expected.Index && receipt.Title == title && receipt.BodyDigest == digest && receipt.ContentVersion == version && (titleChanged && receipt.TitleCommentID > 0 || !titleChanged && receipt.TitleCommentID == 0)
+}
+
+func humanEditCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:  ErrHumanEditQuery,
+		admission:   ErrHumanEditAdmission,
+		notFound:    ErrRepositoryNotVisible,
+		conflict:    ErrHumanEditConflict,
+		unavailable: ErrHumanEditUnavailable,
+	}).forStatus(status)
 }

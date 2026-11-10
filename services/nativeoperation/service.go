@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"forgejo.org/extension-sdk/gitsyntax"
+	"forgejo.org/extension-sdk/operationcontract"
 	execcontext "forgejo.org/modules/nativeoperation"
 
 	sdk "forgejo.org/extension-sdk"
@@ -148,40 +150,15 @@ type ValidIntent struct {
 }
 
 func validOperationID(id string) bool {
-	if id == "" || len(id) > 128 {
-		return false
-	}
-	for _, c := range id {
-		if c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.' || c == ':' {
-			continue
-		}
-		return false
-	}
-	return true
+	return operationcontract.ValidID(id)
 }
 
 func validBranchRef(ref string) bool {
-	if !strings.HasPrefix(ref, git.BranchPrefix) || len(ref) > 512 {
-		return false
-	}
-	name := strings.TrimSpace(ref)
-	if name != ref || strings.ContainsAny(ref, " ~^:?*\\") || strings.Contains(ref, "..") {
-		return false
-	}
-	return len(strings.TrimPrefix(ref, git.BranchPrefix)) > 0
+	return gitsyntax.BranchRef(ref)
 }
 
 func validOID(oid string) bool {
-	if len(oid) != 40 && len(oid) != 64 {
-		return false
-	}
-	for _, c := range oid {
-		if c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' {
-			continue
-		}
-		return false
-	}
-	return true
+	return gitsyntax.FullOID(oid)
 }
 
 // ValidateIntent validates the complete immutable intent. Unknown fields,
@@ -190,7 +167,7 @@ func validOID(oid string) bool {
 func ValidateIntent(operationID string, actorID, repositoryID int64, kind, authRevision string, expectedRevision, notAfter int64, payload []byte, now int64) (*ValidIntent, error) {
 	// This operation-ID family belongs to live human callback admission.
 	// Background operations cannot occupy its actor/repository namespace.
-	if strings.HasPrefix(operationID, "human-comment:") || strings.HasPrefix(operationID, "human-edit:") || strings.HasPrefix(operationID, "human-issue-create:") || strings.HasPrefix(operationID, "human-lock:") || strings.HasPrefix(operationID, "human-state:") || strings.HasPrefix(operationID, "human-review:") || strings.HasPrefix(operationID, "human-inline:") || strings.HasPrefix(operationID, "human-thread:") || strings.HasPrefix(operationID, "human-review-request:") || strings.HasPrefix(operationID, "human-merge:") {
+	if operationcontract.IsHumanID(operationID) {
 		return nil, ErrInvalidIntent
 	}
 	if !validOperationID(operationID) || actorID <= 0 || repositoryID <= 0 {

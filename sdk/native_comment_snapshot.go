@@ -49,3 +49,10 @@ func (a Authority) RepositoryCommentSnapshot(ctx context.Context, repository str
 	}
 	return *r.CommentSnapshot, nil
 }
+
+func commentSnapshotCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		conflict: ErrCommentSnapshotChanged,
+		notFound: ErrRepositoryNotVisible,
+	}).forStatus(status)
+}

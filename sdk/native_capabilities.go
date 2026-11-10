@@ -76,6 +76,7 @@ func validRepositoryCapabilities(p *RepositoryCapabilities, repo string, q Repos
 	}
 	return true
 }
+
 func (a Authority) RepositoryCapabilities(ctx context.Context, repo string, q RepositoryCapabilitiesRequest) (RepositoryCapabilities, error) {
 	if !positivePullID(repo) || !ValidRepositoryCapabilitiesRequest(q) {
 		return RepositoryCapabilities{}, ErrRepositoryCapabilitiesQuery
@@ -85,4 +86,12 @@ func (a Authority) RepositoryCapabilities(ctx context.Context, repo string, q Re
 		return RepositoryCapabilities{}, err
 	}
 	return *r.Capabilities, nil
+}
+
+func repositoryCapabilitiesCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest: ErrRepositoryCapabilitiesQuery,
+		conflict:   ErrRepositoryCapabilitiesChanged,
+		notFound:   ErrRepositoryNotVisible,
+	}).forStatus(status)
 }

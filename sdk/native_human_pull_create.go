@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"forgejo.org/extension-sdk/operationcontract"
 )
 
 const OperationKindHumanPullCreate = "pull_request.human_create.apply"
@@ -74,27 +76,11 @@ func CanonicalHumanPullCreateIntent(q HumanPullCreateRequest) (string, string, e
 }
 
 func HumanPullCreateOperationID(actor, repository, command string) (string, error) {
-	if !positivePullID(actor) || !positivePullID(repository) || !validOperationID(command) {
-		return "", ErrHumanPullCreateQuery
-	}
-	sum := sha256.Sum256([]byte(command))
-	return "human-pull-create:" + actor + ":" + repository + ":" + hex.EncodeToString(sum[:]), nil
+	return humanOperationID(operationcontract.HumanPullCreatePrefix, actor, repository, command, ErrHumanPullCreateQuery)
 }
 
 func ValidHumanPullCreateOperationID(id, actor, repository string) bool {
-	if !positivePullID(actor) || !positivePullID(repository) {
-		return false
-	}
-	prefix := "human-pull-create:" + actor + ":" + repository + ":"
-	if !strings.HasPrefix(id, prefix) || len(id) != len(prefix)+64 || !validOperationID(id) {
-		return false
-	}
-	for _, b := range strings.TrimPrefix(id, prefix) {
-		if !(b >= '0' && b <= '9' || b >= 'a' && b <= 'f') {
-			return false
-		}
-	}
-	return true
+	return validHumanOperationID(operationcontract.HumanPullCreatePrefix, id, actor, repository)
 }
 
 // The SQL primary exists durably; derived PR refs and notification/completion
@@ -171,44 +157,15 @@ func validHumanPullCreateResult(result *OperationLookup, request CallbackRequest
 	if request.HumanPullCreate != nil {
 		id = request.HumanPullCreate.OperationID
 	}
-	if result == nil || !validInstallationID(result.InstallationID) || result.OperationID != id || request.Operation != OperationHumanPullCreateGet && result.InstallationID != request.PullCreateInstallationID {
-		return false
+	r, valid := validHumanOperationResult(result, request, humanOperationResult{
+		operationID: id, installationID: request.PullCreateInstallationID,
+		kind: OperationKindHumanPullCreate, getOperation: OperationHumanPullCreateGet,
+		strictDigest: true, allowIntervention: true,
+	}, request.HumanPullCreate, CanonicalHumanPullCreateIntent)
+	if !valid || r == nil {
+		return valid
 	}
-	if result.Status == BackgroundOutcomeNotObserved {
-		return request.Operation == OperationHumanPullCreateGet && result.Record == nil
-	}
-	r := result.Record
-	if r == nil || r.InstallationID != result.InstallationID || r.OperationID != id || r.Outcome != r.EffectState || r.EffectState != result.Status {
-		return false
-	}
-	switch r.EffectState {
-	case EffectPending, EffectNotCommitted, EffectCommitted, EffectIndeterminate:
-	default:
-		return false
-	}
-	switch r.CancellationStatus {
-	case CancellationNone, CancellationPending, CancellationCancelled, CancellationTooLate, CancellationIndeterminate:
-	default:
-		return false
-	}
-	if r.Kind == "" {
-		return r.ActorID == "" && r.RepositoryID == "" && r.IntentDigest == "" && len(r.Receipt) == 0 && r.CompletionState == "" && r.EffectState == EffectNotCommitted && r.CancellationStatus == CancellationCancelled
-	}
-	if r.Kind != OperationKindHumanPullCreate || r.ActorID != request.Authority.Actor.ID || r.RepositoryID != request.RepositoryID || !validHumanReviewDigest(r.IntentDigest) {
-		return false
-	}
-	if q := request.HumanPullCreate; q != nil {
-		_, digest, err := CanonicalHumanPullCreateIntent(*q)
-		if err != nil || digest != r.IntentDigest {
-			return false
-		}
-	}
-	if r.EffectState != EffectCommitted {
-		return len(r.Receipt) == 0 && r.CompletionState == ""
-	}
-	if r.CompletionState != CompletionPending && r.CompletionState != CompletionComplete && r.CompletionState != CompletionNeedsIntervention {
-		return false
-	}
+
 	var receipt HumanPullCreateReceipt
 	if json.Unmarshal(r.Receipt, &receipt) != nil || strconv.FormatInt(receipt.RepositoryID, 10) != request.RepositoryID || strconv.FormatInt(receipt.ActorID, 10) != request.Authority.Actor.ID || receipt.HeadRepositoryID < 1 || receipt.PullID < 1 || receipt.IssueID < 1 || receipt.Index < 1 || receipt.ContentVersion != 0 || receipt.IntentDigest != r.IntentDigest || !validHumanReviewDigest(receipt.BodyDigest) ||
 		!ValidRepositoryPullCreateSnapshotRequest(RepositoryPullCreateSnapshotRequest{HeadRepositoryID: strconv.FormatInt(receipt.HeadRepositoryID, 10), BaseBranch: receipt.BaseBranch, HeadBranch: receipt.HeadBranch}) || receipt.RepositoryID == receipt.HeadRepositoryID && receipt.BaseBranch == receipt.HeadBranch ||
@@ -223,4 +180,14 @@ func validHumanPullCreateResult(result *OperationLookup, request CallbackRequest
 		return ValidHumanPullCreateReceipt(receipt, *q)
 	}
 	return true
+}
+
+func humanPullCreateCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:  ErrHumanPullCreateQuery,
+		admission:   ErrHumanPullCreateAdmission,
+		notFound:    ErrRepositoryNotVisible,
+		conflict:    ErrHumanPullCreateConflict,
+		unavailable: ErrHumanPullCreateUnavailable,
+	}).forStatus(status)
 }

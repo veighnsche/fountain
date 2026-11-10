@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+
+	"forgejo.org/extension-sdk/gitsyntax"
 )
 
 // Review submit events. Final comments carry no vote. Attachments, pending/draft
@@ -102,27 +104,11 @@ type ReviewSubmitReceipt struct {
 var ErrInvalidReviewSubmitPayload = errors.New("invalid review-submit payload")
 
 func validReviewSubmitPayloadOID(oid string) bool {
-	if len(oid) != 40 && len(oid) != 64 {
-		return false
-	}
-	for _, c := range oid {
-		if c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' {
-			continue
-		}
-		return false
-	}
-	return true
+	return gitsyntax.FullOID(oid)
 }
 
 func validReviewSubmitPayloadRef(ref string) bool {
-	if !strings.HasPrefix(ref, "refs/heads/") || len(ref) > 512 {
-		return false
-	}
-	name := strings.TrimSpace(ref)
-	if name != ref || strings.ContainsAny(ref, " ~^:?*\\") || strings.Contains(ref, "..") {
-		return false
-	}
-	return len(strings.TrimPrefix(ref, "refs/heads/")) > 0
+	return gitsyntax.BranchRef(ref)
 }
 
 // validReviewCommentKey reports whether key is a usable opaque client

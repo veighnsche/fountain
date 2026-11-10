@@ -40,6 +40,7 @@ import (
 	"io"
 	"strings"
 
+	"forgejo.org/extension-sdk/gitsyntax"
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/git"
@@ -82,27 +83,11 @@ func (intent *PublishIntent) IsCreation() bool {
 var ErrInvalidPublishIntent = errors.New("invalid publish intent")
 
 func validPublishOID(oid string) bool {
-	if len(oid) != 40 && len(oid) != 64 {
-		return false
-	}
-	for _, c := range oid {
-		if c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' {
-			continue
-		}
-		return false
-	}
-	return true
+	return gitsyntax.FullOID(oid)
 }
 
 func validPublishBranchRef(ref string) bool {
-	if !strings.HasPrefix(ref, git.BranchPrefix) || len(ref) > 512 {
-		return false
-	}
-	name := strings.TrimSpace(ref)
-	if name != ref || strings.ContainsAny(ref, " ~^:?*\\") || strings.Contains(ref, "..") {
-		return false
-	}
-	return len(strings.TrimPrefix(ref, git.BranchPrefix)) > 0
+	return gitsyntax.BranchRef(ref)
 }
 
 // ParsePublishPayload validates the complete immutable publish intent.

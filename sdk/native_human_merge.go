@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"forgejo.org/extension-sdk/operationcontract"
 )
 
 const OperationKindHumanMerge = "pull_request.human_merge.apply"
@@ -76,25 +78,9 @@ func CanonicalHumanMergeIntent(q HumanMergeRequest) (string, string, error) {
 }
 
 func HumanMergeOperationID(actor, repository, command string) (string, error) {
-	if !positivePullID(actor) || !positivePullID(repository) || !validOperationID(command) {
-		return "", ErrHumanMergeQuery
-	}
-	sum := sha256.Sum256([]byte(command))
-	return "human-merge:" + actor + ":" + repository + ":" + hex.EncodeToString(sum[:]), nil
+	return humanOperationID(operationcontract.HumanMergePrefix, actor, repository, command, ErrHumanMergeQuery)
 }
 
 func ValidHumanMergeOperationID(id, actor, repository string) bool {
-	if !positivePullID(actor) || !positivePullID(repository) {
-		return false
-	}
-	prefix := "human-merge:" + actor + ":" + repository + ":"
-	if !strings.HasPrefix(id, prefix) || len(id) != len(prefix)+64 || !validOperationID(id) {
-		return false
-	}
-	for _, b := range []byte(strings.TrimPrefix(id, prefix)) {
-		if !(b >= '0' && b <= '9' || b >= 'a' && b <= 'f') {
-			return false
-		}
-	}
-	return true
+	return validHumanOperationID(operationcontract.HumanMergePrefix, id, actor, repository)
 }

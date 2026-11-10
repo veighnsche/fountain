@@ -15,6 +15,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"forgejo.org/extension-sdk/wirejson"
 )
 
 const NativeCallbackPath = "/v1/native"
@@ -320,7 +322,7 @@ func dialPinnedUnixSocket(ctx context.Context, socket string, expectedUID uint32
 	return conn, nil
 }
 
-func (c *nativeClient) call(ctx context.Context, request CallbackRequest) (CallbackResponse, error) {
+func (c *nativeClient) exchange(ctx context.Context, request CallbackRequest) (CallbackResponse, error) {
 	if c.socket == "" || c.admission == "" {
 		return CallbackResponse{}, errors.New("native callback is unavailable")
 	}
@@ -350,367 +352,7 @@ func (c *nativeClient) call(ctx context.Context, request CallbackRequest) (Callb
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		if request.Operation == OperationHumanMergeSubmit || request.Operation == OperationHumanMergeGet || request.Operation == OperationHumanMergeCancel {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrHumanMergeQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrHumanMergeAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrHumanMergeConflict
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrHumanMergeUnavailable
-			}
-		}
-		if request.Operation == OperationHumanPullCreateSubmit || request.Operation == OperationHumanPullCreateGet || request.Operation == OperationHumanPullCreateCancel {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrHumanPullCreateQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrHumanPullCreateAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrHumanPullCreateConflict
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrHumanPullCreateUnavailable
-			}
-		}
-		if request.Operation == OperationHumanManualMergeSubmit || request.Operation == OperationHumanManualMergeGet || request.Operation == OperationHumanManualMergeCancel {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrHumanManualMergeQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrHumanManualMergeAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrHumanManualMergeConflict
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrHumanManualMergeUnavailable
-			}
-		}
-		if request.Operation == OperationHumanReviewRequestSubmit || request.Operation == OperationHumanReviewRequestGet || request.Operation == OperationHumanReviewRequestCancel {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrHumanReviewRequestQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrHumanReviewRequestAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrHumanReviewRequestConflict
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrHumanReviewRequestUnavailable
-			}
-		}
-		if request.Operation == OperationHumanThreadSubmit || request.Operation == OperationHumanThreadGet || request.Operation == OperationHumanThreadCancel {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrHumanThreadQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrHumanThreadAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrHumanThreadConflict
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrHumanThreadUnavailable
-			}
-		}
-		if request.Operation == OperationHumanInlineSubmit || request.Operation == OperationHumanInlineGet || request.Operation == OperationHumanInlineCancel {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrHumanInlineQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrHumanInlineAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrHumanInlineConflict
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrHumanInlineUnavailable
-			}
-		}
-		if request.Operation == OperationRepositoryReviewRequestSnapshot {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrReviewRequestSnapshotQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrReviewRequestSnapshotAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrReviewRequestSnapshotChanged
-			case http.StatusRequestEntityTooLarge:
-				return CallbackResponse{}, ErrReviewRequestSnapshotTooLarge
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrReviewRequestSnapshotUnavailable
-			}
-		}
-		if request.Operation == OperationRepositoryThreadSnapshot {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrThreadSnapshotQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrThreadSnapshotAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrThreadSnapshotChanged
-			case http.StatusUnprocessableEntity:
-				return CallbackResponse{}, ErrThreadSnapshotTarget
-			case http.StatusRequestEntityTooLarge:
-				return CallbackResponse{}, ErrThreadSnapshotTooLarge
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrThreadSnapshotUnavailable
-			}
-		}
-		if request.Operation == OperationRepositoryInlineSnapshot {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrInlineSnapshotQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrInlineSnapshotAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrInlineSnapshotChanged
-			case http.StatusUnprocessableEntity:
-				return CallbackResponse{}, ErrInlineSnapshotAnchor
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrInlineSnapshotUnavailable
-			}
-		}
-		if request.Operation == OperationRepositoryManualMergeSnapshot {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrManualMergeSnapshotQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrManualMergeSnapshotAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrManualMergeSnapshotChanged
-			case http.StatusUnprocessableEntity:
-				return CallbackResponse{}, ErrManualMergeSnapshotCommit
-			default:
-				return CallbackResponse{}, ErrManualMergeSnapshotUnavailable
-			}
-		}
-		if request.Operation == OperationRepositoryMergeSnapshot {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrMergeSnapshotQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrMergeSnapshotAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrMergeSnapshotChanged
-			default:
-				return CallbackResponse{}, ErrMergeSnapshotUnavailable
-			}
-		}
-		if request.Operation == OperationRepositoryPullCreateSnapshot {
-			switch response.StatusCode {
-			case http.StatusBadRequest, http.StatusUnprocessableEntity:
-				return CallbackResponse{}, ErrPullCreateSnapshotQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrPullCreateSnapshotAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrPullCreateSnapshotChanged
-			default:
-				return CallbackResponse{}, ErrPullCreateSnapshotUnavailable
-			}
-		}
-		if request.Operation == OperationRepositoryReviewSnapshot && response.StatusCode == http.StatusConflict {
-			return CallbackResponse{}, ErrReviewSnapshotChanged
-		}
-		if request.Operation == OperationRepositoryReviewSnapshot && response.StatusCode == http.StatusNotFound {
-			return CallbackResponse{}, ErrRepositoryNotVisible
-		}
-		if request.Operation == OperationRepositoryStateSnapshot && response.StatusCode == http.StatusConflict {
-			return CallbackResponse{}, ErrStateSnapshotChanged
-		}
-		if request.Operation == OperationRepositoryStateSnapshot && response.StatusCode == http.StatusNotFound {
-			return CallbackResponse{}, ErrRepositoryNotVisible
-		}
-		if request.Operation == OperationRepositoryLockSnapshot && response.StatusCode == http.StatusConflict {
-			return CallbackResponse{}, ErrLockSnapshotChanged
-		}
-		if request.Operation == OperationRepositoryLockSnapshot && response.StatusCode == http.StatusNotFound {
-			return CallbackResponse{}, ErrRepositoryNotVisible
-		}
-		if request.Operation == OperationHumanReviewSubmit || request.Operation == OperationHumanReviewGet || request.Operation == OperationHumanReviewCancel {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrHumanReviewQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrHumanReviewAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrHumanReviewConflict
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrHumanReviewUnavailable
-			}
-		}
-		if request.Operation == OperationHumanStateSubmit || request.Operation == OperationHumanStateGet || request.Operation == OperationHumanStateCancel {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrHumanStateQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrHumanStateAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrHumanStateConflict
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrHumanStateUnavailable
-			}
-		}
-		if request.Operation == OperationHumanLockSubmit || request.Operation == OperationHumanLockGet || request.Operation == OperationHumanLockCancel {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrHumanLockQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrHumanLockAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrHumanLockConflict
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrHumanLockUnavailable
-			}
-		}
-		if request.Operation == OperationHumanIssueCreateSubmit || request.Operation == OperationHumanIssueCreateGet || request.Operation == OperationHumanIssueCreateCancel {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrHumanIssueCreateQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrHumanIssueCreateAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrHumanIssueCreateConflict
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrHumanIssueCreateUnavailable
-			}
-		}
-		if request.Operation == OperationRepositoryIssueCreateSnapshot && response.StatusCode == http.StatusConflict {
-			return CallbackResponse{}, ErrIssueCreateSnapshotChanged
-		}
-		if request.Operation == OperationRepositoryIssueCreateSnapshot && response.StatusCode == http.StatusNotFound {
-			return CallbackResponse{}, ErrRepositoryNotVisible
-		}
-		if request.Operation == OperationHumanEditSubmit || request.Operation == OperationHumanEditGet || request.Operation == OperationHumanEditCancel {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrHumanEditQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrHumanEditAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrHumanEditConflict
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrHumanEditUnavailable
-			}
-		}
-		if request.Operation == OperationHumanCommentSubmit || request.Operation == OperationHumanCommentGet || request.Operation == OperationHumanCommentCancel {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrHumanCommentQuery
-			case http.StatusUnauthorized, http.StatusForbidden:
-				return CallbackResponse{}, ErrHumanCommentAdmission
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrHumanCommentConflict
-			case http.StatusServiceUnavailable:
-				return CallbackResponse{}, ErrHumanCommentUnavailable
-			}
-		}
-		if request.Operation == OperationRepositoryEditSnapshot && response.StatusCode == http.StatusConflict {
-			return CallbackResponse{}, ErrEditSnapshotChanged
-		}
-		if request.Operation == OperationRepositoryEditSnapshot && response.StatusCode == http.StatusNotFound {
-			return CallbackResponse{}, ErrRepositoryNotVisible
-		}
-		if request.Operation == OperationRepositoryCommentSnapshot && response.StatusCode == http.StatusConflict {
-			return CallbackResponse{}, ErrCommentSnapshotChanged
-		}
-		if request.Operation == OperationRepositoryCommentSnapshot && response.StatusCode == http.StatusNotFound {
-			return CallbackResponse{}, ErrRepositoryNotVisible
-		}
-		if request.Operation == OperationRepositoryCapabilities {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrRepositoryCapabilitiesQuery
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrRepositoryCapabilitiesChanged
-			case http.StatusNotFound:
-				return CallbackResponse{}, ErrRepositoryNotVisible
-			}
-		}
-		if request.Operation == OperationReadableRepositories {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrRepositoryCatalogQuery
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrRepositoryCatalogChanged
-			}
-		}
-		if request.Operation == OperationRepositoryChecks {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrChecksQuery
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrChecksChanged
-			case http.StatusRequestEntityTooLarge:
-				return CallbackResponse{}, ErrChecksTooLarge
-			}
-		}
-		if request.Operation == OperationRepositoryThreads {
-			switch response.StatusCode {
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrThreadQuery
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrThreadChanged
-			case http.StatusRequestEntityTooLarge:
-				return CallbackResponse{}, ErrThreadsTooLarge
-			}
-		}
-		if request.Operation == OperationRepositoryPullFiles {
-			switch response.StatusCode {
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrPullFilesChanged
-			case http.StatusRequestEntityTooLarge:
-				return CallbackResponse{}, ErrPullFilesTooLarge
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrPullFilesQuery
-			}
-		}
-		if request.Operation == OperationRepositoryPullCommits {
-			switch response.StatusCode {
-			case http.StatusConflict:
-				return CallbackResponse{}, ErrPullCommitsChanged
-			case http.StatusBadRequest:
-				return CallbackResponse{}, ErrPullCommitsQuery
-			}
-		}
-		// The callback uses 404 for both a missing repository and one the actor
-		// cannot read. A 403 instead means the extension's callback admission or
-		// capability was rejected, so keep it an ordinary authority error.
-		if (request.Operation == OperationRepository || request.Operation == OperationRepositorySource || request.Operation == OperationRepositoryIssues || request.Operation == OperationRepositoryComments || request.Operation == OperationRepositoryPulls || request.Operation == OperationRepositoryPullFiles || request.Operation == OperationRepositoryPullCommits || request.Operation == OperationRepositoryReviews || request.Operation == OperationRepositoryThreads || request.Operation == OperationRepositoryChecks) && response.StatusCode == http.StatusNotFound {
-			return CallbackResponse{}, ErrRepositoryNotVisible
-		}
-		return CallbackResponse{}, fmt.Errorf("native callback returned HTTP %d", response.StatusCode)
+		return CallbackResponse{}, &callbackHTTPStatus{status: response.StatusCode}
 	}
 	return decodeCallbackResponse(response.Body, request)
 }
@@ -726,6 +368,9 @@ func decodeCallbackResponse(body io.Reader, request CallbackRequest) (CallbackRe
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 || data[0] != '{' {
 		return CallbackResponse{}, errors.New("native callback response must be an object")
+	}
+	if err := wirejson.RejectDuplicateKeys(data, "native callback response"); err != nil {
+		return CallbackResponse{}, errors.New("invalid native callback response")
 	}
 	var result CallbackResponse
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -746,43 +391,7 @@ func decodeCallbackResponse(body io.Reader, request CallbackRequest) (CallbackRe
 }
 
 func validCallbackResult(result CallbackResponse, request CallbackRequest) bool {
-	fields := 0
-	if result.RuntimeController != nil {
-		fields++
-	}
-	if result.RuntimeSelection != nil {
-		fields++
-	}
-	if result.RuntimeGrant != nil {
-		fields++
-	}
-	if result.HumanPullCreate != nil {
-		fields++
-	}
-	if result.HumanMerge != nil {
-		fields++
-	}
-	if result.HumanManualMerge != nil {
-		fields++
-	}
-	if result.HumanReviewRequest != nil {
-		fields++
-	}
-	if result.HumanThread != nil {
-		fields++
-	}
-	if result.HumanInline != nil {
-		fields++
-	}
-	if result.ManualMergeSnapshot != nil {
-		fields++
-	}
-	for _, present := range []bool{result.PullCreateSnapshot != nil, result.MergeSnapshot != nil, result.ReviewRequestSnapshot != nil, result.ThreadSnapshot != nil, result.InlineSnapshot != nil, result.HumanReview != nil, result.ReviewSnapshot != nil, result.HumanState != nil, result.StateSnapshot != nil, result.HumanLock != nil, result.LockSnapshot != nil, result.HumanIssueCreate != nil, result.IssueCreateSnapshot != nil, result.HumanEdit != nil, result.HumanComment != nil, result.CommentSnapshot != nil, result.EditSnapshot != nil, result.Capabilities != nil, result.Checks != nil, result.Threads != nil, result.Reviews != nil, result.PullFiles != nil, result.PullCommits != nil, result.Pulls != nil, result.Comments != nil, result.Actor != nil, result.Repository != nil, result.Source != nil, result.Issues != nil, result.IssueIntake != nil, result.Page != nil, result.Owner != nil, result.PublicKeys != nil} {
-		if present {
-			fields++
-		}
-	}
-	if fields != 1 {
+	if !validCallbackResultEnvelope(result, request) {
 		return false
 	}
 	switch request.Operation {
@@ -969,4 +578,10 @@ func (c *nativeClient) PublicSSHKeys(ctx context.Context) ([]PublicKey, error) {
 		return nil, err
 	}
 	return result.PublicKeys, nil
+}
+
+func repositoryCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		notFound: ErrRepositoryNotVisible,
+	}).forStatus(status)
 }

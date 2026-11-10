@@ -64,3 +64,10 @@ func (a Authority) RepositoryLockSnapshot(ctx context.Context, repository string
 	}
 	return *r.LockSnapshot, nil
 }
+
+func lockSnapshotCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		conflict: ErrLockSnapshotChanged,
+		notFound: ErrRepositoryNotVisible,
+	}).forStatus(status)
+}

@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"forgejo.org/extension-sdk/operationcontract"
 )
 
 const OperationKindHumanLock = "discussion.lock.apply"
@@ -103,27 +105,11 @@ func ValidHumanLockReceipt(r HumanLockReceipt, q HumanLockRequest) bool {
 // HumanLockOperationID binds the owning application's durable command to
 // its actor/repository. Persist it before dispatch; reuse it for lookup/cancel.
 func HumanLockOperationID(actor, repository, command string) (string, error) {
-	if !positivePullID(actor) || !positivePullID(repository) || !validOperationID(command) {
-		return "", ErrHumanLockQuery
-	}
-	sum := sha256.Sum256([]byte(command))
-	return "human-lock:" + actor + ":" + repository + ":" + hex.EncodeToString(sum[:]), nil
+	return humanOperationID(operationcontract.HumanLockPrefix, actor, repository, command, ErrHumanLockQuery)
 }
 
 func ValidHumanLockOperationID(id, actor, repository string) bool {
-	if !positivePullID(actor) || !positivePullID(repository) {
-		return false
-	}
-	prefix := "human-lock:" + actor + ":" + repository + ":"
-	if !strings.HasPrefix(id, prefix) || len(id) != len(prefix)+64 {
-		return false
-	}
-	for _, b := range []byte(strings.TrimPrefix(id, prefix)) {
-		if !(b >= '0' && b <= '9' || b >= 'a' && b <= 'f') {
-			return false
-		}
-	}
-	return validOperationID(id)
+	return validHumanOperationID(operationcontract.HumanLockPrefix, id, actor, repository)
 }
 
 // ValidHumanLockInstallationID validates a captured equality condition;
@@ -174,45 +160,15 @@ func validHumanLockResult(result *OperationLookup, request CallbackRequest) bool
 	if request.HumanLock != nil {
 		id = request.HumanLock.OperationID
 	}
-	if result == nil || !validInstallationID(result.InstallationID) || result.OperationID != id ||
-		request.Operation != OperationHumanLockGet && result.InstallationID != request.LockInstallationID {
-		return false
+	r, valid := validHumanOperationResult(result, request, humanOperationResult{
+		operationID: id, installationID: request.LockInstallationID,
+		kind: OperationKindHumanLock, getOperation: OperationHumanLockGet,
+		strictDigest: false, allowIntervention: true,
+	}, request.HumanLock, CanonicalHumanLockIntent)
+	if !valid || r == nil {
+		return valid
 	}
-	if result.Status == BackgroundOutcomeNotObserved {
-		return request.Operation == OperationHumanLockGet && result.Record == nil
-	}
-	r := result.Record
-	if r == nil || r.InstallationID != result.InstallationID || r.OperationID != id || r.Outcome != r.EffectState || r.EffectState != result.Status {
-		return false
-	}
-	switch r.EffectState {
-	case EffectPending, EffectNotCommitted, EffectCommitted, EffectIndeterminate:
-	default:
-		return false
-	}
-	switch r.CancellationStatus {
-	case CancellationNone, CancellationPending, CancellationCancelled, CancellationTooLate, CancellationIndeterminate:
-	default:
-		return false
-	}
-	if r.Kind == "" {
-		return r.ActorID == "" && r.RepositoryID == "" && r.IntentDigest == "" && len(r.Receipt) == 0 && r.CompletionState == "" && r.EffectState == EffectNotCommitted && r.CancellationStatus == CancellationCancelled
-	}
-	if r.Kind != OperationKindHumanLock || r.ActorID != request.Authority.Actor.ID || r.RepositoryID != request.RepositoryID || len(r.IntentDigest) != 64 {
-		return false
-	}
-	if q := request.HumanLock; q != nil {
-		_, digest, err := CanonicalHumanLockIntent(*q)
-		if err != nil || digest != r.IntentDigest {
-			return false
-		}
-	}
-	if r.EffectState != EffectCommitted {
-		return len(r.Receipt) == 0 && r.CompletionState == ""
-	}
-	if r.CompletionState != CompletionPending && r.CompletionState != CompletionComplete && r.CompletionState != CompletionNeedsIntervention {
-		return false
-	}
+
 	var receipt HumanLockReceipt
 	if json.Unmarshal(r.Receipt, &receipt) != nil || strconv.FormatInt(receipt.RepositoryID, 10) != request.RepositoryID || strconv.FormatInt(receipt.ActorID, 10) != request.Authority.Actor.ID || receipt.Subject != "issue" && receipt.Subject != "pull" || receipt.SubjectID < 1 || receipt.IssueID < 1 || receipt.Index < 1 || receipt.CommentID < 1 || receipt.Subject == "issue" && receipt.SubjectID != receipt.IssueID || len(receipt.ReasonDigest) != 64 {
 		return false
@@ -226,4 +182,14 @@ func validHumanLockResult(result *OperationLookup, request CallbackRequest) bool
 		return ValidHumanLockReceipt(receipt, *q)
 	}
 	return true
+}
+
+func humanLockCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:  ErrHumanLockQuery,
+		admission:   ErrHumanLockAdmission,
+		notFound:    ErrRepositoryNotVisible,
+		conflict:    ErrHumanLockConflict,
+		unavailable: ErrHumanLockUnavailable,
+	}).forStatus(status)
 }

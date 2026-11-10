@@ -10,7 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
-	"strings"
+
+	"forgejo.org/extension-sdk/operationcontract"
 )
 
 const OperationKindHumanState = "discussion.state.apply"
@@ -97,27 +98,11 @@ func ValidHumanStateReceipt(r HumanStateReceipt, q HumanStateRequest) bool {
 // HumanStateOperationID binds the owning application's durable command to
 // its actor/repository. Persist it before dispatch; reuse it for lookup/cancel.
 func HumanStateOperationID(actor, repository, command string) (string, error) {
-	if !positivePullID(actor) || !positivePullID(repository) || !validOperationID(command) {
-		return "", ErrHumanStateQuery
-	}
-	sum := sha256.Sum256([]byte(command))
-	return "human-state:" + actor + ":" + repository + ":" + hex.EncodeToString(sum[:]), nil
+	return humanOperationID(operationcontract.HumanStatePrefix, actor, repository, command, ErrHumanStateQuery)
 }
 
 func ValidHumanStateOperationID(id, actor, repository string) bool {
-	if !positivePullID(actor) || !positivePullID(repository) {
-		return false
-	}
-	prefix := "human-state:" + actor + ":" + repository + ":"
-	if !strings.HasPrefix(id, prefix) || len(id) != len(prefix)+64 {
-		return false
-	}
-	for _, b := range []byte(strings.TrimPrefix(id, prefix)) {
-		if !(b >= '0' && b <= '9' || b >= 'a' && b <= 'f') {
-			return false
-		}
-	}
-	return validOperationID(id)
+	return validHumanOperationID(operationcontract.HumanStatePrefix, id, actor, repository)
 }
 
 // ValidHumanStateInstallationID validates a captured equality condition;
@@ -168,45 +153,15 @@ func validHumanStateResult(result *OperationLookup, request CallbackRequest) boo
 	if request.HumanState != nil {
 		id = request.HumanState.OperationID
 	}
-	if result == nil || !validInstallationID(result.InstallationID) || result.OperationID != id ||
-		request.Operation != OperationHumanStateGet && result.InstallationID != request.StateInstallationID {
-		return false
+	r, valid := validHumanOperationResult(result, request, humanOperationResult{
+		operationID: id, installationID: request.StateInstallationID,
+		kind: OperationKindHumanState, getOperation: OperationHumanStateGet,
+		strictDigest: false, allowIntervention: true,
+	}, request.HumanState, CanonicalHumanStateIntent)
+	if !valid || r == nil {
+		return valid
 	}
-	if result.Status == BackgroundOutcomeNotObserved {
-		return request.Operation == OperationHumanStateGet && result.Record == nil
-	}
-	r := result.Record
-	if r == nil || r.InstallationID != result.InstallationID || r.OperationID != id || r.Outcome != r.EffectState || r.EffectState != result.Status {
-		return false
-	}
-	switch r.EffectState {
-	case EffectPending, EffectNotCommitted, EffectCommitted, EffectIndeterminate:
-	default:
-		return false
-	}
-	switch r.CancellationStatus {
-	case CancellationNone, CancellationPending, CancellationCancelled, CancellationTooLate, CancellationIndeterminate:
-	default:
-		return false
-	}
-	if r.Kind == "" {
-		return r.ActorID == "" && r.RepositoryID == "" && r.IntentDigest == "" && len(r.Receipt) == 0 && r.CompletionState == "" && r.EffectState == EffectNotCommitted && r.CancellationStatus == CancellationCancelled
-	}
-	if r.Kind != OperationKindHumanState || r.ActorID != request.Authority.Actor.ID || r.RepositoryID != request.RepositoryID || len(r.IntentDigest) != 64 {
-		return false
-	}
-	if q := request.HumanState; q != nil {
-		_, digest, err := CanonicalHumanStateIntent(*q)
-		if err != nil || digest != r.IntentDigest {
-			return false
-		}
-	}
-	if r.EffectState != EffectCommitted {
-		return len(r.Receipt) == 0 && r.CompletionState == ""
-	}
-	if r.CompletionState != CompletionPending && r.CompletionState != CompletionComplete && r.CompletionState != CompletionNeedsIntervention {
-		return false
-	}
+
 	var receipt HumanStateReceipt
 	if json.Unmarshal(r.Receipt, &receipt) != nil || strconv.FormatInt(receipt.RepositoryID, 10) != request.RepositoryID || strconv.FormatInt(receipt.ActorID, 10) != request.Authority.Actor.ID || receipt.Subject != "issue" && receipt.Subject != "pull" || receipt.SubjectID < 1 || receipt.IssueID < 1 || receipt.Index < 1 || receipt.CommentID < 1 || receipt.Subject == "issue" && receipt.SubjectID != receipt.IssueID || receipt.IsClosed && receipt.ClosedUnix <= 0 || !receipt.IsClosed && receipt.ClosedUnix != 0 {
 		return false
@@ -215,4 +170,14 @@ func validHumanStateResult(result *OperationLookup, request CallbackRequest) boo
 		return ValidHumanStateReceipt(receipt, *q)
 	}
 	return true
+}
+
+func humanStateCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:  ErrHumanStateQuery,
+		admission:   ErrHumanStateAdmission,
+		notFound:    ErrRepositoryNotVisible,
+		conflict:    ErrHumanStateConflict,
+		unavailable: ErrHumanStateUnavailable,
+	}).forStatus(status)
 }

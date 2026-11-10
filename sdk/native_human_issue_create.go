@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"forgejo.org/extension-sdk/operationcontract"
 )
 
 const OperationKindHumanIssueCreate = "issue.create"
@@ -96,27 +98,11 @@ func ValidHumanIssueCreateReceipt(receipt HumanIssueCreateReceipt, q HumanIssueC
 // HumanIssueCreateOperationID binds the owning application's durable command to
 // its actor/repository. Persist it before dispatch; reuse it for lookup/cancel.
 func HumanIssueCreateOperationID(actor, repository, command string) (string, error) {
-	if !positivePullID(actor) || !positivePullID(repository) || !validOperationID(command) {
-		return "", ErrHumanIssueCreateQuery
-	}
-	sum := sha256.Sum256([]byte(command))
-	return "human-issue-create:" + actor + ":" + repository + ":" + hex.EncodeToString(sum[:]), nil
+	return humanOperationID(operationcontract.HumanIssueCreatePrefix, actor, repository, command, ErrHumanIssueCreateQuery)
 }
 
 func ValidHumanIssueCreateOperationID(id, actor, repository string) bool {
-	if !positivePullID(actor) || !positivePullID(repository) {
-		return false
-	}
-	prefix := "human-issue-create:" + actor + ":" + repository + ":"
-	if !strings.HasPrefix(id, prefix) || len(id) != len(prefix)+64 {
-		return false
-	}
-	for _, b := range []byte(strings.TrimPrefix(id, prefix)) {
-		if !(b >= '0' && b <= '9' || b >= 'a' && b <= 'f') {
-			return false
-		}
-	}
-	return validOperationID(id)
+	return validHumanOperationID(operationcontract.HumanIssueCreatePrefix, id, actor, repository)
 }
 
 // ValidHumanIssueCreateInstallationID validates a captured equality condition;
@@ -167,45 +153,15 @@ func validHumanIssueCreateResult(result *OperationLookup, request CallbackReques
 	if request.HumanIssueCreate != nil {
 		id = request.HumanIssueCreate.OperationID
 	}
-	if result == nil || !validInstallationID(result.InstallationID) || result.OperationID != id ||
-		request.Operation != OperationHumanIssueCreateGet && result.InstallationID != request.IssueCreateInstallationID {
-		return false
+	r, valid := validHumanOperationResult(result, request, humanOperationResult{
+		operationID: id, installationID: request.IssueCreateInstallationID,
+		kind: OperationKindHumanIssueCreate, getOperation: OperationHumanIssueCreateGet,
+		strictDigest: false, allowIntervention: true,
+	}, request.HumanIssueCreate, CanonicalHumanIssueCreateIntent)
+	if !valid || r == nil {
+		return valid
 	}
-	if result.Status == BackgroundOutcomeNotObserved {
-		return request.Operation == OperationHumanIssueCreateGet && result.Record == nil
-	}
-	r := result.Record
-	if r == nil || r.InstallationID != result.InstallationID || r.OperationID != id || r.Outcome != r.EffectState || r.EffectState != result.Status {
-		return false
-	}
-	switch r.EffectState {
-	case EffectPending, EffectNotCommitted, EffectCommitted, EffectIndeterminate:
-	default:
-		return false
-	}
-	switch r.CancellationStatus {
-	case CancellationNone, CancellationPending, CancellationCancelled, CancellationTooLate, CancellationIndeterminate:
-	default:
-		return false
-	}
-	if r.Kind == "" {
-		return r.ActorID == "" && r.RepositoryID == "" && r.IntentDigest == "" && len(r.Receipt) == 0 && r.CompletionState == "" && r.EffectState == EffectNotCommitted && r.CancellationStatus == CancellationCancelled
-	}
-	if r.Kind != OperationKindHumanIssueCreate || r.ActorID != request.Authority.Actor.ID || r.RepositoryID != request.RepositoryID || len(r.IntentDigest) != 64 {
-		return false
-	}
-	if q := request.HumanIssueCreate; q != nil {
-		_, digest, err := CanonicalHumanIssueCreateIntent(*q)
-		if err != nil || digest != r.IntentDigest {
-			return false
-		}
-	}
-	if r.EffectState != EffectCommitted {
-		return len(r.Receipt) == 0 && r.CompletionState == ""
-	}
-	if r.CompletionState != CompletionPending && r.CompletionState != CompletionComplete && r.CompletionState != CompletionNeedsIntervention {
-		return false
-	}
+
 	var receipt HumanIssueCreateReceipt
 	if json.Unmarshal(r.Receipt, &receipt) != nil || strconv.FormatInt(receipt.RepositoryID, 10) != request.RepositoryID || strconv.FormatInt(receipt.ActorID, 10) != request.Authority.Actor.ID || receipt.IssueID < 1 || receipt.Index < 1 || receipt.ContentVersion != 0 ||
 		receipt.Title == "" || strings.TrimSpace(receipt.Title) != receipt.Title || len(receipt.Title) > MaxHumanIssueCreateTitleBytes || !utf8.ValidString(receipt.Title) || strings.ContainsRune(receipt.Title, 0) || len(receipt.BodyDigest) != 64 {
@@ -220,4 +176,14 @@ func validHumanIssueCreateResult(result *OperationLookup, request CallbackReques
 		return ValidHumanIssueCreateReceipt(receipt, *q)
 	}
 	return true
+}
+
+func humanIssueCreateCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:  ErrHumanIssueCreateQuery,
+		admission:   ErrHumanIssueCreateAdmission,
+		notFound:    ErrRepositoryNotVisible,
+		conflict:    ErrHumanIssueCreateConflict,
+		unavailable: ErrHumanIssueCreateUnavailable,
+	}).forStatus(status)
 }

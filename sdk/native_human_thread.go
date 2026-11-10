@@ -5,13 +5,12 @@ package extensions
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"reflect"
 	"strconv"
-	"strings"
+
+	"forgejo.org/extension-sdk/operationcontract"
 )
 
 const OperationKindHumanThread = "pull_request.human_thread.apply"
@@ -116,27 +115,11 @@ func validHumanThreadTransition(a, b HumanThreadEvidence, changed bool, actor st
 // HumanThreadOperationID binds the owning application's durable command to
 // its actor/repository. Persist it before dispatch; reuse it for lookup/cancel.
 func HumanThreadOperationID(actor, repository, command string) (string, error) {
-	if !positivePullID(actor) || !positivePullID(repository) || !validOperationID(command) {
-		return "", ErrHumanThreadQuery
-	}
-	sum := sha256.Sum256([]byte(command))
-	return "human-thread:" + actor + ":" + repository + ":" + hex.EncodeToString(sum[:]), nil
+	return humanOperationID(operationcontract.HumanThreadPrefix, actor, repository, command, ErrHumanThreadQuery)
 }
 
 func ValidHumanThreadOperationID(id, actor, repository string) bool {
-	if !positivePullID(actor) || !positivePullID(repository) {
-		return false
-	}
-	prefix := "human-thread:" + actor + ":" + repository + ":"
-	if !strings.HasPrefix(id, prefix) || len(id) != len(prefix)+64 {
-		return false
-	}
-	for _, b := range []byte(strings.TrimPrefix(id, prefix)) {
-		if !(b >= '0' && b <= '9' || b >= 'a' && b <= 'f') {
-			return false
-		}
-	}
-	return validOperationID(id)
+	return validHumanOperationID(operationcontract.HumanThreadPrefix, id, actor, repository)
 }
 
 // ValidHumanThreadInstallationID validates a captured equality condition;
@@ -187,44 +170,15 @@ func validHumanThreadResult(result *OperationLookup, request CallbackRequest) bo
 	if request.HumanThread != nil {
 		id = request.HumanThread.OperationID
 	}
-	if result == nil || !validInstallationID(result.InstallationID) || result.OperationID != id || request.Operation != OperationHumanThreadGet && result.InstallationID != request.ThreadInstallationID {
-		return false
+	r, valid := validHumanOperationResult(result, request, humanOperationResult{
+		operationID: id, installationID: request.ThreadInstallationID,
+		kind: OperationKindHumanThread, getOperation: OperationHumanThreadGet,
+		strictDigest: true, allowIntervention: false,
+	}, request.HumanThread, CanonicalHumanThreadIntent)
+	if !valid || r == nil {
+		return valid
 	}
-	if result.Status == BackgroundOutcomeNotObserved {
-		return request.Operation == OperationHumanThreadGet && result.Record == nil
-	}
-	r := result.Record
-	if r == nil || r.InstallationID != result.InstallationID || r.OperationID != id || r.Outcome != r.EffectState || r.EffectState != result.Status {
-		return false
-	}
-	switch r.EffectState {
-	case EffectPending, EffectNotCommitted, EffectCommitted, EffectIndeterminate:
-	default:
-		return false
-	}
-	switch r.CancellationStatus {
-	case CancellationNone, CancellationPending, CancellationCancelled, CancellationTooLate, CancellationIndeterminate:
-	default:
-		return false
-	}
-	if r.Kind == "" {
-		return r.ActorID == "" && r.RepositoryID == "" && r.IntentDigest == "" && len(r.Receipt) == 0 && r.CompletionState == "" && r.EffectState == EffectNotCommitted && r.CancellationStatus == CancellationCancelled
-	}
-	if r.Kind != OperationKindHumanThread || r.ActorID != request.Authority.Actor.ID || r.RepositoryID != request.RepositoryID || !validHumanReviewDigest(r.IntentDigest) {
-		return false
-	}
-	if q := request.HumanThread; q != nil {
-		_, digest, err := CanonicalHumanThreadIntent(*q)
-		if err != nil || digest != r.IntentDigest {
-			return false
-		}
-	}
-	if r.EffectState != EffectCommitted {
-		return len(r.Receipt) == 0 && r.CompletionState == ""
-	}
-	if r.CompletionState != CompletionPending && r.CompletionState != CompletionComplete {
-		return false
-	}
+
 	var receipt HumanThreadReceipt
 	if json.Unmarshal(r.Receipt, &receipt) != nil || strconv.FormatInt(receipt.RepositoryID, 10) != request.RepositoryID || strconv.FormatInt(receipt.ActorID, 10) != request.Authority.Actor.ID || receipt.PullID < 1 || receipt.IssueID < 1 || receipt.Index < 1 || !validHumanThreadTransition(receipt.Before, receipt.After, receipt.Changed, request.Authority.Actor.ID) {
 		return false
@@ -233,4 +187,14 @@ func validHumanThreadResult(result *OperationLookup, request CallbackRequest) bo
 		return ValidHumanThreadReceipt(receipt, *q)
 	}
 	return true
+}
+
+func humanThreadCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:  ErrHumanThreadQuery,
+		admission:   ErrHumanThreadAdmission,
+		notFound:    ErrRepositoryNotVisible,
+		conflict:    ErrHumanThreadConflict,
+		unavailable: ErrHumanThreadUnavailable,
+	}).forStatus(status)
 }

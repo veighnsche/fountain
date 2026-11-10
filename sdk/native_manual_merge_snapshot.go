@@ -68,3 +68,14 @@ func (a Authority) RepositoryManualMergeSnapshot(ctx context.Context, repository
 	}
 	return *r.ManualMergeSnapshot, nil
 }
+
+func manualMergeSnapshotCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:    ErrManualMergeSnapshotQuery,
+		admission:     ErrManualMergeSnapshotAdmission,
+		notFound:      ErrRepositoryNotVisible,
+		conflict:      ErrManualMergeSnapshotChanged,
+		unprocessable: ErrManualMergeSnapshotCommit,
+		otherwise:     ErrManualMergeSnapshotUnavailable,
+	}).forStatus(status)
+}

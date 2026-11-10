@@ -11,6 +11,8 @@ import (
 	"io"
 	"net/url"
 	"regexp"
+
+	"forgejo.org/extension-sdk/wirejson"
 )
 
 // Trusted extension catalog (RCX-2 F01 frozen wire). The administrator
@@ -267,88 +269,20 @@ func DecodeCatalog(data []byte) (Catalog, error) {
 
 // objectKeys returns the key set of one JSON object document.
 func objectKeys(data []byte) (map[string]bool, error) {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	token, err := decoder.Token()
+	fields, err := wirejson.ObjectFields(data, "JSON document")
 	if err != nil {
 		return nil, err
 	}
-	if delimiter, ok := token.(json.Delim); !ok || delimiter != '{' {
-		return nil, errors.New("not a JSON object")
+	keys := make(map[string]bool, len(fields))
+	for key := range fields {
+		keys[key] = true
 	}
-	fields := make(map[string]bool)
-	for decoder.More() {
-		token, err := decoder.Token()
-		if err != nil {
-			return nil, err
-		}
-		key, ok := token.(string)
-		if !ok {
-			return nil, errors.New("invalid JSON object key")
-		}
-		fields[key] = true
-		var skipped any
-		if err := decoder.Decode(&skipped); err != nil {
-			return nil, err
-		}
-	}
-	return fields, nil
+	return keys, nil
 }
 
 // rejectDuplicateKeys rejects any JSON object with a repeated key, at any
 // depth. encoding/json silently keeps the last duplicate, so strict wire
 // decoding must detect them explicitly.
 func rejectDuplicateKeys(data []byte, what string) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	var check func() error
-	check = func() error {
-		token, err := decoder.Token()
-		if err != nil {
-			return err
-		}
-		switch token := token.(type) {
-		case json.Delim:
-			switch token {
-			case '{':
-				seen := make(map[string]bool)
-				for decoder.More() {
-					keyToken, err := decoder.Token()
-					if err != nil {
-						return err
-					}
-					key, ok := keyToken.(string)
-					if !ok {
-						return errors.New("invalid JSON object key")
-					}
-					if seen[key] {
-						return fmt.Errorf("duplicate JSON object key %q", key)
-					}
-					seen[key] = true
-					if err := check(); err != nil {
-						return err
-					}
-				}
-				_, err = decoder.Token()
-				return err
-			case '[':
-				for decoder.More() {
-					if err := check(); err != nil {
-						return err
-					}
-				}
-				_, err = decoder.Token()
-				return err
-			default:
-				return nil
-			}
-		default:
-			return nil
-		}
-	}
-	if err := check(); err != nil {
-		return err
-	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return fmt.Errorf("%s must contain one value", what)
-	}
-	return nil
+	return wirejson.RejectDuplicateKeys(data, what)
 }

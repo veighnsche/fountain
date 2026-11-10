@@ -63,6 +63,7 @@ type RepositoryInlineSnapshot struct {
 func validRepositoryInlineSnapshot(p *RepositoryInlineSnapshot, repository, actor string, q RepositoryInlineSnapshotRequest) bool {
 	return p != nil && ValidRepositoryInlineSnapshotRequest(q) && validRepositoryReviewSnapshot(&p.Review, repository, actor, RepositoryReviewSnapshotRequest{Index: q.Index}) && p.Anchor == q.Anchor && p.Anchor.Base == p.Review.MergeBaseOID && p.Anchor.Head == p.Review.HeadOID && ValidPullDiffCommit(p.EntryOID) && validHumanReviewDigest(p.DiffDigest) && (p.EntryKind == "blob" || p.EntryKind == "commit" && p.Anchor.Scope == "file")
 }
+
 func (a Authority) RepositoryInlineSnapshot(ctx context.Context, repository string, q RepositoryInlineSnapshotRequest) (RepositoryInlineSnapshot, error) {
 	if !positivePullID(repository) || !ValidRepositoryInlineSnapshotRequest(q) {
 		return RepositoryInlineSnapshot{}, ErrInlineSnapshotQuery
@@ -72,4 +73,15 @@ func (a Authority) RepositoryInlineSnapshot(ctx context.Context, repository stri
 		return RepositoryInlineSnapshot{}, err
 	}
 	return *r.InlineSnapshot, nil
+}
+
+func inlineSnapshotCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:    ErrInlineSnapshotQuery,
+		admission:     ErrInlineSnapshotAdmission,
+		notFound:      ErrRepositoryNotVisible,
+		conflict:      ErrInlineSnapshotChanged,
+		unprocessable: ErrInlineSnapshotAnchor,
+		unavailable:   ErrInlineSnapshotUnavailable,
+	}).forStatus(status)
 }

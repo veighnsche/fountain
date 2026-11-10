@@ -91,3 +91,14 @@ func (a Authority) RepositoryReviewRequestSnapshot(ctx context.Context, reposito
 	}
 	return *r.ReviewRequestSnapshot, nil
 }
+
+func reviewRequestSnapshotCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:  ErrReviewRequestSnapshotQuery,
+		admission:   ErrReviewRequestSnapshotAdmission,
+		notFound:    ErrRepositoryNotVisible,
+		conflict:    ErrReviewRequestSnapshotChanged,
+		tooLarge:    ErrReviewRequestSnapshotTooLarge,
+		unavailable: ErrReviewRequestSnapshotUnavailable,
+	}).forStatus(status)
+}

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"strings"
 
+	"forgejo.org/extension-sdk/operationcontract"
 	auth_model "forgejo.org/models/auth"
 	"forgejo.org/models/db"
 	repo_model "forgejo.org/models/repo"
@@ -23,16 +24,16 @@ import (
 // Operation kinds mirror the SDK background kinds. Authorization for one kind
 // never grants another.
 const (
-	KindIssueGraph      = "issue.graph.mutate"
-	KindRefPublish      = "git.ref.publish"
-	KindPRCreate        = "pull_request.create"
-	KindReviewSubmit    = "pull_request.review.submit"
-	KindThreadResolve   = "pull_request.review.thread.resolve"
-	KindMerge           = "pull_request.merge"
-	KindLifecycleIssue  = "issue.lifecycle.apply"
-	KindLifecycleReview = "pull_request.review.request"
-	KindLifecycleNote   = "issue.comment.publish"
-	KindExecutionLaunch = "execution.launch"
+	KindIssueGraph      = operationcontract.KindIssueGraph
+	KindRefPublish      = operationcontract.KindRefPublish
+	KindPRCreate        = operationcontract.KindPRCreate
+	KindReviewSubmit    = operationcontract.KindReviewSubmit
+	KindThreadResolve   = operationcontract.KindThreadResolve
+	KindMerge           = operationcontract.KindMerge
+	KindLifecycleIssue  = operationcontract.KindLifecycleIssue
+	KindLifecycleReview = operationcontract.KindLifecycleReview
+	KindLifecycleNote   = operationcontract.KindLifecycleNote
+	KindExecutionLaunch = operationcontract.KindExecutionLaunch
 )
 
 // ActorBinding is one administrator approval binding an installation UUID to
@@ -55,12 +56,7 @@ func init() {
 
 // ValidKind reports whether kind is a supported background operation kind.
 func ValidKind(kind string) bool {
-	switch kind {
-	case KindIssueGraph, KindRefPublish, KindPRCreate, KindReviewSubmit, KindThreadResolve, KindMerge, KindLifecycleIssue, KindLifecycleReview, KindLifecycleNote, KindExecutionLaunch:
-		return true
-	default:
-		return false
-	}
+	return operationcontract.ValidEnrollmentKind(kind)
 }
 
 // EnrollBinding records an administrator approval. It verifies the token row

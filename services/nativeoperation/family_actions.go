@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"forgejo.org/extension-sdk/gitsyntax"
 )
 
 // FamilyActionsRun is one run/job/status-level Actions logical update:
@@ -225,13 +227,5 @@ func parseActionsResource(resource string) (actionsClaim, error) {
 }
 
 func validStatusSHA(sha string) bool {
-	if len(sha) != 40 && len(sha) != 64 {
-		return false
-	}
-	for _, c := range sha {
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
-			return false
-		}
-	}
-	return true
+	return gitsyntax.FullOID(sha)
 }

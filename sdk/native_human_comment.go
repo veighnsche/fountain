@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"forgejo.org/extension-sdk/operationcontract"
 )
 
 const HumanCommentAuthorizationRevision = "native-human-request"
@@ -99,27 +101,11 @@ func ValidHumanCommentRequest(q HumanCommentRequest) bool {
 // repository. Persist the returned ID before dispatch; reuse it for get/cancel.
 // Installation is supplied by the live host, never selected by this helper.
 func HumanCommentOperationID(actor, repository, command string) (string, error) {
-	if !positivePullID(actor) || !positivePullID(repository) || !validOperationID(command) {
-		return "", ErrHumanCommentQuery
-	}
-	sum := sha256.Sum256([]byte(command))
-	return "human-comment:" + actor + ":" + repository + ":" + hex.EncodeToString(sum[:]), nil
+	return humanOperationID(operationcontract.HumanCommentPrefix, actor, repository, command, ErrHumanCommentQuery)
 }
 
 func ValidHumanCommentOperationID(id, actor, repository string) bool {
-	if !positivePullID(actor) || !positivePullID(repository) {
-		return false
-	}
-	prefix := "human-comment:" + actor + ":" + repository + ":"
-	if !strings.HasPrefix(id, prefix) || len(id) != len(prefix)+64 {
-		return false
-	}
-	for _, b := range []byte(strings.TrimPrefix(id, prefix)) {
-		if !(b >= '0' && b <= '9' || b >= 'a' && b <= 'f') {
-			return false
-		}
-	}
-	return validOperationID(id)
+	return validHumanOperationID(operationcontract.HumanCommentPrefix, id, actor, repository)
 }
 
 // ValidHumanCommentInstallationID validates the captured namespace condition.
@@ -174,41 +160,15 @@ func validHumanCommentResult(result *OperationLookup, request CallbackRequest) b
 	if request.HumanComment != nil {
 		id = request.HumanComment.OperationID
 	}
-	if result == nil || !validInstallationID(result.InstallationID) || result.OperationID != id {
-		return false
+	r, valid := validHumanOperationResult(result, request, humanOperationResult{
+		operationID: id, installationID: request.CommentInstallationID,
+		kind: OperationKindHumanComment, getOperation: OperationHumanCommentGet,
+		strictDigest: false, allowIntervention: true,
+	}, request.HumanComment, CanonicalHumanCommentIntent)
+	if !valid || r == nil {
+		return valid
 	}
-	if request.Operation != OperationHumanCommentGet && result.InstallationID != request.CommentInstallationID {
-		return false
-	}
-	if result.Status == BackgroundOutcomeNotObserved {
-		return request.Operation == OperationHumanCommentGet && result.Record == nil
-	}
-	r := result.Record
-	if r == nil || r.InstallationID != result.InstallationID || r.OperationID != id || r.Outcome != r.EffectState || r.EffectState != result.Status {
-		return false
-	}
-	switch r.EffectState {
-	case EffectPending, EffectNotCommitted, EffectCommitted, EffectIndeterminate:
-	default:
-		return false
-	}
-	switch r.CancellationStatus {
-	case CancellationNone, CancellationPending, CancellationCancelled, CancellationTooLate, CancellationIndeterminate:
-	default:
-		return false
-	}
-	if r.Kind == "" {
-		return r.ActorID == "" && r.RepositoryID == "" && r.IntentDigest == "" && len(r.Receipt) == 0 && r.CompletionState == "" && r.EffectState == EffectNotCommitted && r.CancellationStatus == CancellationCancelled
-	}
-	if r.Kind != OperationKindHumanComment || r.ActorID != request.Authority.Actor.ID || r.RepositoryID != request.RepositoryID || len(r.IntentDigest) != 64 {
-		return false
-	}
-	if r.EffectState != EffectCommitted {
-		return len(r.Receipt) == 0 && r.CompletionState == ""
-	}
-	if r.CompletionState != CompletionPending && r.CompletionState != CompletionComplete && r.CompletionState != CompletionNeedsIntervention {
-		return false
-	}
+
 	var receipt HumanCommentReceipt
 	if json.Unmarshal(r.Receipt, &receipt) != nil || strconv.FormatInt(receipt.RepositoryID, 10) != request.RepositoryID || strconv.FormatInt(receipt.ActorID, 10) != request.Authority.Actor.ID || receipt.IssueID < 1 || receipt.SubjectID < 1 || receipt.Index < 1 || receipt.CommentID < 1 || receipt.Subject != "issue" && receipt.Subject != "pull" || receipt.Subject == "issue" && receipt.SubjectID != receipt.IssueID {
 		return false
@@ -217,4 +177,14 @@ func validHumanCommentResult(result *OperationLookup, request CallbackRequest) b
 		return receipt.Subject == q.Expected.Subject && strconv.FormatInt(receipt.SubjectID, 10) == q.Expected.SubjectID && strconv.FormatInt(receipt.IssueID, 10) == q.Expected.IssueID && strconv.FormatInt(receipt.Index, 10) == q.Expected.Index
 	}
 	return true
+}
+
+func humanCommentCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:  ErrHumanCommentQuery,
+		admission:   ErrHumanCommentAdmission,
+		notFound:    ErrRepositoryNotVisible,
+		conflict:    ErrHumanCommentConflict,
+		unavailable: ErrHumanCommentUnavailable,
+	}).forStatus(status)
 }

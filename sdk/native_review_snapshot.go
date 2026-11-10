@@ -77,3 +77,10 @@ func (a Authority) RepositoryReviewSnapshot(ctx context.Context, repository stri
 	}
 	return *r.ReviewSnapshot, nil
 }
+
+func reviewSnapshotCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		conflict: ErrReviewSnapshotChanged,
+		notFound: ErrRepositoryNotVisible,
+	}).forStatus(status)
+}

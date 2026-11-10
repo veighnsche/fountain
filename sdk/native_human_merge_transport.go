@@ -63,44 +63,15 @@ func validHumanMergeResult(result *OperationLookup, request CallbackRequest) boo
 	if request.HumanMerge != nil {
 		id = request.HumanMerge.OperationID
 	}
-	if result == nil || !validInstallationID(result.InstallationID) || result.OperationID != id || request.Operation != OperationHumanMergeGet && result.InstallationID != request.MergeInstallationID {
-		return false
+	r, valid := validHumanOperationResult(result, request, humanOperationResult{
+		operationID: id, installationID: request.MergeInstallationID,
+		kind: OperationKindHumanMerge, getOperation: OperationHumanMergeGet,
+		strictDigest: true, allowIntervention: true,
+	}, request.HumanMerge, CanonicalHumanMergeIntent)
+	if !valid || r == nil {
+		return valid
 	}
-	if result.Status == BackgroundOutcomeNotObserved {
-		return request.Operation == OperationHumanMergeGet && result.Record == nil
-	}
-	r := result.Record
-	if r == nil || r.InstallationID != result.InstallationID || r.OperationID != id || r.Outcome != r.EffectState || r.EffectState != result.Status {
-		return false
-	}
-	switch r.EffectState {
-	case EffectPending, EffectNotCommitted, EffectCommitted, EffectIndeterminate:
-	default:
-		return false
-	}
-	switch r.CancellationStatus {
-	case CancellationNone, CancellationPending, CancellationCancelled, CancellationTooLate, CancellationIndeterminate:
-	default:
-		return false
-	}
-	if r.Kind == "" {
-		return r.ActorID == "" && r.RepositoryID == "" && r.IntentDigest == "" && len(r.Receipt) == 0 && r.CompletionState == "" && r.EffectState == EffectNotCommitted && r.CancellationStatus == CancellationCancelled
-	}
-	if r.Kind != OperationKindHumanMerge || r.ActorID != request.Authority.Actor.ID || r.RepositoryID != request.RepositoryID || !validHumanReviewDigest(r.IntentDigest) {
-		return false
-	}
-	if q := request.HumanMerge; q != nil {
-		_, digest, err := CanonicalHumanMergeIntent(*q)
-		if err != nil || digest != r.IntentDigest {
-			return false
-		}
-	}
-	if r.EffectState != EffectCommitted {
-		return len(r.Receipt) == 0 && r.CompletionState == ""
-	}
-	if r.CompletionState != CompletionPending && r.CompletionState != CompletionComplete && r.CompletionState != CompletionNeedsIntervention {
-		return false
-	}
+
 	var receipt HumanMergeReceipt
 	if json.Unmarshal(r.Receipt, &receipt) != nil || strconv.FormatInt(receipt.RepositoryID, 10) != request.RepositoryID || strconv.FormatInt(receipt.ActorID, 10) != request.Authority.Actor.ID || receipt.IntentDigest != r.IntentDigest || !validHumanMergeReceiptShape(receipt) {
 		return false
@@ -113,4 +84,14 @@ func validHumanMergeResult(result *OperationLookup, request CallbackRequest) boo
 		return ValidHumanMergeReceipt(receipt, *q)
 	}
 	return true
+}
+
+func humanMergeCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:  ErrHumanMergeQuery,
+		admission:   ErrHumanMergeAdmission,
+		notFound:    ErrRepositoryNotVisible,
+		conflict:    ErrHumanMergeConflict,
+		unavailable: ErrHumanMergeUnavailable,
+	}).forStatus(status)
 }

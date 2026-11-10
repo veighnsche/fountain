@@ -14,6 +14,7 @@ import (
 	"time"
 
 	extension "forgejo.org/extension-sdk"
+	"forgejo.org/extension-sdk/operationcontract"
 	extensionauth_model "forgejo.org/models/extensionauth"
 	"forgejo.org/modules/setting"
 	extensions_service "forgejo.org/services/extensions"
@@ -494,16 +495,7 @@ func serveBackgroundRevision(w http.ResponseWriter, r *http.Request, operations 
 }
 
 func validBackgroundOperationID(id string) bool {
-	if id == "" || len(id) > 128 {
-		return false
-	}
-	for _, c := range id {
-		if c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.' || c == ':' {
-			continue
-		}
-		return false
-	}
-	return true
+	return operationcontract.ValidID(id)
 }
 
 func decodeBackgroundRequest(w http.ResponseWriter, r *http.Request, target any) bool {

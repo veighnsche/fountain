@@ -19,6 +19,7 @@ import (
 	"time"
 
 	extension "forgejo.org/extension-sdk"
+	"forgejo.org/extension-sdk/wirejson"
 	"forgejo.org/models/asymkey"
 	"forgejo.org/models/db"
 	"forgejo.org/models/organization"
@@ -242,64 +243,8 @@ func callbackHandler(instanceID string, service bool) http.Handler {
 		if !ok {
 			return
 		}
-		humanMerge := request.Operation == extension.OperationHumanMergeSubmit || request.Operation == extension.OperationHumanMergeGet || request.Operation == extension.OperationHumanMergeCancel
-		if !humanMerge && (request.HumanMerge != nil || request.MergeOperationID != "" || request.MergeInstallationID != "") {
-			http.Error(w, "unexpected human merge selector", http.StatusBadRequest)
-			return
-		}
-		humanPullCreate := request.Operation == extension.OperationHumanPullCreateSubmit || request.Operation == extension.OperationHumanPullCreateGet || request.Operation == extension.OperationHumanPullCreateCancel
-		if !humanPullCreate && (request.HumanPullCreate != nil || request.PullCreateOperationID != "" || request.PullCreateInstallationID != "") {
-			http.Error(w, "unexpected human pull creation selector", http.StatusBadRequest)
-			return
-		}
-		humanManualMerge := request.Operation == extension.OperationHumanManualMergeSubmit || request.Operation == extension.OperationHumanManualMergeGet || request.Operation == extension.OperationHumanManualMergeCancel
-		if !humanManualMerge && (request.HumanManualMerge != nil || request.ManualMergeOperationID != "" || request.ManualMergeInstallationID != "") {
-			http.Error(w, "unexpected human manual merge selector", http.StatusBadRequest)
-			return
-		}
-		humanComment := request.Operation == extension.OperationHumanCommentSubmit || request.Operation == extension.OperationHumanCommentGet || request.Operation == extension.OperationHumanCommentCancel
-		humanEdit := request.Operation == extension.OperationHumanEditSubmit || request.Operation == extension.OperationHumanEditGet || request.Operation == extension.OperationHumanEditCancel
-		humanReview := request.Operation == extension.OperationHumanReviewSubmit || request.Operation == extension.OperationHumanReviewGet || request.Operation == extension.OperationHumanReviewCancel
-		humanReviewRequest := request.Operation == extension.OperationHumanReviewRequestSubmit || request.Operation == extension.OperationHumanReviewRequestGet || request.Operation == extension.OperationHumanReviewRequestCancel
-		if !humanReviewRequest && (request.HumanReviewRequest != nil || request.ReviewRequestOperationID != "" || request.ReviewRequestInstallationID != "") {
-			http.Error(w, "unexpected human reviewer selector", http.StatusBadRequest)
-			return
-		}
-		humanThread := request.Operation == extension.OperationHumanThreadSubmit || request.Operation == extension.OperationHumanThreadGet || request.Operation == extension.OperationHumanThreadCancel
-		if !humanThread && (request.HumanThread != nil || request.ThreadOperationID != "" || request.ThreadInstallationID != "") {
-			http.Error(w, "unexpected human thread selector", http.StatusBadRequest)
-			return
-		}
-		humanInline := request.Operation == extension.OperationHumanInlineSubmit || request.Operation == extension.OperationHumanInlineGet || request.Operation == extension.OperationHumanInlineCancel
-		if !humanInline && (request.HumanInline != nil || request.InlineOperationID != "" || request.InlineInstallationID != "") {
-			http.Error(w, "unexpected human inline selector", http.StatusBadRequest)
-			return
-		}
-		if !humanReview && (request.HumanReview != nil || request.ReviewOperationID != "" || request.ReviewInstallationID != "") {
-			http.Error(w, "unexpected human review selector", http.StatusBadRequest)
-			return
-		}
-		humanState := request.Operation == extension.OperationHumanStateSubmit || request.Operation == extension.OperationHumanStateGet || request.Operation == extension.OperationHumanStateCancel
-		if !humanState && (request.HumanState != nil || request.StateOperationID != "" || request.StateInstallationID != "") {
-			http.Error(w, "unexpected human state selector", http.StatusBadRequest)
-			return
-		}
-		humanLock := request.Operation == extension.OperationHumanLockSubmit || request.Operation == extension.OperationHumanLockGet || request.Operation == extension.OperationHumanLockCancel
-		if !humanLock && (request.HumanLock != nil || request.LockOperationID != "" || request.LockInstallationID != "") {
-			http.Error(w, "unexpected human lock selector", http.StatusBadRequest)
-			return
-		}
-		humanIssueCreate := request.Operation == extension.OperationHumanIssueCreateSubmit || request.Operation == extension.OperationHumanIssueCreateGet || request.Operation == extension.OperationHumanIssueCreateCancel
-		if !humanIssueCreate && (request.HumanIssueCreate != nil || request.IssueCreateOperationID != "" || request.IssueCreateInstallationID != "") {
-			http.Error(w, "unexpected human issue creation selector", http.StatusBadRequest)
-			return
-		}
-		if !humanEdit && (request.HumanEdit != nil || request.EditOperationID != "" || request.EditInstallationID != "") {
-			http.Error(w, "unexpected human edit selector", http.StatusBadRequest)
-			return
-		}
-		if !humanComment && (request.HumanComment != nil || request.CommentOperationID != "" || request.CommentInstallationID != "") {
-			http.Error(w, "unexpected human comment selector", http.StatusBadRequest)
+		if err := extension.ValidateHumanCallbackSelectors(request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		if !sameAuthority(request.Authority, entry.authority) {
@@ -315,112 +260,8 @@ func callbackHandler(instanceID string, service bool) http.Handler {
 			http.Error(w, "native capability not declared", http.StatusForbidden)
 			return
 		}
-		if request.Operation != extension.OperationRepositorySource && (request.SourceCommit != "" || len(request.SourcePaths) != 0 || len(request.SourceActors) != 0) {
-			http.Error(w, "invalid native capability request", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationIssueIntakeAuthorize && request.IssueIntake != nil {
-			http.Error(w, "unexpected issue intake fields", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRuntimeControllerSelect && request.RuntimeSelection != nil {
-			http.Error(w, "unexpected controller command", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRuntimeControllerAuthorize && request.RuntimeAuthorization != nil {
-			http.Error(w, "unexpected runtime authorization", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRuntimeControllerGrant && request.RuntimeGrantID != "" {
-			http.Error(w, "unexpected runtime grant reference", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryIssues && request.CompleteIssueBodies {
-			http.Error(w, "unexpected issue body selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryIssues && request.IssueState != "" {
-			http.Error(w, "unexpected issue state", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryComments && request.Comments != nil {
-			http.Error(w, "unexpected discussion selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryCommentSnapshot && request.CommentSnapshot != nil {
-			http.Error(w, "unexpected comment snapshot selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryEditSnapshot && request.EditSnapshot != nil {
-			http.Error(w, "unexpected edit snapshot selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryReviewRequestSnapshot && request.ReviewRequestSnapshot != nil {
-			http.Error(w, "unexpected reviewer selection", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryThreadSnapshot && request.ThreadSnapshot != nil {
-			http.Error(w, "unexpected thread preparation selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryInlineSnapshot && request.InlineSnapshot != nil {
-			http.Error(w, "unexpected inline preparation selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryPullCreateSnapshot && request.PullCreateSnapshot != nil {
-			http.Error(w, "unexpected pull creation preparation selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryMergeSnapshot && request.MergeSnapshot != nil {
-			http.Error(w, "unexpected merge preparation selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryManualMergeSnapshot && request.ManualMergeSnapshot != nil {
-			http.Error(w, "unexpected manual merge preparation selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryReviewSnapshot && request.ReviewSnapshot != nil {
-			http.Error(w, "unexpected review snapshot selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryStateSnapshot && request.StateSnapshot != nil {
-			http.Error(w, "unexpected state snapshot selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryLockSnapshot && request.LockSnapshot != nil {
-			http.Error(w, "unexpected lock snapshot selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryPulls && request.Pulls != nil {
-			http.Error(w, "unexpected pull selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryPullFiles && request.PullFiles != nil {
-			http.Error(w, "unexpected pull files selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryPullCommits && request.PullCommits != nil {
-			http.Error(w, "unexpected pull commits selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryReviews && request.Reviews != nil {
-			http.Error(w, "unexpected review selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryThreads && request.Threads != nil {
-			http.Error(w, "unexpected thread selector", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryCapabilities && request.Capabilities != nil {
-			http.Error(w, "unexpected capability fields", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationReadableRepositories && request.Catalog != nil {
-			http.Error(w, "unexpected repository catalogue fields", http.StatusBadRequest)
-			return
-		}
-		if request.Operation != extension.OperationRepositoryChecks && request.Checks != nil {
-			http.Error(w, "unexpected check selector", http.StatusBadRequest)
+		if err := extension.ValidateCallbackSelectors(request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		switch request.Operation {
@@ -1224,50 +1065,7 @@ func sameAuthority(actual, expected extension.Authority) bool {
 }
 
 func callbackCapability(operation string) (string, bool) {
-	switch operation {
-	case extension.OperationRuntimeControllerRead, extension.OperationRuntimeControllerSelect, extension.OperationRuntimeControllerAuthorize, extension.OperationRuntimeControllerGrant:
-		return extension.CapabilityRuntimeControl, true
-	case extension.OperationHumanMergeSubmit, extension.OperationHumanMergeGet, extension.OperationHumanMergeCancel:
-		return extension.CapabilityHumanMerges, true
-	case extension.OperationHumanPullCreateSubmit, extension.OperationHumanPullCreateGet, extension.OperationHumanPullCreateCancel:
-		return extension.CapabilityHumanPullCreate, true
-	case extension.OperationHumanManualMergeSubmit, extension.OperationHumanManualMergeGet, extension.OperationHumanManualMergeCancel:
-		return extension.CapabilityHumanMerges, true
-	case extension.OperationHumanReviewRequestSubmit, extension.OperationHumanReviewRequestGet, extension.OperationHumanReviewRequestCancel:
-		return extension.CapabilityHumanReviews, true
-	case extension.OperationHumanThreadSubmit, extension.OperationHumanThreadGet, extension.OperationHumanThreadCancel:
-		return extension.CapabilityHumanReviews, true
-	case extension.OperationHumanInlineSubmit, extension.OperationHumanInlineGet, extension.OperationHumanInlineCancel:
-		return extension.CapabilityHumanReviews, true
-	case extension.OperationHumanReviewSubmit, extension.OperationHumanReviewGet, extension.OperationHumanReviewCancel:
-		return extension.CapabilityHumanReviews, true
-	case extension.OperationHumanStateSubmit, extension.OperationHumanStateGet, extension.OperationHumanStateCancel:
-		return extension.CapabilityHumanStates, true
-	case extension.OperationHumanLockSubmit, extension.OperationHumanLockGet, extension.OperationHumanLockCancel:
-		return extension.CapabilityHumanLocks, true
-	case extension.OperationHumanIssueCreateSubmit, extension.OperationHumanIssueCreateGet, extension.OperationHumanIssueCreateCancel:
-		return extension.CapabilityHumanIssueCreate, true
-	case extension.OperationHumanEditSubmit, extension.OperationHumanEditGet, extension.OperationHumanEditCancel:
-		return extension.CapabilityHumanEdits, true
-	case extension.OperationHumanCommentSubmit, extension.OperationHumanCommentGet, extension.OperationHumanCommentCancel:
-		return extension.CapabilityHumanComments, true
-	case extension.OperationIssueIntakeAuthorize:
-		return extension.CapabilityIssueIntake, true
-	case extension.OperationCurrentActor:
-		return extension.CapabilityActorRead, true
-	case extension.OperationRepositoryManualMergeSnapshot:
-		return extension.CapabilityRepositoryRead, true
-	case extension.OperationRepositoryPullCreateSnapshot, extension.OperationRepositoryMergeSnapshot, extension.OperationRepositoryReviewRequestSnapshot, extension.OperationRepositoryThreadSnapshot, extension.OperationRepositoryInlineSnapshot, extension.OperationRepositoryReviewSnapshot, extension.OperationRepositoryStateSnapshot, extension.OperationRepositoryLockSnapshot, extension.OperationRepositoryIssueCreateSnapshot, extension.OperationRepositoryEditSnapshot, extension.OperationRepositoryCommentSnapshot, extension.OperationRepositoryCapabilities, extension.OperationReadableRepositories, extension.OperationRepository, extension.OperationRepositorySource, extension.OperationRepositoryIssues, extension.OperationRepositoryComments, extension.OperationRepositoryPulls, extension.OperationRepositoryPullFiles, extension.OperationRepositoryPullCommits, extension.OperationRepositoryReviews, extension.OperationRepositoryThreads, extension.OperationRepositoryChecks:
-		return extension.CapabilityRepositoryRead, true
-	case extension.OperationOwnedRepositories:
-		return extension.CapabilityOwnedRepositoriesSearch, true
-	case extension.OperationOrganizationOwner:
-		return extension.CapabilityOrganizationOwnership, true
-	case extension.OperationPublicSSHKeys:
-		return extension.CapabilityPublicKeysRead, true
-	default:
-		return "", false
-	}
+	return extension.NativeCallbackCapability(operation)
 }
 
 func decodeCallbackRequest(w http.ResponseWriter, r *http.Request) (extension.CallbackRequest, bool) {
@@ -1278,6 +1076,10 @@ func decodeCallbackRequest(w http.ResponseWriter, r *http.Request) (extension.Ca
 	}
 	data, err := io.ReadAll(io.LimitReader(r.Body, int64(maximum)+1))
 	if err != nil || len(data) > maximum {
+		http.Error(w, "invalid callback request", http.StatusBadRequest)
+		return extension.CallbackRequest{}, false
+	}
+	if _, err := wirejson.ObjectFields(data, "callback request"); err != nil {
 		http.Error(w, "invalid callback request", http.StatusBadRequest)
 		return extension.CallbackRequest{}, false
 	}

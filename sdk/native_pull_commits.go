@@ -51,6 +51,7 @@ func ValidRepositoryPullCommits(p *RepositoryPullCommits, repository string, q R
 	}
 	return true
 }
+
 func (a Authority) RepositoryPullCommits(ctx context.Context, repository string, q RepositoryPullCommitsRequest) (RepositoryPullCommits, error) {
 	if !positivePullID(repository) || !ValidRepositoryPullCommitsRequest(q) {
 		return RepositoryPullCommits{}, ErrPullCommitsQuery
@@ -60,4 +61,12 @@ func (a Authority) RepositoryPullCommits(ctx context.Context, repository string,
 		return RepositoryPullCommits{}, err
 	}
 	return *result.PullCommits, nil
+}
+
+func pullCommitsCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest: ErrPullCommitsQuery,
+		conflict:   ErrPullCommitsChanged,
+		notFound:   ErrRepositoryNotVisible,
+	}).forStatus(status)
 }

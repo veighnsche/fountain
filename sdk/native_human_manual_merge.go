@@ -11,8 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
-	"strings"
 	"unicode/utf8"
+
+	"forgejo.org/extension-sdk/operationcontract"
 )
 
 const OperationKindHumanManualMerge = "pull_request.human_manual_merge.apply"
@@ -66,27 +67,11 @@ func CanonicalHumanManualMergeIntent(q HumanManualMergeRequest) (string, string,
 }
 
 func HumanManualMergeOperationID(actor, repository, command string) (string, error) {
-	if !positivePullID(actor) || !positivePullID(repository) || !validOperationID(command) {
-		return "", ErrHumanManualMergeQuery
-	}
-	sum := sha256.Sum256([]byte(command))
-	return "human-manual-merge:" + actor + ":" + repository + ":" + hex.EncodeToString(sum[:]), nil
+	return humanOperationID(operationcontract.HumanManualMergePrefix, actor, repository, command, ErrHumanManualMergeQuery)
 }
 
 func ValidHumanManualMergeOperationID(id, actor, repository string) bool {
-	if !positivePullID(actor) || !positivePullID(repository) {
-		return false
-	}
-	prefix := "human-manual-merge:" + actor + ":" + repository + ":"
-	if !strings.HasPrefix(id, prefix) || len(id) != len(prefix)+64 || !validOperationID(id) {
-		return false
-	}
-	for _, c := range []byte(strings.TrimPrefix(id, prefix)) {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-			return false
-		}
-	}
-	return true
+	return validHumanOperationID(operationcontract.HumanManualMergePrefix, id, actor, repository)
 }
 
 // This proves the atomic SQL mark/history, not a Git ref write or completed
@@ -156,44 +141,15 @@ func validHumanManualMergeResult(result *OperationLookup, request CallbackReques
 	if request.HumanManualMerge != nil {
 		id = request.HumanManualMerge.OperationID
 	}
-	if result == nil || !validInstallationID(result.InstallationID) || result.OperationID != id || request.Operation != OperationHumanManualMergeGet && result.InstallationID != request.ManualMergeInstallationID {
-		return false
+	r, valid := validHumanOperationResult(result, request, humanOperationResult{
+		operationID: id, installationID: request.ManualMergeInstallationID,
+		kind: OperationKindHumanManualMerge, getOperation: OperationHumanManualMergeGet,
+		strictDigest: true, allowIntervention: true,
+	}, request.HumanManualMerge, CanonicalHumanManualMergeIntent)
+	if !valid || r == nil {
+		return valid
 	}
-	if result.Status == BackgroundOutcomeNotObserved {
-		return request.Operation == OperationHumanManualMergeGet && result.Record == nil
-	}
-	r := result.Record
-	if r == nil || r.InstallationID != result.InstallationID || r.OperationID != id || r.Outcome != r.EffectState || r.EffectState != result.Status {
-		return false
-	}
-	switch r.EffectState {
-	case EffectPending, EffectNotCommitted, EffectCommitted, EffectIndeterminate:
-	default:
-		return false
-	}
-	switch r.CancellationStatus {
-	case CancellationNone, CancellationPending, CancellationCancelled, CancellationTooLate, CancellationIndeterminate:
-	default:
-		return false
-	}
-	if r.Kind == "" {
-		return r.ActorID == "" && r.RepositoryID == "" && r.IntentDigest == "" && len(r.Receipt) == 0 && r.CompletionState == "" && r.EffectState == EffectNotCommitted && r.CancellationStatus == CancellationCancelled
-	}
-	if r.Kind != OperationKindHumanManualMerge || r.ActorID != request.Authority.Actor.ID || r.RepositoryID != request.RepositoryID || !validHumanReviewDigest(r.IntentDigest) {
-		return false
-	}
-	if q := request.HumanManualMerge; q != nil {
-		_, digest, err := CanonicalHumanManualMergeIntent(*q)
-		if err != nil || digest != r.IntentDigest {
-			return false
-		}
-	}
-	if r.EffectState != EffectCommitted {
-		return len(r.Receipt) == 0 && r.CompletionState == ""
-	}
-	if r.CompletionState != CompletionPending && r.CompletionState != CompletionComplete && r.CompletionState != CompletionNeedsIntervention {
-		return false
-	}
+
 	var receipt HumanManualMergeReceipt
 	if json.Unmarshal(r.Receipt, &receipt) != nil || strconv.FormatInt(receipt.RepositoryID, 10) != request.RepositoryID || strconv.FormatInt(receipt.ActorID, 10) != request.Authority.Actor.ID || receipt.PullID < 1 || receipt.IssueID < 1 || receipt.Index < 1 || !validReviewSubmitPayloadRef("refs/heads/"+receipt.BaseBranch) || !ValidPullDiffCommit(receipt.BaseOID) || !ValidPullDiffCommit(receipt.CommitOID) || len(receipt.BaseOID) != len(receipt.CommitOID) || receipt.MergedUnix == 0 || receipt.ClosedUnix < 1 || receipt.HistoryID < 1 || receipt.IntentDigest != r.IntentDigest {
 		return false
@@ -206,4 +162,14 @@ func validHumanManualMergeResult(result *OperationLookup, request CallbackReques
 		return ValidHumanManualMergeReceipt(receipt, *q)
 	}
 	return true
+}
+
+func humanManualMergeCallbackStatusError(status int) error {
+	return (callbackStatusProfile{
+		badRequest:  ErrHumanManualMergeQuery,
+		admission:   ErrHumanManualMergeAdmission,
+		notFound:    ErrRepositoryNotVisible,
+		conflict:    ErrHumanManualMergeConflict,
+		unavailable: ErrHumanManualMergeUnavailable,
+	}).forStatus(status)
 }
