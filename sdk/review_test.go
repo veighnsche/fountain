@@ -46,7 +46,7 @@ func TestValidateReviewSubmitPayload(t *testing.T) {
 		"bad head oid":   func() ReviewSubmitPayload { p := valid; p.ExpectedHeadOID = "xyz"; return p }(),
 		"bad base oid":   func() ReviewSubmitPayload { p := valid; p.ExpectedBaseOID = "xyz"; return p }(),
 		"commit differs": func() ReviewSubmitPayload { p := valid; p.CommitID = strings.Repeat("2", 40); return p }(),
-		"comment event":  func() ReviewSubmitPayload { p := valid; p.Event = "COMMENT"; return p }(),
+		"empty comment":  func() ReviewSubmitPayload { p := valid; p.Event = "COMMENT"; p.Body = " "; return p }(),
 		"pending event":  func() ReviewSubmitPayload { p := valid; p.Event = "PENDING"; return p }(),
 		"empty event":    func() ReviewSubmitPayload { p := valid; p.Event = ""; return p }(),
 		"reject without body": func() ReviewSubmitPayload {

@@ -67,7 +67,7 @@ func TestParseReviewSubmitPayloadRejects(t *testing.T) {
 		"bad head oid":   reviewSubmitPayload(3, 1, 7, "refs/heads/feature", "refs/heads/main", "xyz", base, head, "APPROVED", "b"),
 		"bad base oid":   reviewSubmitPayload(3, 1, 7, "refs/heads/feature", "refs/heads/main", head, "xyz", head, "APPROVED", "b"),
 		"commit differs": reviewSubmitPayload(3, 1, 7, "refs/heads/feature", "refs/heads/main", head, base, base, "APPROVED", "b"),
-		"comment event":  reviewSubmitPayload(3, 1, 7, "refs/heads/feature", "refs/heads/main", head, base, head, "COMMENT", "b"),
+		"empty comment":  reviewSubmitPayload(3, 1, 7, "refs/heads/feature", "refs/heads/main", head, base, head, "COMMENT", " "),
 		"pending event":  reviewSubmitPayload(3, 1, 7, "refs/heads/feature", "refs/heads/main", head, base, head, "PENDING", "b"),
 		"empty event":    reviewSubmitPayload(3, 1, 7, "refs/heads/feature", "refs/heads/main", head, base, head, "", "b"),
 		"reject no body": reviewSubmitPayload(3, 1, 7, "refs/heads/feature", "refs/heads/main", head, base, head, "REQUEST_CHANGES", "  "),

@@ -493,7 +493,8 @@ func (s *Service) recoverConditionalReviewSubmit(ctx context.Context, assessment
 		match := review.ReviewerID == op.ActorID && receipt.ReviewerID == op.ActorID &&
 			review.IssueID == receipt.IssueID && review.IssueID == pr.IssueID &&
 			pr.ID == receipt.PRID && receipt.PRNumber == scope.PRNumber &&
-			(review.Type == issues_model.ReviewTypeApprove || review.Type == issues_model.ReviewTypeReject) &&
+			(receipt.Event == "APPROVED" || receipt.Event == "REQUEST_CHANGES" || receipt.Event == "COMMENT") &&
+			review.Type == reviewSubmitType(receipt.Event) &&
 			strings.EqualFold(review.CommitID, receipt.CommitID)
 		assessment.Checks = append(assessment.Checks,
 			fmt.Sprintf("recorded review id=%d comment=%d pr=%d matches_native=%t", receipt.ReviewID, receipt.CommentID, receipt.PRNumber, match),

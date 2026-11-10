@@ -607,7 +607,7 @@ func exactReviewCommentSignedLine(comment ExactReviewComment) int64 {
 	return comment.Line
 }
 
-// SubmitExactReview submits one final body-only approve/reject review bound to
+// SubmitExactReview submits one final body-only comment/approve/reject review bound to
 // its exact candidate. Unlike SubmitReview it never adopts an existing pending
 // draft: a pending review for this actor refuses and stays untouched. The
 // review, its comment and the official-state/request changes commit in one SQL
@@ -618,7 +618,7 @@ func SubmitExactReview(ctx context.Context, doer *user_model.User, issue *Issue,
 	return review, comm, err
 }
 
-// SubmitExactReviewInline submits one final approve/reject review bound to
+// SubmitExactReviewInline submits one final comment/approve/reject review bound to
 // its exact candidate together with zero or more keyed inline comments.
 // The summary review, its review comment and every code comment commit in
 // one SQL transaction that joins the caller's transaction: any refusal or
@@ -633,8 +633,8 @@ func SubmitExactReviewInline(ctx context.Context, doer *user_model.User, issue *
 	if err := nativeoperation_model.RequireHeldOwnership(ctx); err != nil {
 		return nil, nil, nil, err
 	}
-	if reviewType != ReviewTypeApprove && reviewType != ReviewTypeReject {
-		return nil, nil, nil, ErrExactReviewRefused{Reason: "only approve or reject reviews are supported"}
+	if reviewType != ReviewTypeApprove && reviewType != ReviewTypeReject && reviewType != ReviewTypeComment {
+		return nil, nil, nil, ErrExactReviewRefused{Reason: "unsupported final review type"}
 	}
 	if err := ValidateExactReviewComments(comments); err != nil {
 		return nil, nil, nil, err
@@ -652,7 +652,7 @@ func SubmitExactReviewInline(ctx context.Context, doer *user_model.User, issue *
 	if err := checkExactReviewTarget(issue, pr, want); err != nil {
 		return nil, nil, nil, err
 	}
-	if doer.ID == issue.PosterID && issue.OriginalAuthorID == 0 {
+	if reviewType != ReviewTypeComment && doer.ID == issue.PosterID && issue.OriginalAuthorID == 0 {
 		return nil, nil, nil, ErrExactReviewRefused{Reason: "cannot review your own pull request"}
 	}
 
@@ -689,17 +689,20 @@ func SubmitExactReviewInline(ctx context.Context, doer *user_model.User, issue *
 		return nil, nil, nil, ContentEmptyErr{}
 	}
 
-	// Only reviewers latest review of type approve and reject shall count as "official", so existing reviews needs to be cleared
-	if _, err := db.Exec(ctx, "UPDATE `review` SET official=? WHERE issue_id=? AND reviewer_id=?", false, issue.ID, doer.ID); err != nil {
-		return nil, nil, nil, err
-	}
-	official, err := IsOfficialReviewer(ctx, issue, doer)
-	if err != nil {
-		return nil, nil, nil, err
+	// Commentary carries no vote and cannot supersede an existing human vote.
+	official := false
+	if reviewType != ReviewTypeComment {
+		if _, err := db.Exec(ctx, "UPDATE `review` SET official=? WHERE issue_id=? AND reviewer_id=?", false, issue.ID, doer.ID); err != nil {
+			return nil, nil, nil, err
+		}
+		official, err = IsOfficialReviewer(ctx, issue, doer)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
 
-	// No adoption: a new review row always. CreateReview dismisses the
-	// reviewer's prior approve/reject rows and deletes their request rows.
+	// No adoption: a new review row always. Votes supersede prior votes;
+	// commentary leaves those votes and their official state intact.
 	review, err := CreateReview(ctx, CreateReviewOptions{
 		Type:     reviewType,
 		Issue:    issue,

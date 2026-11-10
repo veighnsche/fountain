@@ -9,12 +9,12 @@ import (
 	"strings"
 )
 
-// Review submit events. Only final dispositions are supported: inline
-// comments, attachments, pending/draft creation, submission of an existing
-// draft, editing and dismissal are outside this operation. The values match
-// the native API review states.
+// Review submit events. Final comments carry no vote. Attachments, pending/draft
+// creation, submission of an existing draft, editing and dismissal remain outside
+// this operation. The values match the native API review states.
 const (
 	ReviewSubmitEventApproved       = "APPROVED"
+	ReviewSubmitEventComment        = "COMMENT"
 	ReviewSubmitEventRequestChanges = "REQUEST_CHANGES"
 )
 
@@ -245,6 +245,10 @@ func ValidateReviewSubmitPayload(repositoryID int64, payload ReviewSubmitPayload
 	}
 	switch payload.Event {
 	case ReviewSubmitEventApproved:
+	case ReviewSubmitEventComment:
+		if strings.TrimSpace(payload.Body) == "" {
+			return ErrInvalidReviewSubmitPayload
+		}
 	case ReviewSubmitEventRequestChanges:
 		if strings.TrimSpace(payload.Body) == "" {
 			return ErrInvalidReviewSubmitPayload

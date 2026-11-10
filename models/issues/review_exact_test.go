@@ -116,12 +116,12 @@ func TestSubmitExactReviewRefusals(t *testing.T) {
 		reason  string
 	}{
 		{
-			name: "comment type unsupported", issueID: 11, doerID: 2,
+			name: "pending type unsupported", issueID: 11, doerID: 2,
 			mutate: func(want *issues_model.ExactReviewTarget) issues_model.ReviewType {
 				*want = mkTarget11()
-				return issues_model.ReviewTypeComment
+				return issues_model.ReviewTypePending
 			},
-			reason: "only approve or reject reviews are supported",
+			reason: "unsupported final review type",
 		},
 		{
 			name: "self review", issueID: 11, doerID: 1,

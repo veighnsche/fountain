@@ -2388,6 +2388,7 @@ func testNativeDesktopEnrollment(t *testing.T) {
 			var effectSends atomic.Int32
 			var receiveSends atomic.Int32
 			var pullSends atomic.Int32
+			var reviewSends atomic.Int32
 			var claimSends atomic.Int32
 			var lostPreparation atomic.Bool
 			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2486,6 +2487,14 @@ func testNativeDesktopEnrollment(t *testing.T) {
 					r.Body = io.NopCloser(bytes.NewReader(body))
 					var intent extension.OperationIntent
 					require.NoError(t, json.Unmarshal(body, &intent))
+					if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_REVIEW") == "1" && intent.Kind == extension.OperationKindReviewSubmit {
+						reviewSends.Add(1)
+						recorder := httptest.NewRecorder()
+						testWebRoutes.ServeHTTP(recorder, r)
+						require.NoError(t, os.WriteFile(filepath.Join(root, "publication-review-reply.json"), recorder.Body.Bytes(), 0600))
+						http.Error(w, "fixture lost original review reply", http.StatusServiceUnavailable)
+						return
+					}
 					if intent.Kind == extension.OperationKindPRCreate {
 						pullSends.Add(1)
 						recorder := httptest.NewRecorder()
@@ -2543,6 +2552,9 @@ func testNativeDesktopEnrollment(t *testing.T) {
 			}
 			if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PULL") == "1" {
 				require.EqualValues(t, 1, pullSends.Load(), "original PR creation is never replayed")
+			}
+			if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_REVIEW") == "1" {
+				require.EqualValues(t, 1, reviewSends.Load(), "original COMMENT review is never replayed")
 			}
 			expectedClaims := 2
 			if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PAYLOAD") != "" {

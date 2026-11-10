@@ -98,6 +98,10 @@ func parseReviewSubmitPayload(payload []byte, repositoryID int64) (*ReviewSubmit
 	}
 	switch review.Event {
 	case string(api.ReviewStateApproved):
+	case string(api.ReviewStateComment):
+		if strings.TrimSpace(review.Body) == "" {
+			return nil, ErrInvalidIntent
+		}
 	case string(api.ReviewStateRequestChanges):
 		if strings.TrimSpace(review.Body) == "" {
 			return nil, ErrInvalidIntent
@@ -129,6 +133,9 @@ func parseReviewSubmitPayload(payload []byte, repositoryID int64) (*ReviewSubmit
 
 // reviewSubmitType maps the validated final event to its native review type.
 func reviewSubmitType(event string) issues_model.ReviewType {
+	if event == string(api.ReviewStateComment) {
+		return issues_model.ReviewTypeComment
+	}
 	if event == string(api.ReviewStateRequestChanges) {
 		return issues_model.ReviewTypeReject
 	}
@@ -167,7 +174,7 @@ func mapExactReviewRefusal(err error) string {
 		return nativeoperation_model.ReasonAuthorityLost
 	case "invalid object id",
 		"commit must equal the expected head",
-		"only approve or reject reviews are supported",
+		"unsupported final review type",
 		"invalid inline comment",
 		"invalid inline anchor",
 		"binary-only inline anchor",
