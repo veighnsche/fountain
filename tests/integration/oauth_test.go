@@ -2334,6 +2334,22 @@ func testNativeDesktopEnrollment(t *testing.T) {
 				}
 				base := string(git("rev-parse", "HEAD"))
 				tree := string(git("rev-parse", "HEAD^{tree}"))
+				if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PULL") == "1" {
+					name := "native-publication-fixture.txt"
+					require.Empty(t, git("ls-tree", "--name-only", "HEAD", "--", name))
+					blobCommand := exec.Command("git", "-C", candidateRepo, "hash-object", "-w", "--stdin")
+					blobCommand.Stdin = strings.NewReader("Real candidate object for conditional publication qualification.\n")
+					blob, err := blobCommand.Output()
+					require.NoError(t, err)
+					entries, err := exec.Command("git", "-C", candidateRepo, "ls-tree", "-z", "HEAD").Output()
+					require.NoError(t, err)
+					entries = append(entries, []byte("100644 blob "+strings.TrimSpace(string(blob))+"\t"+name+"\x00")...)
+					treeCommand := exec.Command("git", "-C", candidateRepo, "mktree", "-z")
+					treeCommand.Stdin = bytes.NewReader(entries)
+					changed, err := treeCommand.Output()
+					require.NoError(t, err)
+					tree = strings.TrimSpace(string(changed))
+				}
 				candidate := string(git("-c", "user.name=Native publish fixture", "-c", "user.email=publish@example.invalid", "commit-tree", tree, "-p", base, "-m", "Native conditional publication fixture"))
 				git("update-ref", "HEAD", candidate)
 				bundle, err := exec.Command("git", "-C", candidateRepo, "bundle", "create", "-", "HEAD", "^"+base).Output()
@@ -2371,6 +2387,7 @@ func testNativeDesktopEnrollment(t *testing.T) {
 			var lost atomic.Bool
 			var effectSends atomic.Int32
 			var receiveSends atomic.Int32
+			var pullSends atomic.Int32
 			var claimSends atomic.Int32
 			var lostPreparation atomic.Bool
 			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2463,6 +2480,31 @@ func testNativeDesktopEnrollment(t *testing.T) {
 					_, _ = w.Write(recorder.Body.Bytes())
 					return
 				}
+				if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PULL") == "1" && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/operations/123456789abcdef0123456789abcdefa/submit") {
+					body, err := io.ReadAll(io.LimitReader(r.Body, 128<<10))
+					require.NoError(t, err)
+					r.Body = io.NopCloser(bytes.NewReader(body))
+					var intent extension.OperationIntent
+					require.NoError(t, json.Unmarshal(body, &intent))
+					if intent.Kind == extension.OperationKindPRCreate {
+						pullSends.Add(1)
+						recorder := httptest.NewRecorder()
+						testWebRoutes.ServeHTTP(recorder, r)
+						require.NoError(t, os.WriteFile(filepath.Join(root, "publication-pull-reply.json"), recorder.Body.Bytes(), 0o600))
+						if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PULL_LOST") == "1" {
+							http.Error(w, "fixture lost original PR creation reply", http.StatusServiceUnavailable)
+							return
+						}
+						for key, values := range recorder.Header() {
+							for _, value := range values {
+								w.Header().Add(key, value)
+							}
+						}
+						w.WriteHeader(recorder.Code)
+						_, _ = w.Write(recorder.Body.Bytes())
+						return
+					}
+				}
 				if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PUBLICATION") == "1" && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/git-receive-pack") {
 					receiveSends.Add(1)
 					recorder := httptest.NewRecorder()
@@ -2498,6 +2540,9 @@ func testNativeDesktopEnrollment(t *testing.T) {
 			require.EqualValues(t, 1, effectSends.Load(), "lookup absence and native reopen never send the completion note twice")
 			if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PUBLICATION") == "1" {
 				require.EqualValues(t, 1, receiveSends.Load(), "original conditional transfer is never replayed")
+			}
+			if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PULL") == "1" {
+				require.EqualValues(t, 1, pullSends.Load(), "original PR creation is never replayed")
 			}
 			expectedClaims := 2
 			if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PAYLOAD") != "" {
