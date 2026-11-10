@@ -30,6 +30,8 @@ const PublishExpectedOldAbsent = "absent"
 type PublishCorrection struct {
 	Number           int64 `json:"number"`
 	ExpectedAuthorID int64 `json:"expected_author_id"`
+	ExpectedPRID     int64 `json:"expected_pr_id,omitempty"`
+	ExpectedIssueID  int64 `json:"expected_issue_id,omitempty"`
 }
 
 // PublishPayload is the git.ref.publish intent payload: one branch creation
@@ -96,6 +98,10 @@ func ValidatePublishPayload(payload PublishPayload) error {
 	}
 	if payload.Correction != nil {
 		if payload.Correction.Number < 1 || payload.Correction.ExpectedAuthorID < 1 {
+			return ErrInvalidPublishPayload
+		}
+		if payload.Correction.ExpectedPRID < 0 || payload.Correction.ExpectedIssueID < 0 ||
+			(payload.Correction.ExpectedPRID == 0) != (payload.Correction.ExpectedIssueID == 0) {
 			return ErrInvalidPublishPayload
 		}
 		if payload.ExpectedOld == PublishExpectedOldAbsent {

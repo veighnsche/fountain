@@ -13,6 +13,7 @@ import (
 
 	extension "forgejo.org/extension-sdk"
 	"forgejo.org/models/extensionauth"
+	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
@@ -69,6 +70,14 @@ func ReadDesktopSource(ctx *context.APIContext) {
 // existing native read owner. It never impersonates an extension callback or
 // acquires an operation reservation, execution claim or publication grant.
 func ReadDesktopSnapshot(ctx *context.APIContext) {
+	readDesktopSnapshot(ctx, false)
+}
+
+func ReadDesktopIssueSnapshot(ctx *context.APIContext) {
+	readDesktopSnapshot(ctx, true)
+}
+
+func readDesktopSnapshot(ctx *context.APIContext, issuesOnly bool) {
 	current := func() bool {
 		grant, _, ok := currentDesktopGrant(ctx)
 		if !ok {
@@ -81,7 +90,11 @@ func ReadDesktopSnapshot(ctx *context.APIContext) {
 			return false
 		}
 		permission, err := access_model.GetUserRepoPermission(ctx, repository, actor)
-		if err != nil || !permission.CanRead(unit.TypeCode) {
+		kind := unit.TypeCode
+		if issuesOnly {
+			kind = unit.TypeIssues
+		}
+		if err != nil || !permission.CanRead(kind) || issuesOnly != (grant.Kind == "issues") {
 			ctx.Error(http.StatusForbidden, "desktop snapshot", errors.New("current repository read required"))
 			return false
 		}
@@ -99,9 +112,31 @@ func ReadDesktopSnapshot(ctx *context.APIContext) {
 		ctx.Error(http.StatusBadRequest, "desktop snapshot", errors.New("bounded exact repository/account selectors required"))
 		return
 	}
+	if issuesOnly {
+		for _, family := range request.Families {
+			if family != extension.SnapshotFamilyIssue && family != extension.SnapshotFamilyComments && family != extension.SnapshotFamilyDependencies && family != extension.SnapshotFamilyRepositoryIssues {
+				ctx.Error(http.StatusForbidden, "desktop snapshot", errors.New("issue-only enrollment refuses code, PR and execution facts"))
+				return
+			}
+		if request.PullNumber != "" {
+			ctx.Error(http.StatusForbidden, "desktop snapshot", errors.New("issue-only enrollment refuses PR selectors"))
+			return
+		}
+		if request.IssueIndex != "" {
+			index, _ := strconv.ParseInt(request.IssueIndex,10,64)
+			issue, err := issues_model.GetIssueByIndex(ctx,ctx.Repo().Repository.ID,index)
+			if err != nil || issue.IsPull {
+				ctx.Error(http.StatusForbidden,"desktop snapshot",errors.New("plain issue selection required"))
+				return
+			}
+		} else if len(request.CommentIDs) != 0 {
+			ctx.Error(http.StatusForbidden,"desktop snapshot",errors.New("issue comments require their exact plain issue"))
+			return
+		}
+	}
 	hasScope, scope := ctx.Authentication().Scope().Get()
 	publicOnly, scopeErr := scope.PublicOnly()
-	decision := extensionauth.SnapshotReadDecision{SubmissionDecision: extensionauth.SubmissionDecision{ActorID: ctx.Doer().ID}, RepositoryID: ctx.Repo().Repository.ID, Scope: scope, PublicOnly: publicOnly, RepositoryIDs: []int64{ctx.Repo().Repository.ID}}
+	decision := extensionauth.SnapshotReadDecision{SubmissionDecision: extensionauth.SubmissionDecision{ActorID: ctx.Doer().ID}, IssuesOnly: issuesOnly, RepositoryID: ctx.Repo().Repository.ID, Scope: scope, PublicOnly: publicOnly, RepositoryIDs: []int64{ctx.Repo().Repository.ID}}
 	if !hasScope || scopeErr != nil || !decision.CanReadFamilies(request.Families) {
 		ctx.Error(http.StatusForbidden, "desktop snapshot", errors.New("explicit native read scopes required"))
 		return

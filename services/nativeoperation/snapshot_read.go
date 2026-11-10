@@ -263,7 +263,7 @@ func (l *snapshotLoader) loadIssue(ctx context.Context, index string) (*issues_m
 		}
 		return nil, ErrSnapshotUnavailable
 	}
-	if !l.permission.CanReadIssuesOrPulls(issue.IsPull) {
+	if l.decision.IssuesOnly && issue.IsPull || !l.permission.CanReadIssuesOrPulls(issue.IsPull) {
 		return nil, ErrSnapshotNotFound
 	}
 	return issue, nil
@@ -567,6 +567,9 @@ func (l *snapshotLoader) dependencyTarget(ctx context.Context, targetID int64) (
 			return nil, issues_model.HiddenReasonNotFound, nil
 		}
 		return nil, "", ErrSnapshotUnavailable
+	}
+	if l.decision.IssuesOnly && target.IsPull {
+		return nil, issues_model.HiddenReasonNoAccess, nil
 	}
 	targetRepo, err := repo_model.GetRepositoryByID(ctx, target.RepoID)
 	if err != nil {

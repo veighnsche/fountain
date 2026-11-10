@@ -310,6 +310,9 @@ func (s *Service) recoverConditionalPublish(ctx context.Context, assessment *Rec
 			pr.Issue.PosterID != scope.CorrectionAuthorID {
 			return fenced(assessment, ReasonRecoveryUncertainEffect, "correction pull request no longer matches the held publish scope")
 		}
+		if scope.CorrectionPRID != 0 && (pr.ID != scope.CorrectionPRID || pr.IssueID != scope.IssueID) {
+			return fenced(assessment, ReasonRecoveryUncertainEffect, "correction pull request identity no longer matches the held publish scope")
+		}
 		prID, issueID = pr.ID, pr.IssueID
 	}
 	comparisonMatch := !comparisonAbsent && strings.EqualFold(comparison, scope.HeadOID)

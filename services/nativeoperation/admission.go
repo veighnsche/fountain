@@ -368,6 +368,9 @@ func (s *Service) checkPublishPrepared(ctx context.Context, scope Scope, reposit
 			pr.Issue.PosterID != scope.CorrectionAuthorID {
 			return nativeoperation_model.ReasonPRMismatch, nil
 		}
+		if scope.CorrectionPRID != 0 && (pr.ID != scope.CorrectionPRID || pr.IssueID != scope.IssueID) {
+			return nativeoperation_model.ReasonPRMismatch, nil
+		}
 	}
 	return "", nil
 }

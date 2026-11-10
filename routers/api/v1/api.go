@@ -802,7 +802,21 @@ func Routes() *web.Route {
 
 		m.Get("/factory/desktop/oauth", repo.DesktopOAuthConfig)
 		m.Get("/factory/desktop/oauth/control", repo.DesktopControlOAuthConfig)
-		m.Get("/factory/desktop/identity", reqToken(), tokenRequiresReadScopes(auth_model.AccessTokenScopeCategoryRepository), repo.DesktopOAuthIdentity)
+		m.Get("/factory/desktop/oauth/issues", repo.DesktopIssuesOAuthConfig)
+		m.Get("/factory/desktop/identity", reqToken(), repo.DesktopOAuthIdentity)
+
+		m.Group("/repos/{username}/{reponame}/factory/desktop/issue-grants", func() {
+			m.Post("", repo.EnrollDesktopGrant)
+			m.Group("/{grant}", func() {
+				m.Get("", repo.GetDesktopGrant)
+				m.Delete("", repo.RevokeDesktopGrant)
+				m.Get("/repository", repo.ReadDesktopRepository)
+				m.Post("/snapshot", repo.ReadDesktopIssueSnapshot)
+				m.Post("/prepare", repo.PrepareDesktopIssueCommand)
+				m.Post("/commands", tokenRequiresWriteScopes(auth_model.AccessTokenScopeCategoryIssue), repo.SubmitDesktopIssueCommand)
+				m.Get("/commands/{operation}", repo.GetDesktopIssueCommand)
+			})
+		}, repoAssignment, repoAccess(), checkTokenPublicOnly(), reqToken(), reqRepoReader(unit.TypeIssues), tokenRequiresReadScopes(auth_model.AccessTokenScopeCategoryIssue), repo.DesktopIssueGrantScope)
 
 		// Repos (requires repo scope)
 		m.Group("/repos/{username}/{reponame}/factory/desktop/grants", func() {

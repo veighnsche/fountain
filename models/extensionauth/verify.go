@@ -207,6 +207,9 @@ type SnapshotReadRequest struct {
 // It contains no submitted token secret and is never returned on the wire.
 type SnapshotReadDecision struct {
 	SubmissionDecision
+	// IssuesOnly is set by the separately enrolled public desktop capability.
+	// Account permissions cannot widen this consent to PR-backed issues.
+	IssuesOnly       bool
 	RepositoryID     int64
 	Scope            auth_model.AccessTokenScope
 	PublicOnly       bool
@@ -232,6 +235,9 @@ func (d SnapshotReadDecision) CanReadFamilies(families []string) bool {
 		return false
 	}
 	for _, family := range families {
+		if d.IssuesOnly && family != sdk.SnapshotFamilyIssue && family != sdk.SnapshotFamilyComments && family != sdk.SnapshotFamilyDependencies && family != sdk.SnapshotFamilyRepositoryIssues {
+			return false
+		}
 		var scope auth_model.AccessTokenScope
 		switch family {
 		case sdk.SnapshotFamilyIssue, sdk.SnapshotFamilyComments, sdk.SnapshotFamilyDependencies, sdk.SnapshotFamilyRepositoryIssues:

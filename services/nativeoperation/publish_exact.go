@@ -54,6 +54,8 @@ const ExpectedOldAbsent = "absent"
 type PublishCorrection struct {
 	Number           int64 `json:"number"`
 	ExpectedAuthorID int64 `json:"expected_author_id"`
+	ExpectedPRID     int64 `json:"expected_pr_id,omitempty"`
+	ExpectedIssueID  int64 `json:"expected_issue_id,omitempty"`
 }
 
 // PublishIntent carries the validated git.ref.publish payload: one branch
@@ -148,6 +150,10 @@ func ParsePublishPayload(payload []byte) (*PublishIntent, error) {
 	}
 	if intent.Correction != nil {
 		if intent.Correction.Number < 1 || intent.Correction.ExpectedAuthorID < 1 {
+			return nil, ErrInvalidPublishIntent
+		}
+		if intent.Correction.ExpectedPRID < 0 || intent.Correction.ExpectedIssueID < 0 ||
+			(intent.Correction.ExpectedPRID == 0) != (intent.Correction.ExpectedIssueID == 0) {
 			return nil, ErrInvalidPublishIntent
 		}
 		if intent.ExpectedOld == ExpectedOldAbsent {
@@ -355,6 +361,10 @@ func verifyPublishBaseTarget(ctx context.Context, repo *repo_model.Repository, g
 			pr.HeadBranch != strings.TrimPrefix(intent.Ref, git.BranchPrefix) ||
 			pr.BaseBranch != strings.TrimPrefix(intent.ComparisonRef, git.BranchPrefix) ||
 			pr.Issue.PosterID != intent.Correction.ExpectedAuthorID {
+			return refusePublish(ExactPublishRefusedPRMismatch)
+		}
+		if intent.Correction.ExpectedPRID != 0 &&
+			(pr.ID != intent.Correction.ExpectedPRID || pr.IssueID != intent.Correction.ExpectedIssueID) {
 			return refusePublish(ExactPublishRefusedPRMismatch)
 		}
 		// The recorded prior candidate is the current PR head: the tip

@@ -246,6 +246,8 @@ func (s *Service) preparePublishReceive(ctx context.Context, req PublishReceiveR
 	if intent.Correction != nil {
 		scope.PRNumber = intent.Correction.Number
 		scope.CorrectionAuthorID = intent.Correction.ExpectedAuthorID
+		scope.CorrectionPRID = intent.Correction.ExpectedPRID
+		scope.IssueID = intent.Correction.ExpectedIssueID
 	}
 	encoded, err := encodeScope(scope)
 	if err != nil {

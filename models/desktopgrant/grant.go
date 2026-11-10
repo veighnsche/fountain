@@ -20,6 +20,7 @@ var (
 // is retained as a tombstone; replay cannot reactivate an earlier enrollment.
 type Grant struct {
 	ID           string             `xorm:"pk VARCHAR(32)"`
+	Kind         string             `xorm:"VARCHAR(16) NOT NULL DEFAULT ''"`
 	ActorID      int64              `xorm:"NOT NULL INDEX"`
 	OAuthGrantID int64              `xorm:"'oauth_grant_id' NOT NULL INDEX"`
 	RepositoryID int64              `xorm:"NOT NULL INDEX"`
@@ -46,7 +47,7 @@ func Get(ctx context.Context, id string) (*Grant, error) {
 }
 
 func sameScope(left, right *Grant) bool {
-	return left.ActorID == right.ActorID && left.OAuthGrantID == right.OAuthGrantID && left.RepositoryID == right.RepositoryID && left.RuntimeID == right.RuntimeID && left.ProofSHA256 == right.ProofSHA256
+	return left.Kind == right.Kind && left.ActorID == right.ActorID && left.OAuthGrantID == right.OAuthGrantID && left.RepositoryID == right.RepositoryID && left.RuntimeID == right.RuntimeID && left.ProofSHA256 == right.ProofSHA256
 }
 
 // Enroll retains the original command identity, including after withdrawal.

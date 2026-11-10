@@ -13,7 +13,8 @@ type DesktopGrantEnrollment struct {
 
 // DesktopGrant is enrollment metadata, never a bearer credential. Every use
 // still requires the same current OAuth authorization and repository access.
-// This initial gateway scope admits repository reads only.
+// Operations describes the separately enrolled repository-read or issue-only
+// capability. Neither enrollment grants execution or publication authority.
 type DesktopGrant struct {
 	ID            string     `json:"id"`
 	RuntimeID     string     `json:"runtime_id"`
@@ -26,3 +27,6 @@ type DesktopGrant struct {
 }
 
 const DesktopRepositoryRead = "repository.read"
+
+const DesktopIssuesRead = "issues.read"
+const DesktopIssuesCollaborate = "issue.collaborate"

@@ -31,6 +31,22 @@ func DesktopOAuthConfig(ctx *context.APIContext) {
 	desktopOAuthConfig(ctx, setting.OAuth2.FactoryDesktopClientID, "read:repository")
 }
 
+func DesktopIssuesOAuthConfig(ctx *context.APIContext) {
+	desktopOAuthConfig(ctx, setting.OAuth2.FactoryDesktopClientID, "write:issue")
+}
+
+// This route marker comes from trusted API composition, never the request body.
+func DesktopIssueGrantScope(ctx *context.APIContext) {
+	ctx.Data["factory_desktop_issue_grant"] = true
+}
+
+func desktopGrantKind(ctx *context.APIContext) string {
+	if ctx.Data["factory_desktop_issue_grant"] == true {
+		return "issues"
+	}
+	return ""
+}
+
 func desktopOAuthConfig(ctx *context.APIContext, clientID, scope string) {
 	ctx.Resp.Header().Set("Cache-Control", "no-store")
 	// Existing installed clients keep their original consent contract. New
@@ -112,10 +128,15 @@ func desktopAuthorization(ctx *context.APIContext) (*auth_model.OAuth2Grant, *au
 
 func desktopProjection(ctx *context.APIContext, grant *desktopgrant.Grant, app *auth_model.OAuth2Application) extension.DesktopGrant {
 	repository := ctx.Repo().Repository
-	return extension.DesktopGrant{ID: grant.ID, RuntimeID: grant.RuntimeID, ApplicationID: app.ClientID,
+	value := extension.DesktopGrant{ID: grant.ID, RuntimeID: grant.RuntimeID, ApplicationID: app.ClientID,
 		Actor:      extension.Actor{ID: strconv.FormatInt(ctx.Doer().ID, 10), Username: ctx.Doer().Name, SiteAdmin: ctx.Doer().IsAdmin},
 		Repository: extension.Repository{ID: strconv.FormatInt(repository.ID, 10), Owner: ctx.Repo().Owner.Name, Name: repository.Name, DefaultBranch: repository.DefaultBranch, Permission: "read"},
 		Active:     !grant.Revoked, Operations: []string{extension.DesktopRepositoryRead}, RuntimeBound: grant.ProofSHA256 != ""}
+	if grant.Kind == "issues" {
+		value.Repository.Permission, value.Repository.DefaultBranch = "issues", ""
+		value.Operations = []string{extension.DesktopIssuesRead, extension.DesktopIssuesCollaborate}
+	}
+	return value
 }
 
 func EnrollDesktopGrant(ctx *context.APIContext) {
@@ -134,7 +155,11 @@ func EnrollDesktopGrant(ctx *context.APIContext) {
 	if !desktopProofAdmitted(ctx, request.ProofSHA256) {
 		return
 	}
-	grant, created, err := desktopgrant.Enroll(ctx, &desktopgrant.Grant{ID: request.CommandID, ActorID: ctx.Doer().ID, OAuthGrantID: authorization.ID, RepositoryID: ctx.Repo().Repository.ID, RuntimeID: request.RuntimeID, ProofSHA256: request.ProofSHA256})
+	if desktopGrantKind(ctx) == "issues" && request.ProofSHA256 == "" {
+		ctx.Error(http.StatusForbidden, "desktop enrollment", errors.New("issue enrollment requires native profile proof"))
+		return
+	}
+	grant, created, err := desktopgrant.Enroll(ctx, &desktopgrant.Grant{ID: request.CommandID, Kind: desktopGrantKind(ctx), ActorID: ctx.Doer().ID, OAuthGrantID: authorization.ID, RepositoryID: ctx.Repo().Repository.ID, RuntimeID: request.RuntimeID, ProofSHA256: request.ProofSHA256})
 	if errors.Is(err, desktopgrant.ErrConflict) {
 		ctx.Error(http.StatusConflict, "desktop enrollment", err)
 		return
@@ -161,7 +186,7 @@ func currentDesktopGrant(ctx *context.APIContext) (*desktopgrant.Grant, *auth_mo
 		return nil, nil, false
 	}
 	grant, err := desktopgrant.Get(ctx, id)
-	if errors.Is(err, desktopgrant.ErrNotFound) || err == nil && (grant.ActorID != ctx.Doer().ID || grant.OAuthGrantID != authorization.ID || grant.RepositoryID != ctx.Repo().Repository.ID) {
+	if errors.Is(err, desktopgrant.ErrNotFound) || err == nil && (grant.Kind != desktopGrantKind(ctx) || grant.ActorID != ctx.Doer().ID || grant.OAuthGrantID != authorization.ID || grant.RepositoryID != ctx.Repo().Repository.ID) {
 		ctx.NotFound()
 		return nil, nil, false
 	}
