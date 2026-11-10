@@ -439,11 +439,10 @@ func (*Service) UpdateLog(
 		}
 	}
 
-	if len(updateTaskColumns) == 0 {
-		return res, nil
-	}
-	if err := actions_model.UpdateTask(ctx, task, updateTaskColumns...); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update task: %w", err))
+	if len(updateTaskColumns) != 0 {
+		if err := actions_model.UpdateTask(ctx, task, updateTaskColumns...); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update task: %w", err))
+		}
 	}
 	if remove != nil {
 		remove()
