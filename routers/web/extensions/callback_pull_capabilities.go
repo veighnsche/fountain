@@ -109,13 +109,9 @@ func readPullCapabilities(ctx context.Context, repo *repo_model.Repository, user
 	for _, action := range []string{"issue.edit", "issue.comment"} {
 		r.Actions[action] = capabilityFact("unsupported", "pull_scope")
 	}
-	edit, comment := capabilityFact("denied", "pull_edit_denied"), capabilityFact("allowed", "pull_comment")
-	if issue.IsPoster(user.ID) || permission.CanWriteIssuesOrPulls(true) {
-		edit = capabilityFact("allowed", "pull_author_or_writer")
-	}
-	if issue.IsLocked && !permission.CanWriteIssuesOrPulls(true) && !user.IsAdmin {
-		comment = capabilityFact("denied", "pull_locked")
-	}
+	facts := issues_model.ReadDiscussionActionFacts(ctx, repo, issue, user, permission)
+	edit, _ := discussionEditCapabilities(facts, "pull")
+	comment := discussionCommentCapability(facts, "pull")
 	resolve := capabilityFact("denied", "thread_resolution_denied")
 	canResolve, err := issues_model.CanMarkConversation(ctx, issue, user)
 	if err != nil {

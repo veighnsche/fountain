@@ -547,59 +547,67 @@ func IsUserAllowedToMerge(ctx context.Context, pr *issues_model.PullRequest, p a
 // CheckPullBranchProtections checks whether the PR is ready to be merged (reviews and status checks).
 // Returns the protected branch rule when `ErrDisallowedToMerge` is returned as error.
 func CheckPullBranchProtections(ctx context.Context, pr *issues_model.PullRequest, skipProtectedFilesCheck bool) (protectedBranchRule *git_model.ProtectedBranch, err error) {
+	protectedBranchRule, _, err = checkPullBranchProtections(ctx, pr, skipProtectedFilesCheck)
+	return protectedBranchRule, err
+}
+
+// checkPullBranchProtections attributes the first refusal at the same point as
+// the native predicate. The public wrapper retains the original error values
+// because native callers use a direct ErrDisallowedToMerge type assertion.
+func checkPullBranchProtections(ctx context.Context, pr *issues_model.PullRequest, skipProtectedFilesCheck bool) (protectedBranchRule *git_model.ProtectedBranch, blocker string, err error) {
 	if err = pr.LoadBaseRepo(ctx); err != nil {
-		return nil, fmt.Errorf("LoadBaseRepo: %w", err)
+		return nil, "", fmt.Errorf("LoadBaseRepo: %w", err)
 	}
 
 	pb, err := git_model.GetFirstMatchProtectedBranchRule(ctx, pr.BaseRepoID, pr.BaseBranch)
 	if err != nil {
-		return nil, fmt.Errorf("LoadProtectedBranch: %v", err)
+		return nil, "", fmt.Errorf("LoadProtectedBranch: %v", err)
 	}
 	if pb == nil {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	isPass, err := IsPullCommitStatusPass(ctx, pr)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if !isPass {
-		return pb, models.ErrDisallowedToMerge{
+		return pb, issues_model.MergeBlockedStatusChecks, models.ErrDisallowedToMerge{
 			Reason: "Not all required status checks successful",
 		}
 	}
 
 	if !issues_model.HasEnoughApprovals(ctx, pb, pr) {
-		return pb, models.ErrDisallowedToMerge{
+		return pb, issues_model.MergeBlockedApprovals, models.ErrDisallowedToMerge{
 			Reason: "Does not have enough approvals",
 		}
 	}
 	if issues_model.MergeBlockedByRejectedReview(ctx, pb, pr) {
-		return pb, models.ErrDisallowedToMerge{
+		return pb, issues_model.MergeBlockedRequestedChanges, models.ErrDisallowedToMerge{
 			Reason: "There are requested changes",
 		}
 	}
 	if issues_model.MergeBlockedByOfficialReviewRequests(ctx, pb, pr) {
-		return pb, models.ErrDisallowedToMerge{
+		return pb, issues_model.MergeBlockedReviewRequests, models.ErrDisallowedToMerge{
 			Reason: "There are official review requests",
 		}
 	}
 
 	if issues_model.MergeBlockedByOutdatedBranch(pb, pr) {
-		return pb, models.ErrDisallowedToMerge{
+		return pb, issues_model.MergeBlockedOutdatedBranch, models.ErrDisallowedToMerge{
 			Reason: "The head branch is behind the base branch",
 		}
 	}
 
 	if skipProtectedFilesCheck {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	if pb.MergeBlockedByProtectedFiles(pr.ChangedProtectedFiles) {
-		return pb, models.ErrDisallowedToMerge{
+		return pb, issues_model.MergeBlockedProtectedFiles, models.ErrDisallowedToMerge{
 			Reason: "Changed protected files",
 		}
 	}
 
-	return nil, nil
+	return nil, "", nil
 }

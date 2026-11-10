@@ -1041,16 +1041,23 @@ var userTelemetryColumns = map[string]bool{
 	"enable_repo_unit_hints":         true,
 }
 
-// UpdateUserCols update user according special columns
-func UpdateUserCols(ctx context.Context, u *User, cols ...string) error {
-	telemetryOnly := len(cols) > 0
+// UserColumnsRequireAuthority classifies the actual column plan. Unknown
+// columns and implicit all-column updates require held authority.
+func UserColumnsRequireAuthority(cols ...string) bool {
+	if len(cols) == 0 {
+		return true
+	}
 	for _, col := range cols {
 		if !userTelemetryColumns[col] {
-			telemetryOnly = false
-			break
+			return true
 		}
 	}
-	if !telemetryOnly {
+	return false
+}
+
+// UpdateUserCols update user according special columns
+func UpdateUserCols(ctx context.Context, u *User, cols ...string) error {
+	if UserColumnsRequireAuthority(cols...) {
 		// Nested participating writer: account authority changes refuse
 		// while another owner holds the reservation; the enclosing
 		// authority update carries the execution.

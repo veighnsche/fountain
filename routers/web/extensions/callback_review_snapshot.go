@@ -15,7 +15,6 @@ import (
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
-	nativeoperation_service "forgejo.org/services/nativeoperation"
 )
 
 // Compare private source/author facts as well as the public preparation without
@@ -27,29 +26,13 @@ type reviewSnapshotFacts struct {
 }
 
 func resolveReviewSnapshot(ctx context.Context, admission *callbackAdmission, request extension.CallbackRequest) (*extension.RepositoryReviewSnapshot, int) {
-	before, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil || !before.Idle {
-		return nil, http.StatusServiceUnavailable
-	}
-	first, status := readReviewSnapshot(ctx, admission, request.RepositoryID, *request.ReviewSnapshot)
+	first, revision, status := observeCallbackSnapshot(ctx, func(ctx context.Context) (*reviewSnapshotFacts, int) {
+		return readReviewSnapshot(ctx, admission, request.RepositoryID, *request.ReviewSnapshot)
+	}, equalSnapshot[reviewSnapshotFacts], nil, []int{http.StatusNotFound})
 	if status != http.StatusOK {
 		return nil, status
 	}
-	second, status := readReviewSnapshot(ctx, admission, request.RepositoryID, *request.ReviewSnapshot)
-	if status == http.StatusNotFound {
-		return nil, http.StatusConflict
-	}
-	if status != http.StatusOK {
-		return nil, status
-	}
-	after, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil {
-		return nil, http.StatusServiceUnavailable
-	}
-	if !after.Idle || after.Revision != before.Revision || *first != *second {
-		return nil, http.StatusConflict
-	}
-	first.Snapshot.NativeRevision = before.Revision
+	first.Snapshot.NativeRevision = revision
 	return &first.Snapshot, http.StatusOK
 }
 

@@ -15,7 +15,6 @@ import (
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
-	nativeoperation_service "forgejo.org/services/nativeoperation"
 )
 
 func readPullCreateSnapshot(ctx context.Context, admission *callbackAdmission, repository string, q extension.RepositoryPullCreateSnapshotRequest) (*extension.RepositoryPullCreateSnapshot, int) {
@@ -102,31 +101,12 @@ func readPullCreateSnapshot(ctx context.Context, admission *callbackAdmission, r
 }
 
 func resolvePullCreateSnapshot(ctx context.Context, admission *callbackAdmission, request extension.CallbackRequest) (*extension.RepositoryPullCreateSnapshot, int) {
-	before, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil || !before.Idle {
-		return nil, http.StatusServiceUnavailable
-	}
-	first, status := readPullCreateSnapshot(ctx, admission, request.RepositoryID, *request.PullCreateSnapshot)
+	first, revision, status := observeCallbackSnapshot(ctx, func(ctx context.Context) (*extension.RepositoryPullCreateSnapshot, int) {
+		return readPullCreateSnapshot(ctx, admission, request.RepositoryID, *request.PullCreateSnapshot)
+	}, equalSnapshot[extension.RepositoryPullCreateSnapshot], func(ctx context.Context) int { _, status := resolveCurrentUser(ctx, admission); return status }, []int{http.StatusNotFound, http.StatusUnprocessableEntity})
 	if status != http.StatusOK {
 		return nil, status
 	}
-	second, status := readPullCreateSnapshot(ctx, admission, request.RepositoryID, *request.PullCreateSnapshot)
-	if status == http.StatusNotFound || status == http.StatusUnprocessableEntity {
-		return nil, http.StatusConflict
-	}
-	if status != http.StatusOK {
-		return nil, status
-	}
-	if _, status := resolveCurrentUser(ctx, admission); status != http.StatusOK {
-		return nil, status
-	}
-	after, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil {
-		return nil, http.StatusServiceUnavailable
-	}
-	if !after.Idle || before.Revision != after.Revision || *first != *second {
-		return nil, http.StatusConflict
-	}
-	first.NativeRevision = before.Revision
+	first.NativeRevision = revision
 	return first, http.StatusOK
 }

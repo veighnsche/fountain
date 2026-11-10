@@ -69,23 +69,42 @@ const (
 
 // CheckPullMergeable check if the pull mergeable based on all conditions (branch protection, merge options, ...)
 func CheckPullMergeable(stdCtx context.Context, doer *user_model.User, perm *access_model.Permission, pr *issues_model.PullRequest, mergeCheckType MergeCheckType, adminSkipProtectionCheck bool) error {
-	return db.WithTx(stdCtx, func(ctx context.Context) error {
+	_, err := EvaluatePullMergeable(stdCtx, doer, perm, pr, mergeCheckType, adminSkipProtectionCheck)
+	return err
+}
+
+// MergeDecision identifies the first typed native refusal. An empty blocker
+// with an error means the evaluator could not establish an explanatory verdict;
+// only a nil error means eligible. This observation never grants write authority.
+type MergeDecision struct {
+	Blocker string
+}
+
+// EvaluatePullMergeable runs the same live transaction as CheckPullMergeable,
+// returning the producer's blocker alongside the original native error. Errors
+// are not wrapped so existing sentinel and direct-type checks remain valid.
+func EvaluatePullMergeable(stdCtx context.Context, doer *user_model.User, perm *access_model.Permission, pr *issues_model.PullRequest, mergeCheckType MergeCheckType, adminSkipProtectionCheck bool) (decision MergeDecision, err error) {
+	refuse := func(blocker string, err error) error {
+		decision.Blocker = blocker
+		return err
+	}
+	err = db.WithTx(stdCtx, func(ctx context.Context) error {
 		if pr.HasMerged {
-			return ErrHasMerged
+			return refuse(issues_model.MergeBlockedMerged, ErrHasMerged)
 		}
 
 		if err := pr.LoadIssue(ctx); err != nil {
 			log.Error("Unable to load issue[%d] for %-v: %v", pr.IssueID, pr, err)
 			return err
 		} else if pr.Issue.IsClosed {
-			return ErrIsClosed
+			return refuse(issues_model.MergeBlockedClosed, ErrIsClosed)
 		}
 
 		if allowedMerge, err := IsUserAllowedToMerge(ctx, pr, *perm, doer); err != nil {
 			log.Error("Error whilst checking if %-v is allowed to merge %-v: %v", doer, pr, err)
 			return err
 		} else if !allowedMerge {
-			return ErrUserNotAllowedToMerge
+			return refuse(issues_model.MergeBlockedPermission, ErrUserNotAllowedToMerge)
 		}
 
 		if mergeCheckType == MergeCheckTypeManually {
@@ -94,18 +113,18 @@ func CheckPullMergeable(stdCtx context.Context, doer *user_model.User, perm *acc
 		}
 
 		if pr.IsWorkInProgress(ctx) {
-			return ErrIsWorkInProgress
+			return refuse(issues_model.MergeBlockedWorkInProgress, ErrIsWorkInProgress)
 		}
 
 		if !pr.CanAutoMerge() && !pr.IsEmpty() {
-			return ErrNotMergeableState
+			return refuse(issues_model.MergeBlockedNotMergeable, ErrNotMergeableState)
 		}
 
 		if pr.IsChecking() {
-			return ErrIsChecking
+			return refuse(issues_model.MergeBlockedChecking, ErrIsChecking)
 		}
 
-		if pb, err := CheckPullBranchProtections(ctx, pr, false); err != nil {
+		if pb, blocker, err := checkPullBranchProtections(ctx, pr, false); err != nil {
 			if !models.IsErrDisallowedToMerge(err) {
 				log.Error("Error whilst checking pull branch protection for %-v: %v", pr, err)
 				return err
@@ -135,7 +154,7 @@ func CheckPullMergeable(stdCtx context.Context, doer *user_model.User, perm *acc
 
 			// If there is still a branch protection check error, return it
 			if err != nil {
-				return err
+				return refuse(blocker, err)
 			}
 		}
 
@@ -146,11 +165,12 @@ func CheckPullMergeable(stdCtx context.Context, doer *user_model.User, perm *acc
 		if noDeps, err := issues_model.IssueNoDependenciesLeft(ctx, pr.Issue); err != nil {
 			return err
 		} else if !noDeps {
-			return ErrDependenciesLeft
+			return refuse(issues_model.MergeBlockedDependency, ErrDependenciesLeft)
 		}
 
 		return nil
 	})
+	return decision, err
 }
 
 // isSignedIfRequired check if merge will be signed if required

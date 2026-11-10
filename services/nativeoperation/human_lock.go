@@ -18,10 +18,8 @@ import (
 	extensionauth_model "forgejo.org/models/extensionauth"
 	issues_model "forgejo.org/models/issues"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
-	"forgejo.org/models/perm"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
-	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/setting"
@@ -107,12 +105,12 @@ func humanLockParent(ctx context.Context, q sdk.HumanLockRequest, admit HumanLoc
 			return nil, nil, ErrAuthorityLost
 		}
 	}
-	kind := unit.TypeIssues
-	if issue.IsPull {
-		kind = unit.TypePullRequests
-	}
 	permission, err := access_model.GetUserRepoPermission(ctx, repo, actor)
-	if err != nil || kind.UnitGlobalDisabled() || !repo.UnitEnabled(ctx, kind) || !permission.CanRead(kind) || !permission.CanAccessAny(perm.AccessModeWrite, unit.TypeIssues, unit.TypePullRequests) {
+	if err != nil {
+		return nil, nil, ErrAuthorityLost
+	}
+	facts := issues_model.ReadDiscussionActionFacts(ctx, repo, issue, actor, permission)
+	if facts.LockPermission() != issues_model.NativeActionAllowed {
 		return nil, nil, ErrAuthorityLost
 	}
 	if issue.IsLocked != p.IsLocked {

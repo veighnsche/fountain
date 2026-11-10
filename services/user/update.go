@@ -44,134 +44,91 @@ type UpdateOptions struct {
 	KeepPronounsPrivate          optional.Option[bool]
 }
 
-// updateAuthorityOptions reports whether these options change authentication
-// or authorization outcomes (roles, activation, capabilities, visibility,
-// quotas) rather than profile display or liveness telemetry. Only
-// authority updates claim ownership; per-request preference and login
-// timestamp writes proceed without advancing the native revision.
-func updateAuthorityOptions(opts *UpdateOptions) bool {
-	return opts.IsAdmin.Has() || opts.IsActive.Has() ||
-		opts.IsRestricted.Has() || opts.AllowCreateOrganization.Has() ||
-		opts.RepoAdminChangeTeamAccess.Has() || opts.AllowGitHook.Has() ||
-		opts.AllowImportLocal.Has() || opts.MaxRepoCreation.Has() ||
-		opts.Visibility.Has()
+type userUpdatePlan struct {
+	columns []string
+	steps   []func(context.Context, *user_model.User) error
+}
+
+func (p *userUpdatePlan) add(column string, step func(context.Context, *user_model.User) error) {
+	p.columns = append(p.columns, column)
+	p.steps = append(p.steps, step)
+}
+
+func planUserField[T any](plan *userUpdatePlan, column string, option optional.Option[T], field func(*user_model.User) *T) {
+	if has, value := option.Get(); has {
+		plan.add(column, func(_ context.Context, user *user_model.User) error {
+			*field(user) = value
+			return nil
+		})
+	}
+}
+
+func planUserUpdate(opts *UpdateOptions) userUpdatePlan {
+	plan := userUpdatePlan{}
+	planUserField(&plan, "keep_email_private", opts.KeepEmailPrivate, func(u *user_model.User) *bool { return &u.KeepEmailPrivate })
+	planUserField(&plan, "full_name", opts.FullName, func(u *user_model.User) *string { return &u.FullName })
+	planUserField(&plan, "pronouns", opts.Pronouns, func(u *user_model.User) *string { return &u.Pronouns })
+	planUserField(&plan, "website", opts.Website, func(u *user_model.User) *string { return &u.Website })
+	planUserField(&plan, "location", opts.Location, func(u *user_model.User) *string { return &u.Location })
+	planUserField(&plan, "description", opts.Description, func(u *user_model.User) *string { return &u.Description })
+	planUserField(&plan, "language", opts.Language, func(u *user_model.User) *string { return &u.Language })
+	planUserField(&plan, "theme", opts.Theme, func(u *user_model.User) *string { return &u.Theme })
+	planUserField(&plan, "diff_view_style", opts.DiffViewStyle, func(u *user_model.User) *string { return &u.DiffViewStyle })
+	planUserField(&plan, "enable_repo_unit_hints", opts.EnableRepoUnitHints, func(u *user_model.User) *bool { return &u.EnableRepoUnitHints })
+	planUserField(&plan, "keep_pronouns_private", opts.KeepPronounsPrivate, func(u *user_model.User) *bool { return &u.KeepPronounsPrivate })
+	planUserField(&plan, "allow_git_hook", opts.AllowGitHook, func(u *user_model.User) *bool { return &u.AllowGitHook })
+	planUserField(&plan, "allow_import_local", opts.AllowImportLocal, func(u *user_model.User) *bool { return &u.AllowImportLocal })
+	planUserField(&plan, "max_repo_creation", opts.MaxRepoCreation, func(u *user_model.User) *int { return &u.MaxRepoCreation })
+	planUserField(&plan, "is_active", opts.IsActive, func(u *user_model.User) *bool { return &u.IsActive })
+	planUserField(&plan, "is_restricted", opts.IsRestricted, func(u *user_model.User) *bool { return &u.IsRestricted })
+	if has, value := opts.IsAdmin.Get(); has {
+		plan.add("is_admin", func(ctx context.Context, u *user_model.User) error {
+			if !value && user_model.IsLastAdminUser(ctx, u) {
+				return models.ErrDeleteLastAdminUser{UID: u.ID}
+			}
+			u.IsAdmin = value
+			return nil
+		})
+	}
+	if has, value := opts.Visibility.Get(); has {
+		plan.add("visibility", func(_ context.Context, u *user_model.User) error {
+			if !u.IsOrganization() && !setting.Service.AllowedUserVisibilityModesSlice.IsAllowedVisibility(value) {
+				return fmt.Errorf("visibility mode not allowed: %s", value.String())
+			}
+			u.Visibility = value
+			return nil
+		})
+	}
+	planUserField(&plan, "keep_activity_private", opts.KeepActivityPrivate, func(u *user_model.User) *bool { return &u.KeepActivityPrivate })
+	planUserField(&plan, "allow_create_organization", opts.AllowCreateOrganization, func(u *user_model.User) *bool { return &u.AllowCreateOrganization })
+	planUserField(&plan, "repo_admin_change_team_access", opts.RepoAdminChangeTeamAccess, func(u *user_model.User) *bool { return &u.RepoAdminChangeTeamAccess })
+	planUserField(&plan, "email_notifications_preference", opts.EmailNotificationsPreference, func(u *user_model.User) *string { return &u.EmailNotificationsPreference })
+	if opts.SetLastLogin {
+		plan.add("last_login_unix", func(_ context.Context, u *user_model.User) error {
+			u.SetLastLogin()
+			return nil
+		})
+	}
+	return plan
 }
 
 func UpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) error {
-	if !updateAuthorityOptions(opts) {
-		return doUpdateUser(ctx, u, opts)
+	plan := planUserUpdate(opts)
+	if len(plan.columns) == 0 {
+		return nil
 	}
-	// One authority writer owns the account change before its effects,
-	// advancing the native revision so old permission observations go
-	// stale. Telemetry-only updates above never claim.
-	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/update", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/update", ID: u.ID}, func(ctx context.Context) error {
-		return doUpdateUser(ctx, u, opts)
-	})
-}
-
-func doUpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) error {
-	cols := make([]string, 0, 20)
-
-	if has, value := opts.KeepEmailPrivate.Get(); has {
-		u.KeepEmailPrivate = value
-		cols = append(cols, "keep_email_private")
-	}
-	if has, value := opts.FullName.Get(); has {
-		u.FullName = value
-		cols = append(cols, "full_name")
-	}
-	if has, value := opts.Pronouns.Get(); has {
-		u.Pronouns = value
-		cols = append(cols, "pronouns")
-	}
-	if has, value := opts.Website.Get(); has {
-		u.Website = value
-		cols = append(cols, "website")
-	}
-	if has, value := opts.Location.Get(); has {
-		u.Location = value
-		cols = append(cols, "location")
-	}
-	if has, value := opts.Description.Get(); has {
-		u.Description = value
-		cols = append(cols, "description")
-	}
-	if has, value := opts.Language.Get(); has {
-		u.Language = value
-		cols = append(cols, "language")
-	}
-	if has, value := opts.Theme.Get(); has {
-		u.Theme = value
-		cols = append(cols, "theme")
-	}
-	if has, value := opts.DiffViewStyle.Get(); has {
-		u.DiffViewStyle = value
-		cols = append(cols, "diff_view_style")
-	}
-	if has, value := opts.EnableRepoUnitHints.Get(); has {
-		u.EnableRepoUnitHints = value
-		cols = append(cols, "enable_repo_unit_hints")
-	}
-	if has, value := opts.KeepPronounsPrivate.Get(); has {
-		u.KeepPronounsPrivate = value
-		cols = append(cols, "keep_pronouns_private")
-	}
-	if has, value := opts.AllowGitHook.Get(); has {
-		u.AllowGitHook = value
-		cols = append(cols, "allow_git_hook")
-	}
-	if has, value := opts.AllowImportLocal.Get(); has {
-		u.AllowImportLocal = value
-		cols = append(cols, "allow_import_local")
-	}
-	if has, value := opts.MaxRepoCreation.Get(); has {
-		u.MaxRepoCreation = value
-		cols = append(cols, "max_repo_creation")
-	}
-	if has, value := opts.IsActive.Get(); has {
-		u.IsActive = value
-		cols = append(cols, "is_active")
-	}
-	if has, value := opts.IsRestricted.Get(); has {
-		u.IsRestricted = value
-		cols = append(cols, "is_restricted")
-	}
-	if has, value := opts.IsAdmin.Get(); has {
-		if !value && user_model.IsLastAdminUser(ctx, u) {
-			return models.ErrDeleteLastAdminUser{UID: u.ID}
+	apply := func(ctx context.Context) error {
+		for _, step := range plan.steps {
+			if err := step(ctx, u); err != nil {
+				return err
+			}
 		}
-		u.IsAdmin = value
-		cols = append(cols, "is_admin")
+		return user_model.UpdateUserCols(ctx, u, plan.columns...)
 	}
-	if has, value := opts.Visibility.Get(); has {
-		if !u.IsOrganization() && !setting.Service.AllowedUserVisibilityModesSlice.IsAllowedVisibility(value) {
-			return fmt.Errorf("visibility mode not allowed: %s", value.String())
-		}
-		u.Visibility = value
-		cols = append(cols, "visibility")
+	if !user_model.UserColumnsRequireAuthority(plan.columns...) {
+		return apply(ctx)
 	}
-	if has, value := opts.KeepActivityPrivate.Get(); has {
-		u.KeepActivityPrivate = value
-		cols = append(cols, "keep_activity_private")
-	}
-	if has, value := opts.AllowCreateOrganization.Get(); has {
-		u.AllowCreateOrganization = value
-		cols = append(cols, "allow_create_organization")
-	}
-	if has, value := opts.RepoAdminChangeTeamAccess.Get(); has {
-		u.RepoAdminChangeTeamAccess = value
-		cols = append(cols, "repo_admin_change_team_access")
-	}
-	if has, value := opts.EmailNotificationsPreference.Get(); has {
-		u.EmailNotificationsPreference = value
-		cols = append(cols, "email_notifications_preference")
-	}
-	if opts.SetLastLogin {
-		u.SetLastLogin()
-		cols = append(cols, "last_login_unix")
-	}
-
-	return user_model.UpdateUserCols(ctx, u, cols...)
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/update", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/update", ID: u.ID}, apply)
 }
 
 type UpdateAuthOptions struct {

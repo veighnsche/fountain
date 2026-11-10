@@ -49,28 +49,12 @@ func readInlineSnapshot(ctx context.Context, admission *callbackAdmission, repos
 	return &inlineSnapshotFacts{Review: *review, Proof: proof}, http.StatusOK
 }
 func resolveInlineSnapshot(ctx context.Context, admission *callbackAdmission, request extension.CallbackRequest) (*extension.RepositoryInlineSnapshot, int) {
-	before, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil || !before.Idle {
-		return nil, http.StatusServiceUnavailable
-	}
-	first, status := readInlineSnapshot(ctx, admission, request.RepositoryID, *request.InlineSnapshot)
+	first, revision, status := observeCallbackSnapshot(ctx, func(ctx context.Context) (*inlineSnapshotFacts, int) {
+		return readInlineSnapshot(ctx, admission, request.RepositoryID, *request.InlineSnapshot)
+	}, equalSnapshot[inlineSnapshotFacts], nil, []int{http.StatusNotFound, http.StatusUnprocessableEntity})
 	if status != http.StatusOK {
 		return nil, status
 	}
-	second, status := readInlineSnapshot(ctx, admission, request.RepositoryID, *request.InlineSnapshot)
-	if status == http.StatusNotFound || status == http.StatusUnprocessableEntity {
-		return nil, http.StatusConflict
-	}
-	if status != http.StatusOK {
-		return nil, status
-	}
-	after, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil {
-		return nil, http.StatusServiceUnavailable
-	}
-	if !after.Idle || after.Revision != before.Revision || *first != *second {
-		return nil, http.StatusConflict
-	}
-	first.Review.Snapshot.NativeRevision = before.Revision
+	first.Review.Snapshot.NativeRevision = revision
 	return &extension.RepositoryInlineSnapshot{Review: first.Review.Snapshot, Anchor: request.InlineSnapshot.Anchor, EntryOID: first.Proof.EntryOID, EntryKind: first.Proof.EntryKind, DiffDigest: first.Proof.DiffDigest}, http.StatusOK
 }

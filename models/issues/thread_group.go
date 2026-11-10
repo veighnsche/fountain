@@ -5,6 +5,7 @@ package issues
 
 import (
 	"context"
+	"errors"
 	"sort"
 
 	"forgejo.org/models/db"
@@ -42,14 +43,55 @@ func FetchThreadComments(ctx context.Context, issue *Issue) (CommentList, map[in
 		Find(&comments); err != nil {
 		return nil, nil, err
 	}
-	if err := issue.LoadRepo(ctx); err != nil {
+	reviews, err := loadThreadCommentRelations(ctx, issue, comments)
+	if err != nil {
 		return nil, nil, err
+	}
+	return comments, reviews, nil
+}
+
+// ThreadCommentRead carries a complete issue context or an explicit overflow.
+// Incomplete reads expose no prefix: later anchored comments can change how a
+// retained anchorless comment belongs to a conversation.
+type ThreadCommentRead struct {
+	Comments CommentList
+	Reviews  map[int64]*Review
+	Complete bool
+}
+
+// FetchThreadCommentsBounded reads at most limit+1 rows, using the last row only
+// as an overflow sentinel. Relations are hydrated only for a complete context.
+// Exact native writers retain FetchThreadComments for their full-context read.
+func FetchThreadCommentsBounded(ctx context.Context, issue *Issue, limit int) (ThreadCommentRead, error) {
+	if issue == nil || issue.ID <= 0 || limit <= 0 {
+		return ThreadCommentRead{}, errors.New("invalid thread comment bound")
+	}
+	conds := FindCommentsOptions{Type: CommentTypeCode, IssueID: issue.ID}.ToConds()
+	var comments CommentList
+	if err := db.GetEngine(ctx).Where(conds).
+		Asc("comment.created_unix").Asc("comment.id").Limit(limit + 1).
+		Find(&comments); err != nil {
+		return ThreadCommentRead{}, err
+	}
+	if len(comments) > limit {
+		return ThreadCommentRead{Complete: false}, nil
+	}
+	reviews, err := loadThreadCommentRelations(ctx, issue, comments)
+	if err != nil {
+		return ThreadCommentRead{}, err
+	}
+	return ThreadCommentRead{Comments: comments, Reviews: reviews, Complete: true}, nil
+}
+
+func loadThreadCommentRelations(ctx context.Context, issue *Issue, comments CommentList) (map[int64]*Review, error) {
+	if err := issue.LoadRepo(ctx); err != nil {
+		return nil, err
 	}
 	if err := comments.LoadPosters(ctx); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err := comments.LoadResolveDoers(ctx); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	ids := make([]int64, 0, len(comments))
 	for _, comment := range comments {
@@ -59,14 +101,51 @@ func FetchThreadComments(ctx context.Context, issue *Issue) (CommentList, map[in
 	}
 	reviews := make(map[int64]*Review)
 	if err := db.GetEngine(ctx).In("id", ids).Find(&reviews); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	for _, comment := range comments {
 		if re, ok := reviews[comment.ReviewID]; ok && re != nil {
 			comment.Review = re
 		}
 	}
-	return comments, reviews, nil
+	return reviews, nil
+}
+
+// CodeThreadIdentity describes a legacy location-only selector. A complete
+// empty location has RootID zero; ambiguous or incomplete contexts never name
+// a root. Callers must refuse those selectors rather than guessing a thread.
+type CodeThreadIdentity struct {
+	RootID    int64
+	Complete  bool
+	Ambiguous bool
+}
+
+// ReadCodeThreadIdentity resolves a native location against its entire bounded
+// context. The sentinel is checked before grouping so a prefix cannot make an
+// anchorless comment appear to belong to a sole recorded immutable context.
+func ReadCodeThreadIdentity(ctx context.Context, issueID, reviewID int64, treePath string, line int64, limit int) (CodeThreadIdentity, error) {
+	if limit <= 0 {
+		return CodeThreadIdentity{}, errors.New("invalid thread identity selector")
+	}
+	var rows CommentList
+	if err := db.GetEngine(ctx).Where("issue_id = ? AND review_id = ? AND tree_path = ? AND line = ? AND type = ?",
+		issueID, reviewID, treePath, line, CommentTypeCode).
+		Cols("id", "type", "issue_id", "review_id", "tree_path", "line", "created_unix", "original_anchor").
+		Asc("created_unix").Asc("id").Limit(limit + 1).Find(&rows); err != nil {
+		return CodeThreadIdentity{}, err
+	}
+	if len(rows) > limit {
+		return CodeThreadIdentity{Complete: false}, nil
+	}
+	threads := GroupCodeThreads(rows)
+	if len(threads) > 1 {
+		return CodeThreadIdentity{Complete: true, Ambiguous: true}, nil
+	}
+	identity := CodeThreadIdentity{Complete: true}
+	if len(threads) == 1 {
+		identity.RootID = threads[0].Root().ID
+	}
+	return identity, nil
 }
 
 // threadGroupKey anchors one conversation: its review, tree path and
@@ -85,6 +164,8 @@ type threadGroupKey struct {
 // otherwise unknown context forms its own conversation. No context is invented
 // on the retained row. Malformed recorded anchors never absorb unknown replies.
 // Roots and members remain ordered by (created_unix, id).
+// The caller supplies the full available context; a partial read must not use
+// this function to infer anchorless identity.
 func GroupCodeThreads(comments CommentList) []CodeThread {
 	groups := make(map[threadGroupKey][]*Comment)
 	order := make([]threadGroupKey, 0, len(comments))

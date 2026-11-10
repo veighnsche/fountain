@@ -248,20 +248,15 @@ func doCreateCodeCommentKnownReviewID(ctx context.Context, doer *user_model.User
 		// This older native form names only a location, not a thread root.
 		// Never attach it to an arbitrary file side/range/original tree pair
 		// when that location now contains several immutable conversations.
-		var rows issues_model.CommentList
-		err := db.GetEngine(ctx).Where("issue_id = ? AND review_id = ? AND tree_path = ? AND line = ? AND type = ?",
-			issue.ID, reviewID, treePath, line, issues_model.CommentTypeCode).
-			Cols("id", "type", "issue_id", "review_id", "tree_path", "line", "created_unix", "original_anchor").
-			Asc("created_unix").Asc("id").Limit(10001).Find(&rows)
+		identity, err := issues_model.ReadCodeThreadIdentity(ctx, issue.ID, reviewID, treePath, line, 10000)
 		if err != nil {
 			return nil, fmt.Errorf("find reply conversation: %w", err)
 		}
-		threads := issues_model.GroupCodeThreads(rows)
-		if len(rows) > 10000 || len(threads) > 1 {
+		if !identity.Complete || identity.Ambiguous {
 			return nil, errors.New("reply location has ambiguous original context")
 		}
-		if len(threads) == 1 {
-			first, err := issues_model.GetCommentByID(ctx, threads[0].Root().ID)
+		if identity.RootID != 0 {
+			first, err := issues_model.GetCommentByID(ctx, identity.RootID)
 			if err != nil {
 				return nil, err
 			}

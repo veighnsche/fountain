@@ -5,15 +5,12 @@ package nativeoperation
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"strconv"
 	"strings"
 
 	sdk "forgejo.org/extension-sdk"
-	"forgejo.org/models"
 	"forgejo.org/models/db"
-	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
@@ -27,9 +24,8 @@ import (
 // Threads partition native location buckets by immutable original context
 // through the shared model grouping, so snapshot roots and resolve
 // bindings derive the same native root. Outdated unresolved threads are
-// retained with Outdated set; hidden or truncated evidence reports
-// Complete=false so the consumer blocks rather than authorizing on partial
-// conversations. Eligibility reuses the evaluator behind
+// retained with Outdated set; hidden evidence reports Complete=false, and
+// incomplete issue contexts fail the read before grouping. Eligibility reuses the evaluator behind
 // CheckPullMergeable and exposes its first typed blocker; the read
 // performs no mutation (the evaluator writes no status: conflict refresh
 // lives in GetPullRequestMergeability, never in this path) and grants no
@@ -97,24 +93,17 @@ func (l *snapshotLoader) threads(ctx context.Context, index, number string) (*sd
 	if err != nil {
 		return nil, err
 	}
-	comments, _, err := issues_model.FetchThreadComments(ctx, issue)
-	if err != nil {
+	read, err := issues_model.FetchThreadCommentsBounded(ctx, issue, snapshotFetchCap-1)
+	if err != nil || !read.Complete {
+		// The wire page cannot express an unknown remaining thread count.
+		// More importantly, grouping a prefix could invent legacy identity.
 		return nil, ErrSnapshotUnavailable
 	}
-	grouped := issues_model.GroupCodeThreads(comments)
+	grouped := issues_model.GroupCodeThreads(read.Comments)
 	// Paging observes ascending root ID so the decimal cursor stays a
 	// total exclusive lower bound across pages at one revision; grouping
 	// itself keeps native (created, id) order for root derivation.
 	sort.Slice(grouped, func(i, j int) bool { return grouped[i].Root().ID < grouped[j].Root().ID })
-	// Truncation guard: the fetch is bounded, so a full fetch against a
-	// larger total means grouping observed a prefix. Digests over a
-	// prefix would lie, so every thread reports incomplete.
-	truncated := false
-	if total, err := issues_model.CountComments(ctx, &issues_model.FindCommentsOptions{IssueID: issue.ID, Type: issues_model.CommentTypeCode}); err != nil {
-		return nil, ErrSnapshotUnavailable
-	} else if int64(len(comments)) >= snapshotFetchCap && total > int64(len(comments)) {
-		truncated = true
-	}
 	after := l.cursorAfterID()
 	remaining := 0
 	for _, thread := range grouped {
@@ -133,9 +122,9 @@ func (l *snapshotLoader) threads(ctx context.Context, index, number string) (*sd
 		kept = append(kept, thread)
 	}
 	converted := make([]issues_model.ThreadSnapshot, 0, len(kept))
-	complete := !truncated
+	complete := true
 	for _, thread := range kept {
-		snapshot, ok := l.threadSnapshot(issue, thread, headTip, truncated)
+		snapshot, ok := l.threadSnapshot(issue, thread, headTip)
 		if !ok {
 			complete = false
 			continue
@@ -145,10 +134,9 @@ func (l *snapshotLoader) threads(ctx context.Context, index, number string) (*sd
 			complete = false
 		}
 	}
-	// One extra row past the page determines terminal status without
-	// returning it: a full page against remaining threads is
-	// nonterminal with NextCursor at the final returned root, otherwise
-	// the terminal page carries Complete with an empty cursor. Dropped
+	// The remaining root count determines terminal status. A nonterminal
+	// page carries NextCursor at the final returned root; a complete
+	// terminal page carries an empty cursor. Dropped
 	// anchors and hidden threads keep the page incomplete either way.
 	terminal := len(kept) == remaining && len(converted) == len(kept)
 	nextCursor := ""
@@ -176,7 +164,7 @@ func (l *snapshotLoader) threads(ctx context.Context, index, number string) (*sd
 // for threads with malformed recorded coordinates/context; the caller marks the page incomplete
 // rather than guessing an anchor. Hidden threads redact to the root
 // locator with no digest.
-func (l *snapshotLoader) threadSnapshot(issue *issues_model.Issue, thread issues_model.CodeThread, headTip string, truncated bool) (issues_model.ThreadSnapshot, bool) {
+func (l *snapshotLoader) threadSnapshot(issue *issues_model.Issue, thread issues_model.CodeThread, headTip string) (issues_model.ThreadSnapshot, bool) {
 	root := thread.Root()
 	visible := true
 	for _, member := range thread {
@@ -234,10 +222,9 @@ func (l *snapshotLoader) threadSnapshot(issue *issues_model.Issue, thread issues
 			outdated = !strings.EqualFold(root.CommitSHA, headTip)
 		}
 	}
-	complete := !truncated
 	converted, err := issues_model.NewThreadSnapshot(root, issue.ID, root.ReviewID, root.TreePath, side, unsigned,
 		strings.ToLower(root.CommitSHA), strings.ToLower(headTip), digest, members, len(members),
-		root.ResolveDoerID, root.ResolveDoerID != 0, outdated, true, "", complete)
+		root.ResolveDoerID, root.ResolveDoerID != 0, outdated, true, "", true)
 	if err != nil {
 		return issues_model.ThreadSnapshot{}, false
 	}
@@ -307,7 +294,7 @@ func (l *snapshotLoader) eligibility(ctx context.Context, number string) (*sdk.S
 		return nil, err
 	}
 	permission := l.permission
-	evalErr := pull_service.CheckPullMergeable(ctx, l.user, &permission, pr, pull_service.MergeCheckTypeGeneral, false)
+	decision, evalErr := pull_service.EvaluatePullMergeable(ctx, l.user, &permission, pr, pull_service.MergeCheckTypeGeneral, false)
 	if evalErr == nil {
 		converted, err := issues_model.NewMergeEligibilitySnapshot(pr, strings.ToLower(headTip), strings.ToLower(baseTip), true, "", nil, true, "", true)
 		if err != nil {
@@ -315,11 +302,18 @@ func (l *snapshotLoader) eligibility(ctx context.Context, number string) (*sdk.S
 		}
 		return l.eligibilityDTO(converted), nil
 	}
-	blocker, reviews, ok := l.attributeBlocker(ctx, pr, evalErr)
-	if !ok {
+	if decision.Blocker == "" {
 		return nil, ErrSnapshotUnavailable
 	}
-	converted, err := issues_model.NewMergeEligibilitySnapshot(pr, strings.ToLower(headTip), strings.ToLower(baseTip), false, blocker, reviews, true, "", true)
+	var reviews []int64
+	if decision.Blocker == issues_model.MergeBlockedRequestedChanges {
+		var ok bool
+		reviews, ok = l.rejectingReviewIDs(ctx, pr)
+		if !ok {
+			return nil, ErrSnapshotUnavailable
+		}
+	}
+	converted, err := issues_model.NewMergeEligibilitySnapshot(pr, strings.ToLower(headTip), strings.ToLower(baseTip), false, decision.Blocker, reviews, true, "", true)
 	if err != nil {
 		return nil, ErrSnapshotUnavailable
 	}
@@ -345,72 +339,6 @@ func (l *snapshotLoader) baseTip(ctx context.Context, pr *issues_model.PullReque
 		return "", ErrSnapshotUnavailable
 	}
 	return tip, nil
-}
-
-// attributeBlocker maps the evaluator's first typed refusal to its bounded
-// blocker in evaluator order without parsing human messages. Protection
-// refusals attribute through the same predicates the evaluator runs, in
-// the same order. It reports ok=false for untyped failures, which fail
-// the read as unavailable.
-func (l *snapshotLoader) attributeBlocker(ctx context.Context, pr *issues_model.PullRequest, evalErr error) (string, []int64, bool) {
-	switch {
-	case errors.Is(evalErr, pull_service.ErrHasMerged):
-		return issues_model.MergeBlockedMerged, nil, true
-	case errors.Is(evalErr, pull_service.ErrIsClosed):
-		return issues_model.MergeBlockedClosed, nil, true
-	case errors.Is(evalErr, pull_service.ErrUserNotAllowedToMerge):
-		return issues_model.MergeBlockedPermission, nil, true
-	case errors.Is(evalErr, pull_service.ErrIsWorkInProgress):
-		return issues_model.MergeBlockedWorkInProgress, nil, true
-	case errors.Is(evalErr, pull_service.ErrNotMergeableState):
-		return issues_model.MergeBlockedNotMergeable, nil, true
-	case errors.Is(evalErr, pull_service.ErrIsChecking):
-		return issues_model.MergeBlockedChecking, nil, true
-	case errors.Is(evalErr, pull_service.ErrDependenciesLeft):
-		return issues_model.MergeBlockedDependency, nil, true
-	case models.IsErrDisallowedToMerge(evalErr):
-		return l.attributeProtection(ctx, pr)
-	default:
-		return "", nil, false
-	}
-}
-
-// attributeProtection replays the branch-protection predicates the
-// evaluator runs, in evaluator order, to name the first blocking rule.
-// Signature requirements carry no typed evaluator signal (a failed sign
-// reports a raw error), so signature-step failures stay unavailable.
-func (l *snapshotLoader) attributeProtection(ctx context.Context, pr *issues_model.PullRequest) (string, []int64, bool) {
-	pb, err := git_model.GetFirstMatchProtectedBranchRule(ctx, pr.BaseRepoID, pr.BaseBranch)
-	if err != nil || pb == nil {
-		return issues_model.MergeBlockedBranchProtection, nil, true
-	}
-	pass, err := pull_service.IsPullCommitStatusPass(ctx, pr)
-	if err != nil {
-		return "", nil, false
-	}
-	if !pass {
-		return issues_model.MergeBlockedStatusChecks, nil, true
-	}
-	if !issues_model.HasEnoughApprovals(ctx, pb, pr) {
-		return issues_model.MergeBlockedApprovals, nil, true
-	}
-	if issues_model.MergeBlockedByRejectedReview(ctx, pb, pr) {
-		ids, ok := l.rejectingReviewIDs(ctx, pr)
-		if !ok {
-			return "", nil, false
-		}
-		return issues_model.MergeBlockedRequestedChanges, ids, true
-	}
-	if issues_model.MergeBlockedByOfficialReviewRequests(ctx, pb, pr) {
-		return issues_model.MergeBlockedReviewRequests, nil, true
-	}
-	if issues_model.MergeBlockedByOutdatedBranch(pb, pr) {
-		return issues_model.MergeBlockedOutdatedBranch, nil, true
-	}
-	if pb.MergeBlockedByProtectedFiles(pr.ChangedProtectedFiles) {
-		return issues_model.MergeBlockedProtectedFiles, nil, true
-	}
-	return issues_model.MergeBlockedBranchProtection, nil, true
 }
 
 // rejectingReviewIDs lists the official non-dismissed rejecting review IDs

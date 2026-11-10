@@ -16,7 +16,6 @@ import (
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
-	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	execcontext "forgejo.org/modules/nativeoperation"
 	notify_service "forgejo.org/services/notify"
@@ -107,21 +106,17 @@ func humanCommentParent(ctx context.Context, q sdk.HumanCommentRequest, admit Hu
 	if err != nil || issue.RepoID != repo.ID || issue.Index != nativeCommentID(p.Index) || issue.IsPull != (p.Subject == "pull") {
 		return nil, nil, ErrAuthorityLost
 	}
-	if user_model.IsBlockedMultiple(ctx, []int64{repo.OwnerID, issue.PosterID}, actor.ID) {
-		return nil, nil, ErrAuthorityLost
-	}
 	if issue.IsPull {
 		if err := issue.LoadPullRequest(ctx); err != nil || issue.PullRequest == nil || issue.PullRequest.ID != nativeCommentID(p.SubjectID) {
 			return nil, nil, ErrAuthorityLost
 		}
 	}
-	kind := unit.TypeIssues
-	if issue.IsPull {
-		kind = unit.TypePullRequests
-	}
 	permission, err := access_model.GetUserRepoPermission(ctx, repo, actor)
-	if err != nil || kind.UnitGlobalDisabled() || !repo.UnitEnabled(ctx, kind) || !permission.CanRead(kind) ||
-		issue.IsLocked && !permission.CanWriteIssuesOrPulls(issue.IsPull) && !actor.IsAdmin {
+	if err != nil {
+		return nil, nil, ErrAuthorityLost
+	}
+	facts := issues_model.ReadDiscussionActionFacts(ctx, repo, issue, actor, permission)
+	if facts.Comment() != issues_model.NativeActionAllowed {
 		return nil, nil, ErrAuthorityLost
 	}
 	issue.Repo = repo

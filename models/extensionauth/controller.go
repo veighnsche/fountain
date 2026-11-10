@@ -8,12 +8,8 @@ import (
 	"time"
 
 	auth_model "forgejo.org/models/auth"
-	"forgejo.org/models/db"
 	"forgejo.org/models/desktopgrant"
-	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
-	"forgejo.org/models/unit"
-	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/setting"
 )
 
@@ -78,26 +74,21 @@ func CheckControllerUse(ctx context.Context, use ControllerUse) (*desktopgrant.O
 			}
 		case desktopgrant.CredentialPAT:
 			if use.TokenID <= 0 || use.TokenID != g.TokenID || use.CredentialFingerprint != g.TokenFingerprint || use.PackageID != g.PackageID ||
-				g.PackageID == "" || g.PackageID != setting.OAuth2.FactoryAppliancePackageID || p.OwnerKind != desktopgrant.ControllerAppliance || p.OwnerID != g.InstallationID {
+				!ControllerPolicyForPackage(g.PackageID).RequiresController() || p.OwnerKind != desktopgrant.ControllerAppliance || p.OwnerID != g.InstallationID {
 				return desktopgrant.ErrController
 			}
-			token := new(auth_model.AccessToken)
-			found, err := db.GetEngine(ctx).ID(g.TokenID).NoAutoCondition().Get(token)
+			credential, err := currentControllerPAT(ctx, g.TokenID, g.ActorID, g.TokenFingerprint)
 			if err != nil {
 				return err
 			}
-			if !found || token.UID != g.ActorID || CredentialFingerprint(token.TokenHash, token.TokenSalt) != g.TokenFingerprint {
-				return desktopgrant.ErrController
-			}
-			allowed, err := token.Scope.HasScope(auth_model.AccessTokenScopeWriteRepository)
-			if err != nil || !allowed {
-				return desktopgrant.ErrController
+			if err := credential.requireScope(controllerCredential, nil); err != nil {
+				return err
 			}
 			binding, err := FindBinding(ctx, g.InstallationID, g.TokenID, g.ActorID, g.RepositoryID, use.Kind)
 			if err != nil || binding == nil {
 				return desktopgrant.ErrController
 			}
-			publicOnly, err := token.Scope.PublicOnly()
+			publicOnly, err := credential.publicOnly(controllerCredential)
 			if err != nil {
 				return desktopgrant.ErrController
 			}
@@ -105,47 +96,13 @@ func CheckControllerUse(ctx context.Context, use ControllerUse) (*desktopgrant.O
 			if err != nil || publicOnly && repository.IsPrivate {
 				return desktopgrant.ErrController
 			}
-			if !token.ResourceAllRepos {
-				resources, err := auth_model.GetRepositoriesAccessibleWithToken(ctx, g.TokenID)
-				if err != nil {
-					return err
-				}
-				included := false
-				for _, resource := range resources {
-					if resource.RepoID == g.RepositoryID {
-						included = true
-						break
-					}
-				}
-				if !included {
-					return desktopgrant.ErrController
-				}
+			if _, err := credential.repositoryResources(ctx, g.RepositoryID, controllerCredential); err != nil {
+				return err
 			}
 		default:
 			return desktopgrant.ErrController
 		}
-		actor, err := user_model.GetUserByID(ctx, g.ActorID)
-		if err != nil {
-			return err
-		}
-		if !actor.IsActive || actor.ProhibitLogin {
-			return desktopgrant.ErrController
-		}
-		repository, err := repo_model.GetRepositoryByID(ctx, g.RepositoryID)
-		if err != nil {
-			return err
-		}
-		if repository.IsArchived || repository.IsMirror || user_model.IsBlocked(ctx, repository.OwnerID, actor.ID) {
-			return desktopgrant.ErrController
-		}
-		permission, err := access_model.GetUserRepoPermission(ctx, repository, actor)
-		if err != nil {
-			return err
-		}
-		if !permission.CanWrite(unit.TypeCode) {
-			return desktopgrant.ErrController
-		}
-		return nil
+		return checkNativeAuthority(ctx, g.ActorID, g.RepositoryID, controllerCredential, nil)
 	})
 	return g, err
 }

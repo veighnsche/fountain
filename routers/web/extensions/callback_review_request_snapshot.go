@@ -49,31 +49,12 @@ func readReviewRequestSnapshot(ctx context.Context, admission *callbackAdmission
 }
 
 func resolveReviewRequestSnapshot(ctx context.Context, admission *callbackAdmission, request extension.CallbackRequest) (*extension.RepositoryReviewRequestSnapshot, int) {
-	before, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil || !before.Idle {
-		return nil, http.StatusServiceUnavailable
-	}
-	first, status := readReviewRequestSnapshot(ctx, admission, request.RepositoryID, *request.ReviewRequestSnapshot)
+	first, revision, status := observeCallbackSnapshot(ctx, func(ctx context.Context) (*reviewRequestSnapshotFacts, int) {
+		return readReviewRequestSnapshot(ctx, admission, request.RepositoryID, *request.ReviewRequestSnapshot)
+	}, func(a, b *reviewRequestSnapshotFacts) bool { return reflect.DeepEqual(a, b) }, func(ctx context.Context) int { _, status := resolveCurrentUser(ctx, admission); return status }, []int{http.StatusNotFound})
 	if status != http.StatusOK {
 		return nil, status
 	}
-	second, status := readReviewRequestSnapshot(ctx, admission, request.RepositoryID, *request.ReviewRequestSnapshot)
-	if status == http.StatusNotFound {
-		return nil, http.StatusConflict
-	}
-	if status != http.StatusOK {
-		return nil, status
-	}
-	if _, status := resolveCurrentUser(ctx, admission); status != http.StatusOK {
-		return nil, status
-	}
-	after, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil {
-		return nil, http.StatusServiceUnavailable
-	}
-	if !after.Idle || after.Revision != before.Revision || !reflect.DeepEqual(first, second) {
-		return nil, http.StatusConflict
-	}
-	first.Snapshot.Review.NativeRevision = before.Revision
+	first.Snapshot.Review.NativeRevision = revision
 	return &first.Snapshot, http.StatusOK
 }

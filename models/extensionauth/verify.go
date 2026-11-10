@@ -6,17 +6,13 @@ package extensionauth
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
 	"slices"
 
 	sdk "forgejo.org/extension-sdk"
 	auth_model "forgejo.org/models/auth"
-	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
-	"forgejo.org/models/unit"
-	user_model "forgejo.org/models/user"
 
 	"github.com/google/uuid"
 )
@@ -96,92 +92,37 @@ func VerifySubmission(ctx context.Context, request SubmissionRequest) (Submissio
 	if !ValidKind(request.Kind) {
 		return SubmissionDecision{}, refuse(RefusalUnknownKind, http.StatusBadRequest)
 	}
-	token, err := auth_model.GetAccessTokenBySHA(ctx, request.TokenSecret)
+	credential, err := authenticatePAT(ctx, request.TokenSecret, request.ActorID)
 	if err != nil {
-		if ctx.Err() != nil {
-			return SubmissionDecision{}, ctx.Err()
-		}
-		if auth_model.IsErrAccessTokenNotExist(err) || auth_model.IsErrAccessTokenEmpty(err) {
-			return SubmissionDecision{}, refuse(RefusalInvalidCredential, http.StatusUnauthorized)
-		}
 		return SubmissionDecision{}, err
 	}
-	// Always compare against the current authoritative hash/salt, including
-	// after a cached-ID lookup, before capturing the fingerprint.
-	expected := auth_model.HashToken(request.TokenSecret, token.TokenSalt)
-	if subtle.ConstantTimeCompare([]byte(token.TokenHash), []byte(expected)) != 1 {
-		return SubmissionDecision{}, refuse(RefusalInvalidCredential, http.StatusUnauthorized)
-	}
-	if token.UID != request.ActorID {
-		return SubmissionDecision{}, refuse(RefusalActorMismatch, http.StatusForbidden)
-	}
-	binding, err := FindBinding(ctx, request.InstallationID, token.ID, request.ActorID, request.RepositoryID, request.Kind)
+	binding, err := FindBinding(ctx, request.InstallationID, credential.token.ID, request.ActorID, request.RepositoryID, request.Kind)
 	if err != nil {
 		return SubmissionDecision{}, err
 	}
 	if binding == nil {
 		return SubmissionDecision{}, refuse(RefusalBindingMissing, http.StatusForbidden)
 	}
-	// All supported background kinds mutate native collaboration state, so the
-	// token must currently grant repository write. Kind-specific native
-	// checks stay at each kind's own enforcement boundary.
-	granted, err := token.Scope.HasScope(auth_model.AccessTokenScopeWriteRepository)
-	if err != nil || !granted {
-		return SubmissionDecision{}, refuse(RefusalInsufficientScope, http.StatusForbidden)
+	if err := credential.requireScope(mutationCredential, nil); err != nil {
+		return SubmissionDecision{}, err
 	}
-	if !token.ResourceAllRepos {
-		resources, err := auth_model.GetRepositoriesAccessibleWithToken(ctx, token.ID)
+	if _, err := credential.repositoryResources(ctx, request.RepositoryID, mutationCredential); err != nil {
+		return SubmissionDecision{}, err
+	}
+	if err := checkNativeAuthority(ctx, request.ActorID, request.RepositoryID, mutationCredential, func(repository *repo_model.Repository) error {
+		publicOnly, err := credential.publicOnly(mutationCredential)
 		if err != nil {
-			return SubmissionDecision{}, err
+			return err
 		}
-		allowed := false
-		for _, resource := range resources {
-			if resource.RepoID == request.RepositoryID {
-				allowed = true
-				break
-			}
+		if publicOnly && repository.IsPrivate {
+			return refuse(RefusalRepositoryExcluded, http.StatusForbidden)
 		}
-		if !allowed {
-			return SubmissionDecision{}, refuse(RefusalRepositoryExcluded, http.StatusForbidden)
-		}
-	}
-	user, err := user_model.GetUserByID(ctx, request.ActorID)
-	if err != nil {
-		if user_model.IsErrUserNotExist(err) {
-			return SubmissionDecision{}, refuse(RefusalAccountUnavailable, http.StatusForbidden)
-		}
+		return nil
+	}); err != nil {
 		return SubmissionDecision{}, err
 	}
-	if !user.IsActive || user.ProhibitLogin {
-		return SubmissionDecision{}, refuse(RefusalAccountUnavailable, http.StatusForbidden)
-	}
-	repository, err := repo_model.GetRepositoryByID(ctx, request.RepositoryID)
-	if err != nil {
-		if repo_model.IsErrRepoNotExist(err) {
-			return SubmissionDecision{}, refuse(RefusalInvalidIntent, http.StatusBadRequest)
-		}
-		return SubmissionDecision{}, err
-	}
-	publicOnly, err := token.Scope.PublicOnly()
-	if err != nil {
-		return SubmissionDecision{}, refuse(RefusalInsufficientScope, http.StatusForbidden)
-	}
-	if publicOnly && repository.IsPrivate {
-		return SubmissionDecision{}, refuse(RefusalRepositoryExcluded, http.StatusForbidden)
-	}
-	permission, err := access_model.GetUserRepoPermission(ctx, repository, user)
-	if err != nil {
-		return SubmissionDecision{}, err
-	}
-	if !permission.CanWrite(unit.TypeCode) {
-		return SubmissionDecision{}, refuse(RefusalPermissionLost, http.StatusForbidden)
-	}
-	decision := SubmissionDecision{
-		TokenID:               token.ID,
-		ActorID:               request.ActorID,
-		CredentialFingerprint: CredentialFingerprint(token.TokenHash, token.TokenSalt),
-		PackageID:             request.PackageID, ControllerGrantID: request.ControllerGrantID,
-	}
+	decision := credential.decision()
+	decision.PackageID, decision.ControllerGrantID = request.PackageID, request.ControllerGrantID
 	if request.ControllerGrantID != "" {
 		if _, err = CheckControllerUse(ctx, ControllerUse{GrantID: request.ControllerGrantID, InstallationID: request.InstallationID, PackageID: request.PackageID,
 			ActorID: request.ActorID, RepositoryID: request.RepositoryID, TokenID: decision.TokenID, CredentialFingerprint: decision.CredentialFingerprint, Kind: request.Kind}); err != nil {
@@ -269,26 +210,11 @@ func VerifySnapshotRead(ctx context.Context, request SnapshotReadRequest) (Snaps
 	if request.TokenSecret == "" || request.ActorID <= 0 || request.RepositoryID <= 0 {
 		return SnapshotReadDecision{}, refuse(RefusalInvalidIntent, http.StatusBadRequest)
 	}
-	token, err := auth_model.GetAccessTokenBySHA(ctx, request.TokenSecret)
+	credential, err := authenticatePAT(ctx, request.TokenSecret, request.ActorID)
 	if err != nil {
-		if ctx.Err() != nil {
-			return SnapshotReadDecision{}, ctx.Err()
-		}
-		if auth_model.IsErrAccessTokenNotExist(err) || auth_model.IsErrAccessTokenEmpty(err) {
-			return SnapshotReadDecision{}, refuse(RefusalInvalidCredential, http.StatusUnauthorized)
-		}
 		return SnapshotReadDecision{}, err
 	}
-	// Always compare against the current authoritative hash/salt, including
-	// after a cached-ID lookup, before capturing the fingerprint.
-	expected := auth_model.HashToken(request.TokenSecret, token.TokenSalt)
-	if subtle.ConstantTimeCompare([]byte(token.TokenHash), []byte(expected)) != 1 {
-		return SnapshotReadDecision{}, refuse(RefusalInvalidCredential, http.StatusUnauthorized)
-	}
-	if token.UID != request.ActorID {
-		return SnapshotReadDecision{}, refuse(RefusalActorMismatch, http.StatusForbidden)
-	}
-	bound, err := HasAnyBinding(ctx, request.InstallationID, token.ID, request.ActorID, request.RepositoryID)
+	bound, err := HasAnyBinding(ctx, request.InstallationID, credential.token.ID, request.ActorID, request.RepositoryID)
 	if err != nil {
 		return SnapshotReadDecision{}, err
 	}
@@ -296,61 +222,27 @@ func VerifySnapshotRead(ctx context.Context, request SnapshotReadRequest) (Snaps
 		return SnapshotReadDecision{}, refuse(RefusalBindingMissing, http.StatusForbidden)
 	}
 	decision := SnapshotReadDecision{
-		SubmissionDecision: SubmissionDecision{
-			TokenID: token.ID, ActorID: request.ActorID,
-			CredentialFingerprint: CredentialFingerprint(token.TokenHash, token.TokenSalt),
-		},
-		RepositoryID: request.RepositoryID, Scope: token.Scope, ResourceAllRepos: token.ResourceAllRepos,
+		SubmissionDecision: credential.decision(),
+		RepositoryID:       request.RepositoryID, Scope: credential.token.Scope, ResourceAllRepos: credential.token.ResourceAllRepos,
 	}
-	if !decision.CanReadFamilies(request.Families) {
-		return SnapshotReadDecision{}, refuse(RefusalInsufficientScope, http.StatusForbidden)
-	}
-	decision.PublicOnly, err = token.Scope.PublicOnly()
-	if err != nil {
-		return SnapshotReadDecision{}, refuse(RefusalInsufficientScope, http.StatusForbidden)
-	}
-	if !token.ResourceAllRepos {
-		resources, err := auth_model.GetRepositoriesAccessibleWithToken(ctx, token.ID)
-		if err != nil {
-			return SnapshotReadDecision{}, err
-		}
-		allowed := false
-		for _, resource := range resources {
-			decision.RepositoryIDs = append(decision.RepositoryIDs, resource.RepoID)
-			if resource.RepoID == request.RepositoryID {
-				allowed = true
-			}
-		}
-		if !allowed {
-			return SnapshotReadDecision{}, refuse(RefusalRepositoryExcluded, http.StatusForbidden)
-		}
-	}
-	user, err := user_model.GetUserByID(ctx, request.ActorID)
-	if err != nil {
-		if user_model.IsErrUserNotExist(err) {
-			return SnapshotReadDecision{}, refuse(RefusalAccountUnavailable, http.StatusForbidden)
-		}
+	if err := credential.requireScope(readCredential, request.Families); err != nil {
 		return SnapshotReadDecision{}, err
 	}
-	if !user.IsActive || user.ProhibitLogin {
-		return SnapshotReadDecision{}, refuse(RefusalAccountUnavailable, http.StatusForbidden)
-	}
-	repositoryRecord, err := repo_model.GetRepositoryByID(ctx, request.RepositoryID)
-	if err != nil {
-		if repo_model.IsErrRepoNotExist(err) {
-			return SnapshotReadDecision{}, refuse(RefusalInvalidIntent, http.StatusBadRequest)
-		}
-		return SnapshotReadDecision{}, err
-	}
-	if !decision.AllowsRepository(repositoryRecord.ID, repositoryRecord.IsPrivate) {
-		return SnapshotReadDecision{}, refuse(RefusalRepositoryExcluded, http.StatusForbidden)
-	}
-	permission, err := access_model.GetUserRepoPermission(ctx, repositoryRecord, user)
+	decision.PublicOnly, err = credential.publicOnly(readCredential)
 	if err != nil {
 		return SnapshotReadDecision{}, err
 	}
-	if !permission.CanReadAny(unit.TypeCode, unit.TypeIssues, unit.TypePullRequests) {
-		return SnapshotReadDecision{}, refuse(RefusalPermissionLost, http.StatusForbidden)
+	decision.RepositoryIDs, err = credential.repositoryResources(ctx, request.RepositoryID, readCredential)
+	if err != nil {
+		return SnapshotReadDecision{}, err
+	}
+	if err := checkNativeAuthority(ctx, request.ActorID, request.RepositoryID, readCredential, func(repository *repo_model.Repository) error {
+		if !decision.AllowsRepository(repository.ID, repository.IsPrivate) {
+			return refuse(RefusalRepositoryExcluded, http.StatusForbidden)
+		}
+		return nil
+	}); err != nil {
+		return SnapshotReadDecision{}, err
 	}
 	return decision, nil
 }

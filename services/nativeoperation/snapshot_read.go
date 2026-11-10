@@ -263,10 +263,16 @@ func (l *snapshotLoader) loadIssue(ctx context.Context, index string) (*issues_m
 		}
 		return nil, ErrSnapshotUnavailable
 	}
-	if l.decision.IssuesOnly && issue.IsPull || !l.permission.CanReadIssuesOrPulls(issue.IsPull) {
+	if !l.canReadIssue(issue) {
 		return nil, ErrSnapshotNotFound
 	}
 	return issue, nil
+}
+
+// canReadIssue is shared by index and explicit-comment selection so both
+// selectors retain the same repository, grant-kind and unit boundary.
+func (l *snapshotLoader) canReadIssue(issue *issues_model.Issue) bool {
+	return issue.RepoID == l.repository.ID && !(l.decision.IssuesOnly && issue.IsPull) && l.permission.CanReadIssuesOrPulls(issue.IsPull)
 }
 
 func (l *snapshotLoader) issue(ctx context.Context, index string) (*sdk.SnapshotIssue, error) {
@@ -391,63 +397,21 @@ func (l *snapshotLoader) comments(ctx context.Context, index string, ids []strin
 	if err != nil {
 		return nil, err
 	}
-	total, err := issues_model.CountComments(ctx, &issues_model.FindCommentsOptions{IssueID: issue.ID})
+	rows, remaining, err := issues_model.FindIssueCommentsAfterID(ctx, issue.ID, l.cursorAfterID(), l.limit+1)
 	if err != nil {
 		return nil, ErrSnapshotUnavailable
 	}
-	rows, err := issues_model.FindComments(ctx, &issues_model.FindCommentsOptions{
-		ListOptions: db.ListOptions{Page: 1, PageSize: snapshotFetchCap},
-		IssueID:     issue.ID,
-	})
-	if err != nil {
-		return nil, ErrSnapshotUnavailable
+	kept := rows
+	if len(kept) > l.limit {
+		kept = kept[:l.limit]
 	}
-	after := l.cursorAfterID()
-	var kept []*issues_model.Comment
-	remaining := 0
-	for _, row := range rows {
-		if row.ID <= after {
-			continue
-		}
-		remaining++
-	}
-	capped := int64(len(rows)) >= snapshotFetchCap && total > int64(len(rows))
-	fetchedComplete := !capped
-	for _, row := range rows {
-		if row.ID <= after {
-			continue
-		}
-		if len(kept) >= l.limit {
-			break
-		}
-		kept = append(kept, row)
-	}
-	page := &sdk.SnapshotCommentPage{IssueID: snapshotIDString(issue.ID), Total: remaining}
+	page := &sdk.SnapshotCommentPage{IssueID: snapshotIDString(issue.ID), Total: int(remaining), Complete: int64(len(kept)) == remaining}
 	for _, row := range kept {
-		converted, err := issues_model.NewCommentSnapshot(row, true, "", true)
+		converted, err := snapshotCommentDTO(row)
 		if err != nil {
 			return nil, ErrSnapshotUnavailable
 		}
-		page.Items = append(page.Items, sdk.SnapshotComment{
-			ID:             snapshotIDString(converted.CommentID),
-			IssueID:        snapshotIDString(converted.IssueID),
-			Type:           converted.Type,
-			PosterID:       snapshotIDString(converted.PosterID),
-			Content:        converted.Content,
-			ContentDigest:  converted.ContentDigest,
-			ContentVersion: converted.ContentVersion,
-			ReviewID:       snapshotIDString(converted.ReviewID),
-			Invalidated:    converted.Invalidated,
-			CreatedUnix:    converted.CreatedUnix,
-			UpdatedUnix:    converted.UpdatedUnix,
-			Visible:        true,
-			Complete:       true,
-		})
-	}
-	// Total counts remaining items after the cursor only when the fetch
-	// covered them; otherwise the page is honestly incomplete.
-	if fetchedComplete {
-		page.Complete = len(kept) == remaining
+		page.Items = append(page.Items, converted)
 	}
 	return page, nil
 }
@@ -474,7 +438,7 @@ func (l *snapshotLoader) commentsByIDs(ctx context.Context, ids []string) (*sdk.
 			}
 			return nil, ErrSnapshotUnavailable
 		}
-		if issue.RepoID != l.repository.ID || !l.permission.CanReadIssuesOrPulls(issue.IsPull) {
+		if !l.canReadIssue(issue) {
 			return nil, ErrSnapshotNotFound
 		}
 		if issueID == 0 {
@@ -482,30 +446,38 @@ func (l *snapshotLoader) commentsByIDs(ctx context.Context, ids []string) (*sdk.
 		} else if issueID != issue.ID {
 			return nil, ErrSnapshotInvalid
 		}
-		converted, err := issues_model.NewCommentSnapshot(comment, true, "", true)
+		converted, err := snapshotCommentDTO(comment)
 		if err != nil {
 			return nil, ErrSnapshotUnavailable
 		}
-		page.Items = append(page.Items, sdk.SnapshotComment{
-			ID:             snapshotIDString(converted.CommentID),
-			IssueID:        snapshotIDString(converted.IssueID),
-			Type:           converted.Type,
-			PosterID:       snapshotIDString(converted.PosterID),
-			Content:        converted.Content,
-			ContentDigest:  converted.ContentDigest,
-			ContentVersion: converted.ContentVersion,
-			ReviewID:       snapshotIDString(converted.ReviewID),
-			Invalidated:    converted.Invalidated,
-			CreatedUnix:    converted.CreatedUnix,
-			UpdatedUnix:    converted.UpdatedUnix,
-			Visible:        true,
-			Complete:       true,
-		})
+		page.Items = append(page.Items, converted)
 	}
 	page.IssueID = snapshotIDString(issueID)
 	page.Total = len(page.Items)
 	page.Complete = true
 	return page, nil
+}
+
+func snapshotCommentDTO(comment *issues_model.Comment) (sdk.SnapshotComment, error) {
+	converted, err := issues_model.NewCommentSnapshot(comment, true, "", true)
+	if err != nil {
+		return sdk.SnapshotComment{}, err
+	}
+	return sdk.SnapshotComment{
+		ID:             snapshotIDString(converted.CommentID),
+		IssueID:        snapshotIDString(converted.IssueID),
+		Type:           converted.Type,
+		PosterID:       snapshotIDString(converted.PosterID),
+		Content:        converted.Content,
+		ContentDigest:  converted.ContentDigest,
+		ContentVersion: converted.ContentVersion,
+		ReviewID:       snapshotIDString(converted.ReviewID),
+		Invalidated:    converted.Invalidated,
+		CreatedUnix:    converted.CreatedUnix,
+		UpdatedUnix:    converted.UpdatedUnix,
+		Visible:        converted.Visible,
+		Complete:       converted.Complete,
+	}, nil
 }
 
 func (l *snapshotLoader) dependencies(ctx context.Context, index string) (*sdk.SnapshotDependencyPage, error) {
@@ -804,31 +776,15 @@ func (l *snapshotLoader) reviews(ctx context.Context, index, number string) (*sd
 		}
 		issueID = pr.IssueID
 	}
-	total, err := issues_model.CountReviews(ctx, issues_model.FindReviewOptions{IssueID: issueID})
+	rows, remaining, err := issues_model.FindIssueReviewsAfterID(ctx, issueID, l.cursorAfterID(), l.limit+1)
 	if err != nil {
 		return nil, ErrSnapshotUnavailable
 	}
-	rows, err := issues_model.FindReviews(ctx, issues_model.FindReviewOptions{
-		ListOptions: db.ListOptions{Page: 1, PageSize: snapshotFetchCap},
-		IssueID:     issueID,
-	})
-	if err != nil {
-		return nil, ErrSnapshotUnavailable
+	kept := rows
+	if len(kept) > l.limit {
+		kept = kept[:l.limit]
 	}
-	after := l.cursorAfterID()
-	var kept []*issues_model.Review
-	remaining := 0
-	for _, row := range rows {
-		if row.ID <= after {
-			continue
-		}
-		remaining++
-		if len(kept) < l.limit {
-			kept = append(kept, row)
-		}
-	}
-	capped := len(rows) >= snapshotFetchCap && total > int64(len(rows))
-	page := &sdk.SnapshotReviewPage{IssueID: snapshotIDString(issueID), Total: remaining}
+	page := &sdk.SnapshotReviewPage{IssueID: snapshotIDString(issueID), Total: int(remaining), Complete: int64(len(kept)) == remaining}
 	for _, row := range kept {
 		converted, err := issues_model.NewReviewSnapshot(row, true, "", true)
 		if err != nil {
@@ -850,9 +806,6 @@ func (l *snapshotLoader) reviews(ctx context.Context, index, number string) (*sd
 			Complete:      true,
 		})
 	}
-	if !capped {
-		page.Complete = len(kept) == remaining
-	}
 	return page, nil
 }
 
@@ -860,24 +813,15 @@ func (l *snapshotLoader) checks(ctx context.Context, sha string) (*sdk.SnapshotC
 	if !l.permission.CanRead(unit.TypeCode) {
 		return nil, ErrSnapshotNotFound
 	}
-	statuses, count, err := git_model.GetLatestCommitStatus(ctx, l.repository.ID, sha, db.ListOptions{Page: 1, PageSize: snapshotFetchCap})
+	statuses, remaining, err := git_model.FindLatestCommitStatusesAfterID(ctx, l.repository.ID, sha, l.cursorAfterID(), l.limit+1)
 	if err != nil {
 		return nil, ErrSnapshotUnavailable
 	}
-	after := l.cursorAfterID()
-	var kept []*git_model.CommitStatus
-	remaining := 0
-	for _, status := range statuses {
-		if status.ID <= after {
-			continue
-		}
-		remaining++
-		if len(kept) < l.limit {
-			kept = append(kept, status)
-		}
+	kept := statuses
+	if len(kept) > l.limit {
+		kept = kept[:l.limit]
 	}
-	capped := len(statuses) >= snapshotFetchCap && count > int64(len(statuses))
-	set := &sdk.SnapshotCheckSet{SHA: sha, Total: remaining}
+	set := &sdk.SnapshotCheckSet{SHA: sha, Total: int(remaining), Complete: int64(len(kept)) == remaining}
 	for _, status := range kept {
 		converted, err := git_model.NewCheckSnapshot(status, true, "", true)
 		if err != nil {
@@ -895,9 +839,6 @@ func (l *snapshotLoader) checks(ctx context.Context, sha string) (*sdk.SnapshotC
 			Visible:     true,
 			Complete:    true,
 		})
-	}
-	if !capped {
-		set.Complete = len(kept) == remaining
 	}
 	return set, nil
 }

@@ -18,7 +18,6 @@ import (
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
-	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	execcontext "forgejo.org/modules/nativeoperation"
 	issue_service "forgejo.org/services/issue"
@@ -108,17 +107,13 @@ func humanEditParent(ctx context.Context, q sdk.HumanEditRequest, admit HumanEdi
 			return nil, nil, ErrAuthorityLost
 		}
 	}
-	kind := unit.TypeIssues
-	if issue.IsPull {
-		kind = unit.TypePullRequests
-	}
 	permission, err := access_model.GetUserRepoPermission(ctx, repo, actor)
-	if err != nil || kind.UnitGlobalDisabled() || !repo.UnitEnabled(ctx, kind) || !permission.CanRead(kind) {
+	if err != nil {
 		return nil, nil, ErrAuthorityLost
 	}
-	writer := permission.CanWriteIssuesOrPulls(issue.IsPull)
-	if q.Title != nil && (!issue.IsPoster(actor.ID) && !writer || user_model.IsBlockedMultiple(ctx, []int64{repo.OwnerID, issue.PosterID}, actor.ID)) ||
-		q.Body != nil && issue.PosterID != actor.ID && !writer {
+	facts := issues_model.ReadDiscussionActionFacts(ctx, repo, issue, actor, permission)
+	if !facts.Readable || q.Title != nil && facts.TitleEdit() != issues_model.NativeActionAllowed ||
+		q.Body != nil && facts.BodyEdit() != issues_model.NativeActionAllowed {
 		return nil, nil, ErrAuthorityLost
 	}
 	if issue.Title != p.Title || editBodyDigest(issue.Content) != p.BodyDigest || int64(issue.ContentVersion) != p.ContentVersion {

@@ -14,7 +14,6 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	"forgejo.org/modules/git"
-	nativeoperation_service "forgejo.org/services/nativeoperation"
 	pull_service "forgejo.org/services/pull"
 )
 
@@ -93,31 +92,12 @@ func readManualMergeSnapshot(ctx context.Context, admission *callbackAdmission, 
 }
 
 func resolveManualMergeSnapshot(ctx context.Context, admission *callbackAdmission, request extension.CallbackRequest) (*extension.RepositoryManualMergeSnapshot, int) {
-	before, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil || !before.Idle {
-		return nil, http.StatusServiceUnavailable
-	}
-	first, status := readManualMergeSnapshot(ctx, admission, request.RepositoryID, *request.ManualMergeSnapshot)
+	first, revision, status := observeCallbackSnapshot(ctx, func(ctx context.Context) (*extension.RepositoryManualMergeSnapshot, int) {
+		return readManualMergeSnapshot(ctx, admission, request.RepositoryID, *request.ManualMergeSnapshot)
+	}, equalSnapshot[extension.RepositoryManualMergeSnapshot], func(ctx context.Context) int { _, status := resolveCurrentUser(ctx, admission); return status }, []int{http.StatusNotFound, http.StatusUnprocessableEntity})
 	if status != http.StatusOK {
 		return nil, status
 	}
-	second, status := readManualMergeSnapshot(ctx, admission, request.RepositoryID, *request.ManualMergeSnapshot)
-	if status == http.StatusNotFound || status == http.StatusUnprocessableEntity {
-		return nil, http.StatusConflict
-	}
-	if status != http.StatusOK {
-		return nil, status
-	}
-	if _, status := resolveCurrentUser(ctx, admission); status != http.StatusOK {
-		return nil, status
-	}
-	after, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil {
-		return nil, http.StatusServiceUnavailable
-	}
-	if !after.Idle || before.Revision != after.Revision || *first != *second {
-		return nil, http.StatusConflict
-	}
-	first.NativeRevision = before.Revision
+	first.NativeRevision = revision
 	return first, http.StatusOK
 }

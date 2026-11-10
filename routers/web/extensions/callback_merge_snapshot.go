@@ -13,7 +13,6 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	"forgejo.org/modules/git"
-	nativeoperation_service "forgejo.org/services/nativeoperation"
 )
 
 type mergeSnapshotFacts struct {
@@ -83,31 +82,12 @@ func readMergeSnapshot(ctx context.Context, admission *callbackAdmission, reposi
 }
 
 func resolveMergeSnapshot(ctx context.Context, admission *callbackAdmission, request extension.CallbackRequest) (*extension.RepositoryMergeSnapshot, int) {
-	before, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil || !before.Idle {
-		return nil, http.StatusServiceUnavailable
-	}
-	first, status := readMergeSnapshot(ctx, admission, request.RepositoryID, *request.MergeSnapshot)
+	first, revision, status := observeCallbackSnapshot(ctx, func(ctx context.Context) (*mergeSnapshotFacts, int) {
+		return readMergeSnapshot(ctx, admission, request.RepositoryID, *request.MergeSnapshot)
+	}, equalSnapshot[mergeSnapshotFacts], func(ctx context.Context) int { _, status := resolveCurrentUser(ctx, admission); return status }, []int{http.StatusNotFound})
 	if status != http.StatusOK {
 		return nil, status
 	}
-	second, status := readMergeSnapshot(ctx, admission, request.RepositoryID, *request.MergeSnapshot)
-	if status == http.StatusNotFound {
-		return nil, http.StatusConflict
-	}
-	if status != http.StatusOK {
-		return nil, status
-	}
-	if _, status := resolveCurrentUser(ctx, admission); status != http.StatusOK {
-		return nil, status
-	}
-	after, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil {
-		return nil, http.StatusServiceUnavailable
-	}
-	if !after.Idle || before.Revision != after.Revision || *first != *second {
-		return nil, http.StatusConflict
-	}
-	first.Snapshot.NativeRevision = before.Revision
+	first.Snapshot.NativeRevision = revision
 	return &first.Snapshot, http.StatusOK
 }

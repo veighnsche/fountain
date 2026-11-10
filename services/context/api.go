@@ -58,6 +58,7 @@ type APIContext struct {
 	reducer    authz.AuthorizationReducer
 
 	requiredScopeCategories []auth_model.AccessTokenScopeCategory
+	DesktopGrantRoute       DesktopGrantRoute
 }
 
 func init() {

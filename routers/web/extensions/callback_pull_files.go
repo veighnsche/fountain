@@ -10,8 +10,6 @@ import (
 	"unicode/utf8"
 
 	extension "forgejo.org/extension-sdk"
-	issues_model "forgejo.org/models/issues"
-	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/git"
 )
 
@@ -176,72 +174,27 @@ func readPullFile(ctx context.Context, repo *git.Repository, base, head string, 
 	return item, nil
 }
 
-func pullFilesParent(ctx context.Context, admission *callbackAdmission, repository, index string) (*issues_model.PullRequest, int) {
-	issue, id, status := discussionParent(ctx, admission, repository, extension.RepositoryCommentsRequest{Subject: "pull", Index: index, Limit: 1})
-	if status != http.StatusOK {
-		return nil, status
-	}
-	pr := issue.PullRequest
-	if pr == nil || strconv.FormatInt(pr.ID, 10) != id || pr.IssueID != issue.ID || pr.BaseRepoID != issue.RepoID || pr.Index != issue.Index {
-		return nil, http.StatusServiceUnavailable
-	}
-	return pr, http.StatusOK
-}
-func pullFilesCursor(repository, pull, base, head string, offset int) string {
-	return strings.Join([]string{repository, pull, base, head, strconv.Itoa(offset)}, ".")
-}
-
 func resolveRepositoryPullFiles(ctx context.Context, admission *callbackAdmission, request extension.CallbackRequest) (*extension.RepositoryPullFiles, int) {
 	q := *request.PullFiles
-	pr, status := pullFilesParent(ctx, admission, request.RepositoryID, q.Index)
+	comparison, status := openPullComparison(ctx, admission, request.RepositoryID, q.Index)
 	if status != http.StatusOK {
 		return nil, status
 	}
-	repository, err := repo_model.GetRepositoryByID(ctx, pr.BaseRepoID)
-	if err != nil {
-		return nil, http.StatusServiceUnavailable
+	defer comparison.native.Close()
+	if status := comparison.verifyObjects(); status != http.StatusOK {
+		return nil, status
 	}
-	native, err := git.OpenRepository(ctx, repository.RepoPath())
-	if err != nil {
-		return nil, http.StatusServiceUnavailable
-	}
-	defer native.Close()
-	base := pr.MergeBase
-	head, err := native.GetRefCommitID(pr.GetGitRefName())
-	if err != nil || !extension.ValidPullDiffCommit(base) || !extension.ValidPullDiffCommit(head) {
-		return nil, http.StatusServiceUnavailable
-	}
-	baseCommit, err := native.GetCommit(base)
-	if err != nil || baseCommit.ID.String() != base {
-		return nil, http.StatusServiceUnavailable
-	}
-	headCommit, err := native.GetCommit(head)
-	if err != nil || headCommit.ID.String() != head {
-		return nil, http.StatusServiceUnavailable
-	}
-	if base != head {
-		ancestor, err := headCommit.HasPreviousCommit(baseCommit.ID)
-		if err != nil || !ancestor {
-			return nil, http.StatusServiceUnavailable
-		}
-	}
+	base, head, native := comparison.base, comparison.head, comparison.native
 	if q.Base != "" && (q.Base != base || q.Head != head) {
 		return nil, http.StatusConflict
 	}
-	id := strconv.FormatInt(pr.ID, 10)
-	offset := 0
-	if q.Cursor != "" {
-		parts := strings.Split(q.Cursor, ".")
-		if len(parts) != 5 {
-			return nil, http.StatusBadRequest
-		}
-		offset, err = strconv.Atoi(parts[4])
-		if err != nil || offset < 1 || q.Cursor != pullFilesCursor(request.RepositoryID, id, base, head, offset) {
-			return nil, http.StatusBadRequest
-		}
+	id := strconv.FormatInt(comparison.pullID, 10)
+	offset, status := comparison.offset(q.Cursor, 0)
+	if status != http.StatusOK {
+		return nil, status
 	}
 	raw := &pullDiffBuffer{limit: 2 * 1024 * 1024}
-	err = pullDiffCommand(ctx, native, base, head, raw, "raw")
+	err := pullDiffCommand(ctx, native, base, head, raw, "raw")
 	if raw.exceeded {
 		return nil, http.StatusRequestEntityTooLarge
 	}
@@ -265,19 +218,10 @@ func resolveRepositoryPullFiles(ctx context.Context, admission *callbackAdmissio
 		page.Items = append(page.Items, item)
 	}
 	if end < len(files) {
-		page.NextCursor = pullFilesCursor(request.RepositoryID, id, base, head, end)
+		page.NextCursor = comparison.cursor(end)
 	}
-	// Recheck current native authority, parent and head after all Git I/O.
-	after, status := pullFilesParent(ctx, admission, request.RepositoryID, q.Index)
-	if status != http.StatusOK {
+	if status := comparison.recheck(ctx, admission); status != http.StatusOK {
 		return nil, status
-	}
-	afterHead, err := native.GetRefCommitID(after.GetGitRefName())
-	if err != nil {
-		return nil, http.StatusServiceUnavailable
-	}
-	if after.ID != pr.ID || after.MergeBase != base || afterHead != head || after.HeadRepoID != pr.HeadRepoID || after.HeadBranch != pr.HeadBranch || after.BaseBranch != pr.BaseBranch {
-		return nil, http.StatusConflict
 	}
 	return page, http.StatusOK
 }

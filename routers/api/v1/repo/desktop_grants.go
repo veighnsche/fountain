@@ -35,16 +35,25 @@ func DesktopIssuesOAuthConfig(ctx *context.APIContext) {
 	desktopOAuthConfig(ctx, setting.OAuth2.FactoryDesktopClientID, "write:issue")
 }
 
-// This route marker comes from trusted API composition, never the request body.
+// DesktopGrantHandler binds a handler to its trusted enrollment profile.
+func DesktopGrantHandler(route context.DesktopGrantRoute, handler func(*context.APIContext)) func(*context.APIContext) {
+	if route != context.DesktopRepositoryGrantRoute && route != context.DesktopIssueGrantRoute {
+		panic("invalid desktop grant route")
+	}
+	return func(ctx *context.APIContext) {
+		ctx.DesktopGrantRoute = route
+		handler(ctx)
+	}
+}
+
+// DesktopIssueGrantScope retains the exported middleware adapter for callers
+// outside the production route composition.
 func DesktopIssueGrantScope(ctx *context.APIContext) {
-	ctx.Data["factory_desktop_issue_grant"] = true
+	ctx.DesktopGrantRoute = context.DesktopIssueGrantRoute
 }
 
 func desktopGrantKind(ctx *context.APIContext) string {
-	if ctx.Data["factory_desktop_issue_grant"] == true {
-		return "issues"
-	}
-	return ""
+	return string(ctx.DesktopGrantRoute)
 }
 
 func desktopOAuthConfig(ctx *context.APIContext, clientID, scope string) {

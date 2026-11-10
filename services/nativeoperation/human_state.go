@@ -15,7 +15,6 @@ import (
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
-	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	execcontext "forgejo.org/modules/nativeoperation"
 	notify_service "forgejo.org/services/notify"
@@ -104,23 +103,23 @@ func humanStateParent(ctx context.Context, q sdk.HumanStateRequest, admit HumanS
 	if issue.IsPull && (issue.PullRequest.HasMerged != p.HasMerged || issue.PullRequest.HasMerged) {
 		return nil, nil, errHumanStateChanged
 	}
-	kind := unit.TypeIssues
-	if issue.IsPull {
-		kind = unit.TypePullRequests
-	}
 	permission, err := access_model.GetUserRepoPermission(ctx, repo, actor)
-	if err != nil || kind.UnitGlobalDisabled() || !repo.UnitEnabled(ctx, kind) || !permission.CanRead(kind) || (!issue.IsPoster(actor.ID) && !permission.CanWriteIssuesOrPulls(issue.IsPull)) || user_model.IsBlockedMultiple(ctx, []int64{repo.OwnerID, issue.PosterID}, actor.ID) {
+	if err != nil {
+		return nil, nil, ErrAuthorityLost
+	}
+	facts := issues_model.ReadDiscussionActionFacts(ctx, repo, issue, actor, permission)
+	if facts.StatePermission() != issues_model.NativeActionAllowed {
 		return nil, nil, ErrAuthorityLost
 	}
 	if issue.IsClosed != p.IsClosed {
 		return nil, nil, errHumanStateChanged
 	}
-	if q.Close && repo.IsDependenciesEnabled(ctx) {
-		clear, err := issues_model.IssueNoDependenciesLeft(ctx, issue)
+	if q.Close {
+		blocker, err := issues_model.CheckNativeCloseDependencies(ctx, repo, issue)
 		if err != nil {
 			return nil, nil, err
 		}
-		if !clear {
+		if blocker != issues_model.NativeActionAllowed {
 			return nil, nil, errHumanStateDependencies
 		}
 	}

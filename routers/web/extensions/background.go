@@ -16,7 +16,6 @@ import (
 	extension "forgejo.org/extension-sdk"
 	"forgejo.org/extension-sdk/operationcontract"
 	extensionauth_model "forgejo.org/models/extensionauth"
-	"forgejo.org/modules/setting"
 	extensions_service "forgejo.org/services/extensions"
 	nativeoperation_service "forgejo.org/services/nativeoperation"
 )
@@ -225,11 +224,7 @@ func serveBackgroundOperation(w http.ResponseWriter, r *http.Request, manager *e
 	case extension.BackgroundControllerGrantPath, extension.BackgroundControllerClaimPath, extension.BackgroundControllerClaimGetPath, extension.BackgroundControllerRetirePath:
 		serveBackgroundController(w, r, admission)
 	case extension.BackgroundIssueIntakePath:
-		// The legacy signed intake callback has no central controller grant.
-		// Configuring Factory's central authority must fence that old writer
-		// too; it cannot compete with a selected desktop. Q22 supplies its
-		// separately admitted controller-aware successor.
-		if setting.OAuth2.FactoryAppliancePackageID != "" && admission.PackageID == setting.OAuth2.FactoryAppliancePackageID {
+		if err := extensionauth_model.ControllerPolicyForPackage(admission.PackageID).CheckLegacyIntake(); err != nil {
 			http.Error(w, "controller-aware issue intake required", http.StatusForbidden)
 			return
 		}
@@ -300,7 +295,7 @@ func serveBackgroundSubmit(w http.ResponseWriter, r *http.Request, admission ext
 		Kind:              request.Kind,
 		PackageID:         admission.PackageID,
 		ControllerGrantID: request.ControllerGrantID,
-		RequireController: setting.OAuth2.FactoryAppliancePackageID != "" && admission.PackageID == setting.OAuth2.FactoryAppliancePackageID,
+		RequireController: extensionauth_model.ControllerPolicyForPackage(admission.PackageID).RequiresController(),
 	})
 	if err != nil {
 		var refusal *extensionauth_model.RefusalError

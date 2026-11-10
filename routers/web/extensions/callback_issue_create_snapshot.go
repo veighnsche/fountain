@@ -13,33 +13,16 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
-	nativeoperation_service "forgejo.org/services/nativeoperation"
 )
 
 func resolveIssueCreateSnapshot(ctx context.Context, admission *callbackAdmission, repository string) (*extension.RepositoryIssueCreateSnapshot, int) {
-	before, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil || !before.Idle {
-		return nil, http.StatusServiceUnavailable
-	}
-	first, status := readIssueCreateSnapshot(ctx, admission, repository)
+	first, revision, status := observeCallbackSnapshot(ctx, func(ctx context.Context) (*extension.RepositoryIssueCreateSnapshot, int) {
+		return readIssueCreateSnapshot(ctx, admission, repository)
+	}, equalSnapshot[extension.RepositoryIssueCreateSnapshot], nil, []int{http.StatusNotFound})
 	if status != http.StatusOK {
 		return nil, status
 	}
-	second, status := readIssueCreateSnapshot(ctx, admission, repository)
-	if status == http.StatusNotFound {
-		return nil, http.StatusConflict
-	}
-	if status != http.StatusOK {
-		return nil, status
-	}
-	after, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil {
-		return nil, http.StatusServiceUnavailable
-	}
-	if !after.Idle || after.Revision != before.Revision || *first != *second {
-		return nil, http.StatusConflict
-	}
-	first.NativeRevision = before.Revision
+	first.NativeRevision = revision
 	return first, http.StatusOK
 }
 

@@ -17,6 +17,58 @@ func capabilityFact(state, reason string) extension.RepositoryActionCapability {
 	return extension.RepositoryActionCapability{State: state, Reason: reason}
 }
 
+func discussionCommentCapability(facts issues_model.DiscussionActionFacts, subject string) extension.RepositoryActionCapability {
+	switch facts.Comment() {
+	case issues_model.NativeActionAllowed:
+		return capabilityFact("allowed", subject+"_comment")
+	case issues_model.NativeActionArchived:
+		return capabilityFact("denied", "repository_archived")
+	case issues_model.NativeActionBlocked:
+		return capabilityFact("denied", "actor_blocked")
+	default:
+		return capabilityFact("denied", subject+"_locked")
+	}
+}
+
+func discussionEditCapabilities(facts issues_model.DiscussionActionFacts, subject string) (title, body extension.RepositoryActionCapability) {
+	title, body = capabilityFact("denied", subject+"_edit_denied"), capabilityFact("denied", subject+"_edit_denied")
+	if facts.TitleEdit() == issues_model.NativeActionAllowed {
+		title = capabilityFact("allowed", subject+"_author_or_writer")
+	}
+	if facts.BodyEdit() == issues_model.NativeActionAllowed {
+		body = capabilityFact("allowed", subject+"_poster_or_writer")
+	}
+	if facts.Archived {
+		title, body = capabilityFact("denied", "repository_archived"), capabilityFact("denied", "repository_archived")
+	}
+	return title, body
+}
+
+func discussionStateCapability(blocker issues_model.NativeActionBlocker, allowed string) extension.RepositoryActionCapability {
+	if blocker == issues_model.NativeActionAllowed {
+		return capabilityFact("allowed", allowed)
+	}
+	reason := string(blocker)
+	if blocker == issues_model.NativeActionPermission {
+		reason = "state_author_or_writer_required"
+	}
+	if blocker == issues_model.NativeActionBlocked {
+		reason = "state_actor_blocked"
+	}
+	return capabilityFact("denied", reason)
+}
+
+func discussionLockCapability(blocker issues_model.NativeActionBlocker, allowed string) extension.RepositoryActionCapability {
+	if blocker == issues_model.NativeActionAllowed {
+		return capabilityFact("allowed", allowed)
+	}
+	reason := string(blocker)
+	if blocker == issues_model.NativeActionPermission {
+		reason = "lock_writer_required"
+	}
+	return capabilityFact("denied", reason)
+}
+
 func readRepositoryCapabilities(ctx context.Context, admission *callbackAdmission, repository string, q extension.RepositoryCapabilitiesRequest) (*extension.RepositoryCapabilities, int) {
 	metadata, status := resolveCollaborationRepository(ctx, admission, repository)
 	if status != http.StatusOK {
@@ -101,16 +153,9 @@ func readRepositoryCapabilities(ctx context.Context, admission *callbackAdmissio
 			return nil, http.StatusServiceUnavailable
 		}
 		r.ResourceID = strconv.FormatInt(issue.ID, 10)
-		edit, comment := capabilityFact("denied", "issue_edit_denied"), capabilityFact("allowed", "issue_comment")
-		if issue.IsPoster(user.ID) || permission.CanWriteIssuesOrPulls(false) {
-			edit = capabilityFact("allowed", "issue_author_or_writer")
-		}
-		if issue.IsLocked && !permission.CanWriteIssuesOrPulls(false) && !user.IsAdmin {
-			comment = capabilityFact("denied", "issue_locked")
-		}
-		if repo.IsArchived {
-			edit, comment = capabilityFact("denied", "repository_archived"), capabilityFact("denied", "repository_archived")
-		}
+		facts := issues_model.ReadDiscussionActionFacts(ctx, repo, issue, user, permission)
+		edit, _ := discussionEditCapabilities(facts, "issue")
+		comment := discussionCommentCapability(facts, "issue")
 		r.Actions["issue.edit"], r.Actions["issue.comment"] = edit, comment
 		for _, action := range []string{"pull.edit", "pull.comment", "pull.review", "pull.review.comment", "pull.review.approve", "pull.review.request_changes", "thread.resolve", "pull.merge", "checks.read", "checks.jobs.read"} {
 			r.Actions[action] = capabilityFact("unsupported", "issue_scope")

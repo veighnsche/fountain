@@ -72,34 +72,12 @@ func readThreadSnapshot(ctx context.Context, admission *callbackAdmission, repos
 }
 
 func resolveThreadSnapshot(ctx context.Context, admission *callbackAdmission, request extension.CallbackRequest) (*extension.RepositoryThreadSnapshot, int) {
-	before, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil || !before.Idle {
-		return nil, http.StatusServiceUnavailable
-	}
-	first, status := readThreadSnapshot(ctx, admission, request.RepositoryID, *request.ThreadSnapshot)
+	first, revision, status := observeCallbackSnapshot(ctx, func(ctx context.Context) (*threadSnapshotFacts, int) {
+		return readThreadSnapshot(ctx, admission, request.RepositoryID, *request.ThreadSnapshot)
+	}, func(a, b *threadSnapshotFacts) bool { return reflect.DeepEqual(a, b) }, func(ctx context.Context) int { _, status := resolveCurrentUser(ctx, admission); return status }, []int{http.StatusNotFound, http.StatusUnprocessableEntity})
 	if status != http.StatusOK {
 		return nil, status
 	}
-	second, status := readThreadSnapshot(ctx, admission, request.RepositoryID, *request.ThreadSnapshot)
-	if status == http.StatusNotFound || status == http.StatusUnprocessableEntity {
-		return nil, http.StatusConflict
-	}
-	if status != http.StatusOK {
-		return nil, status
-	}
-	// Recheck the live human after complete conversation hydration as well as
-	// inside each PR read. Preparation must not release evidence to a changed
-	// session merely because its native revision stayed idle.
-	if _, status := resolveCurrentUser(ctx, admission); status != http.StatusOK {
-		return nil, status
-	}
-	after, err := nativeoperation_service.Default().ReadNativeRevision(ctx)
-	if err != nil {
-		return nil, http.StatusServiceUnavailable
-	}
-	if !after.Idle || after.Revision != before.Revision || !reflect.DeepEqual(first, second) {
-		return nil, http.StatusConflict
-	}
-	first.Snapshot.Review.NativeRevision = before.Revision
+	first.Snapshot.Review.NativeRevision = revision
 	return &first.Snapshot, http.StatusOK
 }
