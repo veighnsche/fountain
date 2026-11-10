@@ -105,7 +105,10 @@ test('external renderer retirement removes its pending window-message handler', 
   const {renderExternal, retireExternal} = await import('../markup/external.js');
   document.body.innerHTML = '<iframe class="external-render"></iframe>';
   const frame = document.querySelector('iframe');
+  // happy-dom 21 no longer loads src-less iframe pages; supply the frame's window.
+  Object.defineProperty(frame, 'contentWindow', {value: {postMessage: vi.fn()}});
   renderExternal();
+  expect(frame.contentWindow.postMessage).toHaveBeenCalledWith({requestOffsetHeight: true}, '*');
   retireExternal();
   window.dispatchEvent(new MessageEvent('message', {source: frame.contentWindow, data: {frameHeight: 400}}));
   expect(frame.height).toBe('');

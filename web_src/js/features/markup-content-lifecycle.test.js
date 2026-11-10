@@ -19,6 +19,11 @@ function installMarkup() {
   </div><iframe class="external-render"></iframe></div>
   <div data-extension-panel><div class="markup"><pre class="code-block"><code>owned\n</code></pre>
     <pre><code class="language-mermaid">owned</code></pre></div></div>`;
+  // happy-dom 21 no longer loads src-less iframe pages, so the external-render
+  // frame has no window of its own; give it one to receive the height request.
+  const frame = document.querySelector('iframe.external-render');
+  Object.defineProperty(frame, 'contentWindow', {value: {postMessage: vi.fn()}});
+  return frame;
 }
 
 // The mocked renderer imports resolve in microtasks; the mermaid iframe load
@@ -59,12 +64,12 @@ test('markup content renders each native renderer once and skips owned markup', 
 
 test('markup retirement removes mermaid blocks, disposes players, drops external handler', async () => {
   const player = await import('asciinema-player');
-  installMarkup();
+  const frame = installMarkup();
   initMarkupContent();
   await settleRenderers();
   expect(document.querySelectorAll('.mermaid-block')).toHaveLength(1);
+  expect(frame.contentWindow.postMessage).toHaveBeenCalledWith({requestOffsetHeight: true}, '*');
   const created = player.create.mock.results[0].value;
-  const frame = document.querySelector('iframe.external-render');
   retireMarkupContent();
   expect(document.querySelectorAll('.mermaid-block')).toHaveLength(0);
   expect(created.dispose).toHaveBeenCalledTimes(1);
