@@ -2307,8 +2307,25 @@ func testNativeDesktopEnrollment(t *testing.T) {
 			var lost atomic.Bool
 			var effectSends atomic.Int32
 			var claimSends atomic.Int32
+			var lostPreparation atomic.Bool
 			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/claims") && claimSends.Add(1) == 2 {
+				var claimNumber int32
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/claims") {
+					claimNumber = claimSends.Add(1)
+				}
+				if claimNumber == 3 && os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PREPARATION_LOST") == "1" {
+					recorder := httptest.NewRecorder()
+					testWebRoutes.ServeHTTP(recorder, r)
+					if recorder.Code == http.StatusOK {
+						lostPreparation.Store(true)
+						http.Error(w, "fixture lost preparation claim reply", http.StatusServiceUnavailable)
+						return
+					}
+					w.WriteHeader(recorder.Code)
+					_, _ = w.Write(recorder.Body.Bytes())
+					return
+				}
+				if claimNumber == 2 {
 					require.NoError(t, os.WriteFile(filepath.Join(root, "claim-request-paused"), []byte("original claim received"), 0o600))
 					deadline := time.Now().Add(5 * time.Second)
 					for time.Now().Before(deadline) {
@@ -2385,7 +2402,18 @@ func testNativeDesktopEnrollment(t *testing.T) {
 			require.EqualValues(t, 1, effectSends.Load(), "lookup absence and native reopen never send the completion note twice")
 			expectedClaims := 2
 			if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PAYLOAD") != "" {
-				expectedClaims++ // Exact additional native worker; no paid inference.
+				if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PREPARATION_LOST") != "1" {
+					expectedClaims++ // Exact additional native worker; no paid inference.
+				}
+				if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PREPARATION") == "1" {
+					expectedClaims++ // Privileged preparation has its own exact claim.
+					if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PRODUCT_SETUP") == "1" {
+						expectedClaims++ // Independent reviewer setup.
+					}
+				}
+			}
+			if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PREPARATION_LOST") == "1" {
+				require.True(t, lostPreparation.Load(), "original preparation claim reply was not lost")
 			}
 			require.EqualValues(t, expectedClaims, claimSends.Load(), "each native claim is reserved once; absence, lost reply, reopen and retirement only look up")
 		}
