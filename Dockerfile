@@ -40,6 +40,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 FROM build-tools AS frontend
 COPY Makefile webpack.config.js tailwind.config.js ./
 COPY web_src ./web_src
+COPY sdk/navigationpolicy/policy.json ./sdk/navigationpolicy/policy.json
 COPY public ./public
 COPY assets ./assets
 RUN make frontend

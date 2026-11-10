@@ -4,8 +4,7 @@
 // This module owns mount validation, the contribution lifecycle
 // (update/suspend/resume/retire) and scoped transport. A's presentation layer
 // owns root visibility/text and the native transition; B's lifecycle hooks own
-// native feature init/teardown. The dataset validators intentionally mirror
-// extensions.js until A02 unifies them; C does not edit that A-owned file.
+// native feature init/teardown.
 //
 // Lifetime guarantees (see sdk/browser/extension-contract.d.ts): update() and
 // suspend()/resume() always preserve the exact root and all retained resources
@@ -15,19 +14,16 @@
 // the same root, resources and stream.
 
 import {navigateNative} from '../native-lifecycle.js';
+import {appSubURLPathname, validDirectPattern} from './extension-navigation-policy.js';
 
-function validAppSubURL(value) {
-  return typeof value === 'string' && (value === '' ||
-    /^\/[^/\\?#\s]+(?:\/[^/\\?#\s]+)*$/.test(value) &&
-    !/%2f|%5c/i.test(value) && !value.split('/').some((part) => part === '.' || part === '..'));
-}
+const mountSlug = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-function nativeMountURL(input, appSubURL) {
-  if (!validAppSubURL(appSubURL) || typeof input !== 'string') return null;
+function nativeMountURL(input, appPathname) {
+  if (typeof input !== 'string') return null;
   try {
     const url = new URL(input, window.location.href);
     return url.origin === window.location.origin && !url.username && !url.password && !url.search && !url.hash &&
-      !/%2f|%5c/i.test(url.pathname) && url.pathname.startsWith(`${appSubURL}/`) ? url : null;
+      !/%2f|%5c/i.test(url.pathname) && url.pathname.startsWith(`${appPathname}/`) ? url : null;
   } catch {
     return null;
   }
@@ -39,6 +35,23 @@ function nativeAPIPath(pathname, appSubURL, suffix) {
   if (!prefix.startsWith(appSubURL)) return false;
   const scope = prefix.slice(appSubURL.length);
   return scope === '' || scope === '/user/settings' || scope === '/admin' || /^\/[^/]+\/[^/]+$/.test(scope);
+}
+
+function ownerPageAPIPath(pathname, appSubURL, extensionId) {
+  const segments = pathname.slice(appSubURL.length).split('/');
+  return segments.length === 8 && segments[0] === '' && segments[1] === '-' &&
+    segments[2] === 'native' && segments[3] === 'pages' && segments[4] === extensionId &&
+    mountSlug.test(segments[5]) && segments[6] === 'api' && segments[7] === '';
+}
+
+function mountDirectPatterns(value) {
+  if (value === undefined) return [];
+  try {
+    const patterns = JSON.parse(value);
+    return Array.isArray(patterns) && patterns.every(validDirectPattern) ? patterns : null;
+  } catch {
+    return null;
+  }
 }
 
 function scopedTarget(relativePath, apiHref) {
@@ -55,25 +68,30 @@ const browserContractVersion = 1;
 
 /** Validate a contribution root's dataset without importing or fetching. */
 export function parseMountDataset(root) {
-  const {appSubUrl, extensionEntry, extensionId, extensionPageId, extensionPanelId, extensionOwnerId, extensionApiBase, extensionAssetBase, extensionSessionGeneration, extensionRepositoryId, extensionContractVersion} = root.dataset;
+  const {appSubUrl, extensionEntry, extensionId, extensionPageId, extensionPanelId, extensionOwnerId, extensionApiBase, extensionAssetBase, extensionSessionGeneration, extensionRepositoryId, extensionContractVersion, extensionDirectPatterns} = root.dataset;
   const mode = extensionPageId ? 'page' : 'panel';
   const contributionId = extensionPageId || extensionPanelId;
-  if (!extensionId || !contributionId || !extensionSessionGeneration || extensionContractVersion !== String(browserContractVersion)) return {ok: false};
-  if (extensionOwnerId !== undefined && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(extensionOwnerId)) return {ok: false};
-  const entry = nativeMountURL(extensionEntry, appSubUrl);
-  const assets = nativeMountURL(extensionAssetBase, appSubUrl);
-  const api = nativeMountURL(extensionApiBase, appSubUrl);
+  if (extensionPageId && extensionPanelId) return {ok: false};
+  if (!mountSlug.test(extensionId ?? '') || !mountSlug.test(contributionId ?? '') || !extensionSessionGeneration) return {ok: false};
+  if (extensionOwnerId !== undefined && !mountSlug.test(extensionOwnerId)) return {ok: false};
+  const appPathname = appSubURLPathname(appSubUrl);
+  if (appPathname === null) return {ok: false};
+  const directPatterns = mountDirectPatterns(extensionDirectPatterns);
+  if (directPatterns === null) return {ok: false};
+  const entry = nativeMountURL(extensionEntry, appPathname);
+  const assets = nativeMountURL(extensionAssetBase, appPathname);
+  const api = nativeMountURL(extensionApiBase, appPathname);
   const apiSuffix = `/-/native/${mode}s/${extensionId}/${contributionId}/api/`;
   // A linked shared owner's panel carries the page's canonical API base
   // (NFX-C04/H-OWNER): one API identity for both modes.
   const ownerPageAPI = mode === 'panel' && Boolean(extensionOwnerId) && Boolean(api) &&
-    api.pathname.includes(`/-/native/pages/${extensionId}/`) && api.pathname.endsWith('/api/');
-  if (!entry || !assets || !api || assets.pathname !== `${appSubUrl}/-/native/assets/${extensionId}/` ||
-      !entry.href.startsWith(assets.href) || (!nativeAPIPath(api.pathname, appSubUrl, apiSuffix) && !ownerPageAPI)) {
+    ownerPageAPIPath(api.pathname, appPathname, extensionId);
+  if (!entry || !assets || !api || assets.pathname !== `${appPathname}/-/native/assets/${extensionId}/` ||
+      !entry.href.startsWith(assets.href) || (!nativeAPIPath(api.pathname, appPathname, apiSuffix) && !ownerPageAPI)) {
     return {ok: false};
   }
   return {
-    ok: true, mode, contributionId,
+    ok: extensionContractVersion === String(browserContractVersion), mode, contributionId,
     entryHref: entry.href,
     apiHref: api.href,
     assetHref: assets.href,
@@ -81,7 +99,24 @@ export function parseMountDataset(root) {
     ownerId: extensionOwnerId,
     sessionGeneration: extensionSessionGeneration,
     repositoryId: extensionRepositoryId,
+    contractVersion: extensionContractVersion,
+    directPatterns,
   };
+}
+
+/** Identity of the admitted contribution definition, independent of display facts. */
+export function mountIdentity(parsed, {includeContractVersion = true} = {}) {
+  if (!parsed?.mode || includeContractVersion && !parsed.ok) return null;
+  return JSON.stringify([
+    parsed.mode, parsed.extensionId, parsed.contributionId, parsed.ownerId ?? '',
+    parsed.entryHref, parsed.apiHref, parsed.assetHref, appSubURLPathname(parsed.appSubUrl),
+    parsed.sessionGeneration, ...(includeContractVersion ? [parsed.contractVersion ?? ''] : []),
+  ]);
+}
+
+/** Shared owners are private to one extension's owner namespace. */
+export function mountOwnerKey(parsed) {
+  return parsed?.ok && parsed.ownerId ? JSON.stringify([parsed.extensionId, parsed.ownerId]) : null;
 }
 
 /** Scoped fetch bound to the contribution apiBase and session generation. */

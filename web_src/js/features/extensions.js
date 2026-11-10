@@ -1,34 +1,11 @@
 import {retirePageFeatures, setPageConfig, readNativePageData, initPageFeatures, setNativeNavigator} from '../native-lifecycle.js';
 import {submitEventSubmitter} from '../utils/dom.js';
-import {mountContribution, parseMountDataset} from './extension-mount.js';
-
-function isAuthPath(pathname) {
-  return /(?:^|\/)user\/(?:login|logout|sign_up|forgot_password|forget_password|reset_password|recover_account|activate|activate_email|two_factor|webauthn|oauth2|openid|link_account|link_account_signin|link_account_signup)(?:\/|$)/.test(pathname) ||
-    /(?:^|\/)user\/settings\/(?:change_password|security|applications|keys)(?:\/|$)/.test(pathname) ||
-    /(?:^|\/)(?:install|login\/oauth|login\/openid|oauth2|openid)(?:\/|$)/.test(pathname);
-}
-
-function hasCredentialQuery(url) {
-  return Array.from(url.searchParams.keys()).some((key) => /^(?:token|password|secret|client_secret|authorization|auth|code|credential|session|api_key|private_key|.*_token)$/i.test(key));
-}
+import {mountContribution, parseMountDataset, mountIdentity, mountOwnerKey} from './extension-mount.js';
+import {classifyNavigation, validAppSubURL, appSubURLPathname, matchesDirectPattern} from './extension-navigation-policy.js';
 
 /** Classify a browser destination for host-handled native navigation. */
 export function classifyWorkspaceNavigation(input, base, origin, appSubPath = '') {
-  let url;
-  try {
-    url = new URL(input, base);
-  } catch {
-    return {kind: 'reject'};
-  }
-  if (['mailto:', 'tel:'].includes(url.protocol)) return {kind: 'top', url: url.href};
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return {kind: 'reject'};
-  if (/%2f|%5c/i.test(url.pathname)) return {kind: 'reject'};
-  if (appSubPath && !url.pathname.startsWith(`${appSubPath}/`)) return {kind: 'top', url: url.href};
-  if (url.origin !== origin || isAuthPath(url.pathname) || hasCredentialQuery(url)) {
-    return {kind: 'top', url: url.href};
-  }
-  if (/(?:^|\/)-\/native(?:\/|$)/.test(url.pathname)) return {kind: 'reject'};
-  return {kind: 'native', url: url.href, path: `${url.pathname}${url.search}${url.hash}`};
+  return classifyNavigation(input, base, origin, appSubPath);
 }
 
 export function workspacePath(input, base, origin, appSubPath = '') {
@@ -69,23 +46,15 @@ export function workspaceDirectPath(pathname, appSubPath = '', patterns = []) {
   return patterns.some((pattern) => typeof pattern === 'string' && matchDirectPattern(candidate, pattern));
 }
 
-function directPatterns(home) {
-  try {
-    const parsed = JSON.parse(home?.dataset.extensionSubroutes ?? '[]');
-    return Array.isArray(parsed) ? parsed.filter((pattern) => typeof pattern === 'string') : [];
-  } catch {
-    return [];
-  }
+function ownerDirectPath(pathname, root) {
+  const parsed = parseMountDataset(root);
+  if (!parsed.ok || !parsed.ownerId) return false;
+  const prefix = appSubURLPathname(parsed.appSubUrl);
+  return pathname.startsWith(`${prefix}/`) && matchesDirectPattern(pathname.slice(prefix.length), parsed.directPatterns);
 }
 
 const importExtension = (url) => import(/* webpackIgnore: true */ url);
 const sessionCheckPath = (appSubPath) => `${appSubPath}/-/native/session`;
-
-function validAppSubURL(value) {
-  return typeof value === 'string' && (value === '' ||
-    /^\/[^/\\?#\s]+(?:\/[^/\\?#\s]+)*$/.test(value) &&
-    !/%2f|%5c/i.test(value) && !value.split('/').some((part) => part === '.' || part === '..'));
-}
 
 function focusFragment(hash) {
   let id = hash.slice(1);
@@ -116,34 +85,23 @@ function hasDirtyNativeForm(excludeForm = null) {
   return false;
 }
 
-// Adopted identity: same contribution plus the live session generation plus
-// the browser contract version. Generation mismatch is session change
-// (retire path), never adoption; version skew is refused the same way.
-function pageIdentity(root) {
-  const dataset = root.dataset;
-  return [dataset.extensionId, dataset.extensionPageId, dataset.extensionApiBase, dataset.extensionSessionGeneration, dataset.extensionContractVersion].join('\0');
+function rootIdentity(root, options) {
+  return mountIdentity(parseMountDataset(root), options);
 }
 
 function ownerKey(root) {
-  return root.dataset.extensionOwnerId ? `${root.dataset.extensionId}\0${root.dataset.extensionOwnerId}` : null;
+  return mountOwnerKey(parseMountDataset(root));
 }
 
-// The native renderer re-authorizes panel contributions on every eligible
-// document. Session continuity alone does not retain permission or a changed
-// contribution definition. Repository ID remains a display fact, not identity.
-function panelIdentity(root) {
-  const dataset = root.dataset;
-  return [dataset.extensionId, dataset.extensionPanelId, dataset.extensionOwnerId,
-    dataset.extensionEntry, dataset.extensionApiBase, dataset.extensionAssetBase,
-    dataset.appSubUrl, dataset.extensionSessionGeneration, dataset.extensionContractVersion].join('\0');
+function contributionSlot(parsed) {
+  return parsed.mode ? JSON.stringify([parsed.mode, parsed.extensionId, parsed.contributionId]) : null;
 }
 
-// Loose identity without the contract version: finds entered duplicates
-// that are otherwise identical to a parked owner, so version skew takes
-// the retire+conceal path instead of adoption or a second mount.
-function pageIdentityLoose(root) {
-  const dataset = root.dataset;
-  return [dataset.extensionId, dataset.extensionPageId, dataset.extensionApiBase, dataset.extensionSessionGeneration].join('\0');
+function refreshMountPresentation(root, peer) {
+  for (const name of ['extensionRepositoryId', 'extensionDirectPatterns']) {
+    if (peer.dataset[name] === undefined) delete root.dataset[name];
+    else root.dataset[name] = peer.dataset[name];
+  }
 }
 
 function liveSessionMatches(url, generation, fetcher) {
@@ -190,8 +148,7 @@ export function initExtensionPages(importer = importExtension, fetcher = (...arg
       };
       if (home?.hasAttribute('hidden')) {
         owner.update({...facts, mode: 'panel', visible: false});
-      } else if (owner.root.dataset.extensionOwnerId &&
-        workspaceDirectPath(window.location.pathname, owner.root.dataset.appSubUrl ?? '', directPatterns(home))) {
+      } else if (ownerDirectPath(window.location.pathname, owner.root)) {
         owner.update({...facts, mode: 'page', visible: true});
       }
     }
@@ -253,9 +210,10 @@ export function initExtensionPages(importer = importExtension, fetcher = (...arg
     if (!home || leaving) return;
     const entered = new Map();
     for (const root of enteredHome.querySelectorAll('[data-extension-panel]')) {
-      if (!parseMountDataset(root).ok || root.dataset.extensionSessionGeneration !== home.dataset.extensionSessionGeneration ||
-          root.dataset.appSubUrl !== home.dataset.appSubUrl) continue;
-      entered.set(panelIdentity(root), root);
+      const parsed = parseMountDataset(root);
+      if (!parsed.ok || parsed.sessionGeneration !== home.dataset.extensionSessionGeneration ||
+          appSubURLPathname(parsed.appSubUrl) !== appSubURLPathname(home.dataset.appSubUrl)) continue;
+      entered.set(mountIdentity(parsed), root);
     }
     panelOwnerKeys.clear();
     for (const root of entered.values()) {
@@ -263,11 +221,10 @@ export function initExtensionPages(importer = importExtension, fetcher = (...arg
       if (key) panelOwnerKeys.add(key);
     }
     for (const root of home.querySelectorAll('[data-extension-panel]')) {
-      const peer = entered.get(panelIdentity(root));
+      const peer = entered.get(rootIdentity(root));
       if (peer) {
-        entered.delete(panelIdentity(root));
-        if (peer.dataset.extensionRepositoryId === undefined) delete root.dataset.extensionRepositoryId;
-        else root.dataset.extensionRepositoryId = peer.dataset.extensionRepositoryId;
+        entered.delete(rootIdentity(root));
+        refreshMountPresentation(root, peer);
         continue;
       }
       // Withdrawn admissions retire even when the session generation is
@@ -346,22 +303,33 @@ export function initExtensionPages(importer = importExtension, fetcher = (...arg
     }
     const entered = new Map();
     const enteredLoose = new Map();
+    const enteredSlots = new Map();
+    const refused = [];
     for (const root of document.querySelectorAll('[data-extension-page]')) {
-      if (!entered.has(pageIdentity(root))) entered.set(pageIdentity(root), root);
-      else if (!root.hasAttribute('data-extension-mounted')) mountRoot(root);
-      if (!enteredLoose.has(pageIdentityLoose(root))) enteredLoose.set(pageIdentityLoose(root), root);
+      if (park?.contains(root)) continue;
+      const parsed = parseMountDataset(root);
+      const identity = mountIdentity(parsed);
+      const loose = mountIdentity(parsed, {includeContractVersion: false});
+      if (identity) {
+        if (!entered.has(identity)) entered.set(identity, root);
+        else if (!root.hasAttribute('data-extension-mounted')) mountRoot(root);
+      } else {
+        refused.push(root);
+      }
+      if (loose && !enteredLoose.has(loose)) enteredLoose.set(loose, root);
+      const slot = contributionSlot(parsed);
+      if (slot) enteredSlots.set(slot, root);
     }
     const panelsVisible = home ? !home.hasAttribute('hidden') : true;
     const owned = new Set();
     for (const owner of Array.from(mounted)) {
       const isPage = pageRoots.has(owner.root);
       if (isPage && park !== null && park.contains(owner.root)) {
-        const duplicate = entered.get(pageIdentity(owner.root));
+        const duplicate = entered.get(rootIdentity(owner.root));
         if (duplicate && duplicate !== owner.root) {
-          entered.delete(pageIdentity(owner.root));
+          entered.delete(rootIdentity(owner.root));
           duplicate.replaceWith(owner.root);
-          if (duplicate.dataset.extensionRepositoryId === undefined) delete owner.root.dataset.extensionRepositoryId;
-          else owner.root.dataset.extensionRepositoryId = duplicate.dataset.extensionRepositoryId;
+          refreshMountPresentation(owner.root, duplicate);
           owned.add(owner.root);
           owner.update({...facts, mode: 'page', visible: true});
           owner.resume({sessionGeneration: owner.root.dataset.extensionSessionGeneration});
@@ -371,11 +339,18 @@ export function initExtensionPages(importer = importExtension, fetcher = (...arg
         // contract version is missing or differs is never adopted and
         // never mounted; the parked owner retires and both roots leave
         // the document. Checked before any adoption or second mount.
-        const skewed = enteredLoose.get(pageIdentityLoose(owner.root));
+        const skewed = enteredLoose.get(rootIdentity(owner.root, {includeContractVersion: false}));
         if (skewed && skewed !== owner.root) {
-          entered.delete(pageIdentity(skewed));
-          entered.delete(pageIdentity(owner.root));
+          entered.delete(rootIdentity(skewed));
+          entered.delete(rootIdentity(owner.root));
           skewed.remove();
+          owner.root.remove();
+          mounted.splice(mounted.indexOf(owner), 1);
+          pageRoots.delete(owner.root);
+          owner.retire('contribution-unavailable');
+          continue;
+        }
+        if (enteredSlots.has(contributionSlot(parseMountDataset(owner.root)))) {
           owner.root.remove();
           mounted.splice(mounted.indexOf(owner), 1);
           pageRoots.delete(owner.root);
@@ -399,14 +374,16 @@ export function initExtensionPages(importer = importExtension, fetcher = (...arg
       // A linked shared owner's retained panel presents in page mode on
       // its owner's direct paths (NFX-C04/H-OWNER).
       const routePath = typeof facts.route === 'string' ? facts.route.split(/[?#]/)[0] : '';
-      const ownerDirect = !isPage && panelsVisible && Boolean(owner.root.dataset.extensionOwnerId) &&
-        workspaceDirectPath(routePath, owner.root.dataset.appSubUrl ?? '', directPatterns(home));
+      const ownerDirect = !isPage && panelsVisible && ownerDirectPath(routePath, owner.root);
       owner.update({...facts, mode: isPage || ownerDirect ? 'page' : 'panel', visible: isPage ? true : panelsVisible});
     }
     for (const root of entered.values()) {
       if (owned.has(root)) continue;
       pageRoots.add(root);
       mountRoot(root);
+    }
+    for (const root of refused) {
+      if (root.isConnected) mountRoot(root);
     }
     if (panelsVisible) {
       for (const root of home?.querySelectorAll('[data-extension-panel]') ?? []) mountRoot(root);

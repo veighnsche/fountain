@@ -1,9 +1,8 @@
 {{/* NFX-A04/H-C: a declared shared owner is presented by its one retained
 panel instance in the panels home. When that linked panel is rendered,
 the page slot emits no competing mount; otherwise the page mounts here. */}}
-{{$ownerPresented := false}}
-{{if and .Extension.OwnerID .ExtensionPanelsHome}}{{range .ExtensionPanels}}{{if and .OwnerID (eq .OwnerID $.Extension.OwnerID)}}{{$ownerPresented = true}}{{end}}{{end}}{{end}}
+{{$ownerPresented := .ExtensionOwnerPresented}}
 <section class="extension-page{{if $ownerPresented}} extension-page-owner-presented{{end}}" {{if $ownerPresented}}aria-label="{{.Extension.Title}}"{{else}}aria-labelledby="extension-page-title"{{end}}>
 	{{if not $ownerPresented}}<h1 id="extension-page-title" class="ui dividing header">{{.Extension.Title}}</h1>{{end}}
-	{{if not $ownerPresented}}<div class="extension-page-mount" data-extension-page data-extension-contract-version="{{.BrowserContractVersion}}" data-app-sub-url="{{AppSubUrl}}" data-extension-id="{{.Extension.ID}}" data-extension-page-id="{{.Extension.PageID}}"{{if .Extension.OwnerID}} data-extension-owner-id="{{.Extension.OwnerID}}"{{end}} data-extension-entry="{{.ExtensionEntry}}" data-extension-api-base="{{.ExtensionAPIBase}}" data-extension-asset-base="{{.ExtensionAssetBase}}" data-extension-session-generation="{{.ExtensionSessionGeneration}}"{{if .ExtensionRepositoryID}} data-extension-repository-id="{{.ExtensionRepositoryID}}"{{end}}></div>{{end}}
+	{{if not $ownerPresented}}{{template "extensions/mount" .ExtensionMount}}{{end}}
 </section>

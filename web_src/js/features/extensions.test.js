@@ -697,7 +697,9 @@ test('a declared shared owner mounts once on its retained panel root', async () 
 test('owner-presented page slots emit no competing mount and the home supplies responsive space', () => {
   const content = readFileSync('templates/extensions/content.tmpl', 'utf8');
   expect(content).toContain('$ownerPresented');
-  expect(content).toContain('{{if not $ownerPresented}}<div class="extension-page-mount" data-extension-page');
+  expect(content).toContain('{{if not $ownerPresented}}{{template "extensions/mount" .ExtensionMount}}');
+  const mount = readFileSync('templates/extensions/mount.tmpl', 'utf8');
+  expect(mount).toContain('class="extension-page-mount" data-extension-page');
   expect(content).toContain('extension-page-owner-presented');
   const css = readFileSync('web_src/css/features/extensions.css', 'utf8');
   expect(css).toContain('[data-extension-page][data-extension-owner-presented] { display: none !important; }');
@@ -709,7 +711,7 @@ test('owner-presented page slots emit no competing mount and the home supplies r
 test('a shared owner without a page root receives initial page-mode presentation', async () => {
   const savedConfig = window.config;
   window.history.replaceState(null, '', '/workspace');
-  const ownerAttrs = 'data-extension-owner-id="workspace" data-extension-entry="/-/native/assets/example/main.js" data-extension-api-base="/-/native/pages/example/spaces/api/"';
+  const ownerAttrs = 'data-extension-owner-id="workspace" data-extension-direct-patterns=\'["/workspace"]\' data-extension-entry="/-/native/assets/example/main.js" data-extension-api-base="/-/native/pages/example/spaces/api/"';
   // Server-suppressed page slot (NFX-A04/H-C): only the retained panel root.
   document.body.innerHTML = liveMarkup({
     content: directContent('Global Workspace'),

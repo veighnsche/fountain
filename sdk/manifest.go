@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"forgejo.org/extension-sdk/navigationpolicy"
 )
 
 const Protocol = 1
@@ -316,7 +318,7 @@ func (p Page) MatchSubroute(suffix string) (Subroute, map[string]string, bool) {
 		for i, segment := range pattern {
 			if strings.HasPrefix(segment, "{") {
 				value := segments[i]
-				if value == "" || len(value) > 255 {
+				if value == "" || len(value) > navigationpolicy.MaxOpaqueRouteSegmentBytes() {
 					matched = false
 					break
 				}
