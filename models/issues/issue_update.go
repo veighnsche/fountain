@@ -367,6 +367,15 @@ func NewIssueWithIndex(ctx context.Context, doer *user_model.User, opts NewIssue
 	if _, err := e.Insert(opts.Issue); err != nil {
 		return err
 	}
+	// Retain creation evidence in the same transaction as the new issue.
+	// Waiting until its first edit leaves an unedited issue unverifiable to
+	// native intake; old rows are deliberately not backfilled from current text.
+	if opts.Issue.ContentVersion == 0 {
+		if err := SaveIssueContentHistory(ctx, opts.Issue.PosterID, opts.Issue.ID, 0,
+			opts.Issue.CreatedUnix, opts.Issue.Content, true); err != nil {
+			return err
+		}
+	}
 
 	if opts.Issue.MilestoneID > 0 {
 		stats.QueueRecalcMilestoneByID(ctx, opts.Issue.MilestoneID)

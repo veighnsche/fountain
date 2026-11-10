@@ -109,13 +109,14 @@ func (s *Service) ReadSnapshot(ctx context.Context, decision extensionauth.Snaps
 		return sdk.NativeSnapshot{}, ErrSnapshotUnavailable
 	}
 	loader := &snapshotLoader{
-		service:    s,
-		decision:   decision,
-		repository: repository,
-		user:       user,
-		permission: permission,
-		limit:      req.Limit,
-		cursor:     req.Cursor,
+		service:            s,
+		decision:           decision,
+		repository:         repository,
+		user:               user,
+		permission:         permission,
+		limit:              req.Limit,
+		cursor:             req.Cursor,
+		dependencyLocators: req.DependencyLocators,
 	}
 	if loader.limit <= 0 {
 		loader.limit = sdk.SnapshotPageLimit
@@ -224,13 +225,14 @@ func (s *Service) ReadSnapshot(ctx context.Context, decision extensionauth.Snaps
 }
 
 type snapshotLoader struct {
-	decision   extensionauth.SnapshotReadDecision
-	service    *Service
-	repository *repo_model.Repository
-	user       *user_model.User
-	permission access_model.Permission
-	limit      int
-	cursor     string
+	dependencyLocators bool
+	decision           extensionauth.SnapshotReadDecision
+	service            *Service
+	repository         *repo_model.Repository
+	user               *user_model.User
+	permission         access_model.Permission
+	limit              int
+	cursor             string
 }
 
 func snapshotIDString(id int64) string {
@@ -529,11 +531,11 @@ func (l *snapshotLoader) dependencies(ctx context.Context, index string) (*sdk.S
 	}
 	page := &sdk.SnapshotDependencyPage{IssueID: snapshotIDString(issue.ID), Total: remaining}
 	for _, row := range kept {
-		visible, reason, err := l.dependencyVisible(ctx, row.DependencyID)
+		target, reason, err := l.dependencyTarget(ctx, row.DependencyID)
 		if err != nil {
 			return nil, err
 		}
-		converted, err := issues_model.NewDependencySnapshot(row, visible, reason, true)
+		converted, err := issues_model.NewDependencySnapshot(row, target != nil, reason, true)
 		if err != nil {
 			return nil, ErrSnapshotUnavailable
 		}
@@ -547,40 +549,43 @@ func (l *snapshotLoader) dependencies(ctx context.Context, index string) (*sdk.S
 			HiddenReason: converted.HiddenReason,
 			Complete:     true,
 		}
+		if target != nil && l.dependencyLocators {
+			item.RepositoryID, item.Index = snapshotIDString(target.RepoID), snapshotIDString(target.Index)
+		}
 		page.Items = append(page.Items, item)
 	}
 	page.Complete = len(kept) == remaining
 	return page, nil
 }
 
-// dependencyVisible intersects the target credential restrictions and current
+// dependencyTarget intersects the target credential restrictions and current
 // repository/unit permissions, retaining only the redacted edge when denied.
-func (l *snapshotLoader) dependencyVisible(ctx context.Context, targetID int64) (bool, string, error) {
+func (l *snapshotLoader) dependencyTarget(ctx context.Context, targetID int64) (*issues_model.Issue, string, error) {
 	target, err := issues_model.GetIssueByID(ctx, targetID)
 	if err != nil {
 		if issues_model.IsErrIssueNotExist(err) {
-			return false, issues_model.HiddenReasonNotFound, nil
+			return nil, issues_model.HiddenReasonNotFound, nil
 		}
-		return false, "", ErrSnapshotUnavailable
+		return nil, "", ErrSnapshotUnavailable
 	}
 	targetRepo, err := repo_model.GetRepositoryByID(ctx, target.RepoID)
 	if err != nil {
 		if repo_model.IsErrRepoNotExist(err) {
-			return false, issues_model.HiddenReasonNotFound, nil
+			return nil, issues_model.HiddenReasonNotFound, nil
 		}
-		return false, "", ErrSnapshotUnavailable
+		return nil, "", ErrSnapshotUnavailable
 	}
 	if !l.decision.AllowsRepository(targetRepo.ID, targetRepo.IsPrivate) {
-		return false, issues_model.HiddenReasonNoAccess, nil
+		return nil, issues_model.HiddenReasonNoAccess, nil
 	}
 	permission, err := access_model.GetUserRepoPermission(ctx, targetRepo, l.user)
 	if err != nil {
-		return false, "", ErrSnapshotUnavailable
+		return nil, "", ErrSnapshotUnavailable
 	}
 	if !permission.CanReadIssuesOrPulls(target.IsPull) {
-		return false, issues_model.HiddenReasonNoAccess, nil
+		return nil, issues_model.HiddenReasonNoAccess, nil
 	}
-	return true, "", nil
+	return target, "", nil
 }
 
 // repositoryIssues enumerates open non-PR issues of exactly the loader's

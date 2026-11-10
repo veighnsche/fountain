@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -2302,6 +2303,30 @@ func testNativeDesktopEnrollment(t *testing.T) {
 		if checker := os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_CHECK"); checker != "" {
 			root := os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_ROOT")
 			require.True(t, filepath.IsAbs(root) && strings.HasPrefix(root, "/home/"))
+			if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_INPUTS") == "1" {
+				var repositorySettings map[string]any
+				DecodeJSON(t, call(http.MethodGet, "/api/v1/repos/user2/repo1", nil, http.StatusOK), &repositorySettings)
+				tracker, ok := repositorySettings["internal_tracker"].(map[string]any)
+				require.True(t, ok, "fixture repository has no internal issue tracker")
+				tracker["enable_issue_dependencies"] = true
+				call(http.MethodPatch, "/api/v1/repos/user2/repo1", map[string]any{"internal_tracker": tracker}, http.StatusOK)
+				type issueRef struct {
+					ID     int64 `json:"id"`
+					Number int64 `json:"number"`
+				}
+				var prerequisite, objective issueRef
+				DecodeJSON(t, call(http.MethodPost, "/api/v1/repos/user2/repo1/issues", map[string]string{"title": "Desktop native prerequisite", "body": "Preserve this dependency context."}, http.StatusCreated), &prerequisite)
+				DecodeJSON(t, call(http.MethodPost, "/api/v1/repos/user2/repo1/issues", map[string]string{"title": "Desktop native intake", "body": "Preserve this exact admitted objective.\n"}, http.StatusCreated), &objective)
+				var comment struct {
+					ID int64 `json:"id"`
+				}
+				DecodeJSON(t, call(http.MethodPost, fmt.Sprintf("/api/v1/repos/user2/repo1/issues/%d/comments", objective.Number), map[string]string{"body": "Selected native context.\n"}, http.StatusCreated), &comment)
+				call(http.MethodPost, fmt.Sprintf("/api/v1/repos/user2/repo1/issues/%d/dependencies", objective.Number), map[string]any{"index": prerequisite.Number, "owner": "user2", "repo": "repo1"}, http.StatusCreated)
+				fixture, err := json.Marshal(map[string]any{"number": objective.Number, "id": strconv.FormatInt(objective.ID, 10), "comment": strconv.FormatInt(comment.ID, 10), "dependency": strconv.FormatInt(prerequisite.ID, 10), "dependency_number": prerequisite.Number})
+				require.NoError(t, err)
+				require.NoFileExists(t, filepath.Join(root, "inputs-fixture.json"))
+				require.NoError(t, os.WriteFile(filepath.Join(root, "inputs-fixture.json"), fixture, 0o600))
+			}
 			pair, err := tls.LoadX509KeyPair(filepath.Join(root, "server.pem"), filepath.Join(root, "server.key"))
 			require.NoError(t, err)
 			var lost atomic.Bool
@@ -2376,6 +2401,19 @@ func testNativeDesktopEnrollment(t *testing.T) {
 						http.Error(w, "fixture lost initial controller reply", http.StatusServiceUnavailable)
 						return
 					}
+					for key, values := range recorder.Header() {
+						for _, value := range values {
+							w.Header().Add(key, value)
+						}
+					}
+					w.WriteHeader(recorder.Code)
+					_, _ = w.Write(recorder.Body.Bytes())
+					return
+				}
+				if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_INPUTS") == "1" && strings.HasSuffix(r.URL.Path, "/snapshot") {
+					recorder := httptest.NewRecorder()
+					testWebRoutes.ServeHTTP(recorder, r)
+					require.NoError(t, os.WriteFile(filepath.Join(root, "inputs-snapshot.json"), recorder.Body.Bytes(), 0o600))
 					for key, values := range recorder.Header() {
 						for _, value := range values {
 							w.Header().Add(key, value)

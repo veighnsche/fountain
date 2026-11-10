@@ -66,18 +66,19 @@ type SnapshotAncestryRequest struct {
 // to that actor. Cursor is an opaque decimal after-ID for list families:
 // items carry IDs strictly greater than the cursor, ordered ascending.
 type SnapshotRequest struct {
-	RepositoryID string                   `json:"repository_id"`
-	WriterIDs    []string                 `json:"writer_ids,omitempty"`
-	ActorID      string                   `json:"actor_id"`
-	Families     []string                 `json:"families"`
-	IssueIndex   string                   `json:"issue_index,omitempty"`
-	PullNumber   string                   `json:"pull_number,omitempty"`
-	CommentIDs   []string                 `json:"comment_ids,omitempty"`
-	SHA          string                   `json:"sha,omitempty"`
-	Refs         []string                 `json:"refs,omitempty"`
-	Limit        int                      `json:"limit,omitempty"`
-	Cursor       string                   `json:"cursor,omitempty"`
-	Ancestry     *SnapshotAncestryRequest `json:"ancestry,omitempty"`
+	DependencyLocators bool                     `json:"dependency_locators,omitempty"`
+	RepositoryID       string                   `json:"repository_id"`
+	WriterIDs          []string                 `json:"writer_ids,omitempty"`
+	ActorID            string                   `json:"actor_id"`
+	Families           []string                 `json:"families"`
+	IssueIndex         string                   `json:"issue_index,omitempty"`
+	PullNumber         string                   `json:"pull_number,omitempty"`
+	CommentIDs         []string                 `json:"comment_ids,omitempty"`
+	SHA                string                   `json:"sha,omitempty"`
+	Refs               []string                 `json:"refs,omitempty"`
+	Limit              int                      `json:"limit,omitempty"`
+	Cursor             string                   `json:"cursor,omitempty"`
+	Ancestry           *SnapshotAncestryRequest `json:"ancestry,omitempty"`
 }
 
 func validSnapshotFamily(family string) bool {
@@ -159,6 +160,9 @@ func ValidateSnapshotRequest(req SnapshotRequest) error {
 			return ErrInvalidSnapshotRequest
 		}
 		seen[family] = true
+	}
+	if req.DependencyLocators && !seen[SnapshotFamilyDependencies] {
+		return ErrInvalidSnapshotRequest
 	}
 	if req.IssueIndex != "" && !snapshotDecimalID(req.IssueIndex) {
 		return ErrInvalidSnapshotRequest
@@ -337,6 +341,8 @@ type SnapshotCommentPage struct {
 // removal plus readdition of the same edge; hidden occurrences redact the
 // target so an inaccessible prerequisite blocks without leaking it.
 type SnapshotDependency struct {
+	RepositoryID string `json:"repository_id,omitempty"`
+	Index        string `json:"index,omitempty"`
 	OccurrenceID string `json:"occurrence_id"`
 	IssueID      string `json:"issue_id"`
 	DependencyID string `json:"dependency_id,omitempty"`
