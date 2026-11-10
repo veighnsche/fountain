@@ -54,7 +54,7 @@ func (oa *OAuth2CommonHandlers) AddApp(ctx *context.Context) {
 	// stale.
 	var app *auth.OAuth2Application
 	var secret string
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("owner/%d/oauth2-app", oa.OwnerID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("owner/%d/oauth2-app", oa.OwnerID), 0, nativeoperation_service.AuthorityTarget{Operation: "owner/oauth2-app", ID: oa.OwnerID}, func(ctx std_ctx.Context) error {
 		created, err := auth.CreateOAuth2Application(ctx, auth.CreateOAuth2ApplicationOptions{
 			Name:               form.Name,
 			RedirectURIs:       util.SplitTrimSpace(form.RedirectURIs, "\n"),
@@ -128,7 +128,7 @@ func (oa *OAuth2CommonHandlers) EditSave(ctx *context.Context) {
 	// stale.
 	appID := ctx.ParamsInt64("id")
 	var updated *auth.OAuth2Application
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("oauth2-app/%d", appID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("oauth2-app/%d", appID), 0, nativeoperation_service.AuthorityTarget{Operation: "oauth2-app", ID: appID}, func(ctx std_ctx.Context) error {
 		app, err := auth.UpdateOAuth2Application(ctx, auth.UpdateOAuth2ApplicationOptions{
 			ID:                 appID,
 			Name:               form.Name,
@@ -170,7 +170,7 @@ func (oa *OAuth2CommonHandlers) RegenerateSecret(ctx *context.Context) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	var secret string
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("oauth2-app/%d", app.ID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("oauth2-app/%d", app.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "oauth2-app", ID: app.ID}, func(ctx std_ctx.Context) error {
 		regenerated, err := app.GenerateClientSecret(ctx)
 		if err != nil {
 			return err
@@ -192,7 +192,7 @@ func (oa *OAuth2CommonHandlers) DeleteApp(ctx *context.Context) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	appID := ctx.ParamsInt64("id")
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("oauth2-app/%d", appID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("oauth2-app/%d", appID), 0, nativeoperation_service.AuthorityTarget{Operation: "oauth2-app", ID: appID}, func(ctx std_ctx.Context) error {
 		return auth.DeleteOAuth2Application(ctx, appID, oa.OwnerID)
 	}); err != nil {
 		ctx.ServerError("DeleteOAuth2Application", err)
@@ -209,7 +209,7 @@ func (oa *OAuth2CommonHandlers) RevokeGrant(ctx *context.Context) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	grantID := ctx.ParamsInt64("grantId")
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("oauth2-grant/%d", grantID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("oauth2-grant/%d", grantID), 0, nativeoperation_service.AuthorityTarget{Operation: "oauth2-grant", ID: grantID}, func(ctx std_ctx.Context) error {
 		return auth.RevokeOAuth2Grant(ctx, grantID, oa.OwnerID)
 	}); err != nil {
 		ctx.ServerError("RevokeOAuth2Grant", err)

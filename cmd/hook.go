@@ -346,7 +346,11 @@ func runHookReferenceTransaction(ctx context.Context, c *cli.Command) error {
 	if isWiki, _ := strconv.ParseBool(os.Getenv(repo_module.EnvRepoIsWiki)); isWiki && !strings.HasSuffix(repoName, ".wiki") {
 		repoName += ".wiki"
 	}
-	if repoUser == "" || repoName == "" || len(os.Getenv("SSH_ORIGINAL_COMMAND")) == 0 {
+	origin, err := nativeoperation.GitOrigin(os.Getenv(nativeoperation.EnvGitOrigin), os.Getenv("SSH_ORIGINAL_COMMAND"))
+	if err != nil {
+		return fail(ctx, "", "invalid native Git origin")
+	}
+	if repoUser == "" || repoName == "" || origin == "" {
 		return nil
 	}
 
@@ -368,6 +372,7 @@ func runHookReferenceTransaction(ctx context.Context, c *cli.Command) error {
 
 	extra := private.HookReferenceTransaction(ctx, repoUser, repoName, private.TransactionOptions{
 		Phase:        phase,
+		Origin:       origin,
 		OldCommitIDs: oldCommitIDs,
 		NewCommitIDs: newCommitIDs,
 		RefFullNames: refFullNames,

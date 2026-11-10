@@ -10,6 +10,7 @@ import (
 
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/setting"
 )
 
@@ -52,14 +53,25 @@ func InternalPushingEnvironment(doer *user_model.User, repo *repo_model.Reposito
 // that update refs without a pushing user, such as pull-request ref
 // updates. Callers append the owner's execution capability for binding.
 func RefWriteEnvironment(repo *repo_model.Repository) []string {
-	return append(os.Environ(),
-		EnvRepoName+"="+repo.Name,
+	return RefWriteEnvironmentForTarget(repo, execcontext.TargetCode)
+}
+
+// RefWriteEnvironmentForTarget supplies explicit code/wiki hook identity.
+func RefWriteEnvironmentForTarget(repo *repo_model.Repository, target execcontext.RepositoryTarget) []string {
+	isWiki := target == execcontext.TargetWiki
+	name := repo.Name
+	if isWiki {
+		name += ".wiki"
+	}
+	env := append(os.Environ(),
+		EnvRepoName+"="+name,
 		EnvRepoUsername+"="+repo.OwnerName,
 		EnvRepoID+"="+fmt.Sprintf("%d", repo.ID),
-		EnvRepoIsWiki+"=false",
+		EnvRepoIsWiki+"="+fmt.Sprintf("%t", isWiki),
 		EnvAppURL+"="+setting.AppURL,
 		"SSH_ORIGINAL_COMMAND=gitea-internal",
 	)
+	return execcontext.AppendGitOriginEnv(env, execcontext.GitOriginInternalRef)
 }
 
 // PushingEnvironment returns an os environment to allow hooks to work on push
@@ -97,5 +109,5 @@ func FullPushingEnvironment(author, committer *user_model.User, repo *repo_model
 		environ = append(environ, EnvPusherEmail+"="+committer.Email)
 	}
 
-	return environ
+	return execcontext.AppendGitOriginEnv(environ, execcontext.GitOriginInternalRef)
 }

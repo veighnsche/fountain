@@ -94,7 +94,7 @@ func runGenerateAccessToken(ctx context.Context, c *cli.Command) error {
 	// Create the token. One authority writer owns the token change
 	// before its effects, advancing the native revision so old permission
 	// observations go stale.
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/token", user.ID), 0, func(ctx context.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/token", user.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/token", ID: user.ID}, func(ctx context.Context) error {
 		return auth_model.NewAccessToken(ctx, t)
 	}); err != nil {
 		return err

@@ -244,7 +244,7 @@ func CreateDeployKey(ctx *context.APIContext) {
 	// observations go stale.
 	repoID := ctx.Repo().Repository.ID
 	var key *asymkey_model.DeployKey
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("repo/%d/deploy-key", repoID), repoID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("repo/%d/deploy-key", repoID), repoID, nativeoperation_service.AuthorityTarget{Operation: "repo/deploy-key", ID: repoID}, func(ctx stdCtx.Context) error {
 		var err error
 		key, err = asymkey_model.AddDeployKey(ctx, repoID, form.Title, content, form.ReadOnly)
 		return err
@@ -297,7 +297,7 @@ func DeleteDeploykey(ctx *context.APIContext) {
 	// observations go stale.
 	repoID := ctx.Repo().Repository.ID
 	keyID := ctx.ParamsInt64(":id")
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("repo/%d/deploy-key/%d", repoID, keyID), repoID, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("repo/%d/deploy-key/%d", repoID, keyID), repoID, nativeoperation_service.AuthorityTarget{Operation: "repo/deploy-key", ID: repoID, ID2: keyID}, func(ctx stdCtx.Context) error {
 		return asymkey_service.DeleteDeployKey(ctx, keyID, repoID)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {

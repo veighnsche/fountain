@@ -33,11 +33,7 @@ import (
 var ErrAuthorityLost = errors.New("authority_lost")
 
 // RefLine is one reference-transaction input line.
-type RefLine struct {
-	Old string
-	New string
-	Ref string
-}
+type RefLine = execcontext.RefTransactionLine
 
 // Reference-transaction hook phases.
 const (
@@ -51,6 +47,7 @@ const (
 type TransactionRequest struct {
 	OwnerName string
 	RepoName  string
+	Origin    execcontext.GitExecutionOrigin
 	Phase     string
 	Lines     []RefLine
 	Proof     string
@@ -96,6 +93,23 @@ func (s *Service) ClassifyTransaction(ctx context.Context, req TransactionReques
 		return TransactionDecision{}, err
 	}
 	ownerKind, installationID, operationID := splitOwner(reservation.Owner)
+	if scope.NativeRename != nil {
+		plan := scope.NativeRename
+		repoName := plan.RepositoryName
+		if plan.Target == execcontext.TargetWiki {
+			repoName += ".wiki"
+		}
+		if ownerKind != nativeoperation_model.OwnerOrdinary || req.Origin != execcontext.GitOriginRefRename ||
+			plan.Validate() != nil || plan.RepositoryID != scope.RepositoryID || req.OwnerName != plan.OwnerName || req.RepoName != repoName ||
+			!plan.PermitsTransaction(req.Phase, req.Lines) {
+			return TransactionDecision{Reason: "operation scope mismatch"}, nil
+		}
+		return TransactionDecision{Allowed: true}, nil
+	}
+	if req.Origin == execcontext.GitOriginRefRename {
+		return TransactionDecision{Reason: "native rename launch is not recorded"}, nil
+	}
+
 	wiki := strings.HasSuffix(req.RepoName, ".wiki")
 	if !transactionTargetMatches(reservation.Owner, ownerKind, scope, wiki) {
 		return TransactionDecision{Reason: "operation scope mismatch"}, nil
@@ -120,11 +134,11 @@ func (s *Service) ClassifyTransaction(ctx context.Context, req TransactionReques
 			return TransactionDecision{Reason: "operation scope mismatch"}, nil
 		}
 		for _, line := range req.Lines {
-			ref := line.Ref
-			if wiki && scope.Family == FamilyMirrorSync {
-				ref = "wiki:" + ref
+			target := execcontext.TargetCode
+			if wiki {
+				target = execcontext.TargetWiki
 			}
-			if !scopePermitsRef(scope, ref) {
+			if !scopePermitsRepositoryRef(scope, target, line.Ref) {
 				return TransactionDecision{Reason: "operation scope mismatch"}, nil
 			}
 		}
@@ -191,19 +205,19 @@ func transactionTargetMatches(owner, kind string, scope Scope, wiki bool) bool {
 	if !ok {
 		return !wiki
 	}
-	parts := strings.SplitN(resource, "/", 3)
-	wikiTarget := false
+	target := execcontext.TargetCode
+	var err error
 	switch family {
 	case FamilyRefWrite:
-		wikiTarget = len(parts) == 3 && strings.HasPrefix(parts[2], "wiki/")
+		target, err = execcontext.RefWriteRepositoryTarget(scope.RepositoryTarget, resource)
 	case FamilyReceiveHTTP, FamilyReceiveSSH:
-		wikiTarget = len(parts) >= 2 && parts[1] == "wiki"
+		target, _, err = execcontext.ReceiveRepositoryTarget(scope.RepositoryTarget, resource)
 	case FamilyMirrorSync:
-		// Each mirror ref carries its own main/wiki namespace; the caller
-		// checks membership after adding the wiki prefix where appropriate.
 		return scope.Family == FamilyMirrorSync
+	default:
+		target, err = execcontext.ResolveRepositoryTarget(scope.RepositoryTarget, execcontext.TargetCode)
 	}
-	return wiki == wikiTarget
+	return err == nil && wiki == (target == execcontext.TargetWiki)
 }
 
 func splitOwner(owner string) (kind, installationID, operationID string) {
@@ -563,16 +577,37 @@ func (s *Service) ClassifyCompletion(ctx context.Context, repositoryID int64, re
 		// The native pre-receive permission checks already validated these
 		// options. Persist uncertainty before their setting effects: recovery
 		// must never release this owner from Git ref evidence alone.
-		scope.ReceiveHasPushOptions = true
-		encoded, err := encodeScope(scope)
+		document, err := execcontext.DecodeScopeDocument(reservation.Scope)
 		if err != nil {
 			return TransactionDecision{}, err
 		}
-		if err := nativeoperation_model.UpdateScopeWhere(ctx, reservation.Owner, encoded); err != nil {
+		encoded, err := document.WithReceivePushOptions(true)
+		if err != nil {
+			return TransactionDecision{}, err
+		}
+		if err := nativeoperation_model.UpdateScopeExact(ctx, reservation.Owner, reservation.Generation, document.Original(), encoded); err != nil {
 			return TransactionDecision{}, err
 		}
 	}
 	return TransactionDecision{Allowed: true}, nil
+}
+
+func scopePermitsRepositoryRef(scope Scope, target execcontext.RepositoryTarget, ref string) bool {
+	if scope.Family != FamilyMirrorSync {
+		return scopePermitsRef(scope, ref)
+	}
+	encoded := execcontext.EncodeScopedRefTarget(target, ref)
+	matched := false
+	for _, tuple := range scope.Refs {
+		actual, plain, err := execcontext.ScopedRefRepositoryTarget(tuple)
+		if err != nil {
+			return false
+		}
+		if actual == target && plain == ref && tuple.Ref == encoded {
+			matched = true
+		}
+	}
+	return matched
 }
 
 // scopePermitsRef reports whether an ordinary scope covers a proven ref:

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	nativeoperation_model "forgejo.org/models/nativeoperation"
+	"forgejo.org/modules/log"
 	execcontext "forgejo.org/modules/nativeoperation"
 )
 
@@ -54,21 +55,42 @@ func BoundCallbackContext(ctx context.Context, proof, capabilityPath string) (co
 // matches; anything else is a silent no-op and the caller keeps its
 // existing behavior.
 func RefineReceiveScope(ctx context.Context, proof string, refs []ScopedRef) {
+	if _, err := RefineReceiveScopeChecked(ctx, proof, refs); err != nil {
+		log.Error("Receive scope refinement failed: %v", err)
+	}
+}
+
+// RefinementResult distinguishes an unrelated owner from a persisted refinement.
+type RefinementResult uint8
+
+const (
+	RefinementNotApplicable RefinementResult = iota
+	RefinementUpdated
+)
+
+// RefineReceiveScopeChecked reports persistence and proof failures before hook admission.
+func RefineReceiveScopeChecked(ctx context.Context, proof string, refs []ScopedRef) (RefinementResult, error) {
 	if proof == "" || len(refs) == 0 {
-		return
+		return RefinementNotApplicable, nil
 	}
 	reservation, err := nativeoperation_model.ReadReservation(ctx)
-	if err != nil || reservation.Owner == "" {
-		return
+	if err != nil {
+		return RefinementNotApplicable, err
+	}
+	if reservation.Owner == "" {
+		return RefinementNotApplicable, nil
+	}
+	document, err := execcontext.DecodeScopeDocument(reservation.Scope)
+	if err != nil {
+		return RefinementNotApplicable, err
+	}
+	if family := document.Scope().Family; family != FamilyReceiveHTTP && family != FamilyReceiveSSH {
+		return RefinementNotApplicable, nil
 	}
 	if !execcontext.VerifyProof(reservation.Verifier, proof) {
-		return
+		return RefinementNotApplicable, nativeoperation_model.ErrBusy
 	}
-	scope, err := decodeScope(reservation.Scope)
-	if err != nil || (scope.Family != FamilyReceiveHTTP && scope.Family != FamilyReceiveSSH) {
-		return
-	}
-	_ = UpdateScopeRefs(ctx, reservation.Owner, refs)
+	return refineScopeRefs(ctx, reservation, document, refs)
 }
 
 // RefineCollabPullScope records the derived PR ref a pull-creation owner
@@ -81,27 +103,53 @@ func RefineReceiveScope(ctx context.Context, proof string, refs []ScopedRef) {
 // and offline recovery keeps fencing the multi-statement creation for
 // intervention.
 func RefineCollabPullScope(ctx context.Context, proof string, refs []ScopedRef) {
+	if _, err := RefineCollabPullScopeChecked(ctx, proof, refs); err != nil {
+		log.Error("Pull scope refinement failed: %v", err)
+	}
+}
+
+// RefineCollabPullScopeChecked reports failures while binding a derived pull ref.
+func RefineCollabPullScopeChecked(ctx context.Context, proof string, refs []ScopedRef) (RefinementResult, error) {
 	if proof == "" || len(refs) == 0 {
-		return
+		return RefinementNotApplicable, nil
 	}
 	reservation, err := nativeoperation_model.ReadReservation(ctx)
-	if err != nil || reservation.Owner == "" {
-		return
+	if err != nil {
+		return RefinementNotApplicable, err
 	}
-	if !execcontext.VerifyProof(reservation.Verifier, proof) {
-		return
+	if reservation.Owner == "" {
+		return RefinementNotApplicable, nil
 	}
 	family, resource, ok := execcontext.SplitOrdinaryResource(reservation.Owner)
-	if !ok || family != FamilyCollaboration || !strings.HasPrefix(resource, "pull/new/") {
-		return
+	if !ok || family != FamilyCollaboration {
+		return RefinementNotApplicable, nil
+	}
+	claim, err := execcontext.ParseCollabResource(resource)
+	if err != nil || claim.Kind != "pull" || claim.Op != "create" {
+		return RefinementNotApplicable, nil
 	}
 	for _, ref := range refs {
 		if !strings.HasPrefix(ref.Ref, "refs/pull/") {
-			return
+			return RefinementNotApplicable, nil
 		}
 	}
-	if _, err := decodeScope(reservation.Scope); err != nil {
-		return
+	if !execcontext.VerifyProof(reservation.Verifier, proof) {
+		return RefinementNotApplicable, nativeoperation_model.ErrBusy
 	}
-	_ = UpdateScopeRefs(ctx, reservation.Owner, refs)
+	document, err := execcontext.DecodeScopeDocument(reservation.Scope)
+	if err != nil {
+		return RefinementNotApplicable, err
+	}
+	return refineScopeRefs(ctx, reservation, document, refs)
+}
+
+func refineScopeRefs(ctx context.Context, reservation *nativeoperation_model.Reservation, document *execcontext.ScopeDocument, refs []ScopedRef) (RefinementResult, error) {
+	encoded, err := document.UpdateRefs(refs)
+	if err != nil {
+		return RefinementNotApplicable, err
+	}
+	if err := nativeoperation_model.UpdateScopeExact(ctx, reservation.Owner, reservation.Generation, document.Original(), encoded); err != nil {
+		return RefinementNotApplicable, err
+	}
+	return RefinementUpdated, nil
 }

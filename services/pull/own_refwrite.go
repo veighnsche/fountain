@@ -5,11 +5,9 @@ package pull
 
 import (
 	"context"
-	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	execcontext "forgejo.org/modules/nativeoperation"
@@ -17,22 +15,12 @@ import (
 	"forgejo.org/services/nativeownership"
 )
 
-// refWriteScope mirrors the service Scope JSON fields the pull ref writers
-// record. Unknown fields in either direction are ignored by encoding/json,
-// so service-side additions never break this projection.
-type refWriteScope struct {
-	Kind         string `json:"kind"`
-	Family       string `json:"family,omitempty"`
-	RepositoryID int64  `json:"repository_id"`
-	Ref          string `json:"ref,omitempty"`
-	OldOID       string `json:"old_oid,omitempty"`
-	NewOID       string `json:"new_oid,omitempty"`
-	PRNumber     int64  `json:"pr_number,omitempty"`
-}
+// refWriteScope retains the pull writer's name for the shared persisted scope.
+type refWriteScope = execcontext.Scope
 
 // familyRefWrite names the direct single-ref native writers. It must equal
 // the service family of the same writers.
-const familyRefWrite = "ref-write"
+const familyRefWrite = execcontext.FamilyRefWrite
 
 // ErrMergeNotStarted marks reservation contention before the merge callback.
 // Deferred automerges may retry this refusal, never an error after entry.
@@ -66,7 +54,7 @@ const (
 func withRefWriteOwnership(ctx context.Context, resource string, scope refWriteScope, fn func(ctx context.Context) error) error {
 	scope.Kind = nativeoperation_model.OwnerOrdinary
 	scope.Family = familyRefWrite
-	encoded, err := json.Marshal(scope)
+	encoded, err := execcontext.EncodeWriterScope(scope)
 	if err != nil {
 		return err
 	}
@@ -84,33 +72,23 @@ func recordRefWriteResult(ctx context.Context, newOID string) error {
 	if exec == nil || exec.Owner == "" {
 		return errors.New("ref result recording requires ownership")
 	}
-	if strings.HasPrefix(exec.Owner, "cond:") {
+	if execcontext.IsConditionalOwner(exec.Owner) {
 		return nil
 	}
 	reservation, err := nativeoperation_model.ReadReservation(ctx)
 	if err != nil {
 		return err
 	}
-	if reservation.Owner != exec.Owner {
+	if reservation.Owner != exec.Owner || reservation.Generation != exec.Generation {
 		return nativeoperation_model.ErrWrongOwner
 	}
-	// A nested ref write must preserve the enclosing owner's fields,
-	// including the PR sweep's bound head branch.
-	var scope map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(reservation.Scope), &scope); err != nil {
-		return err
-	}
-	if scope == nil {
-		return errors.New("ref scope is not an object")
-	}
-	encodedOID, err := json.Marshal(newOID)
+	document, err := execcontext.DecodeScopeDocument(reservation.Scope)
 	if err != nil {
 		return err
 	}
-	scope["new_oid"] = encodedOID
-	encoded, err := json.Marshal(scope)
+	encoded, err := document.WithRefResult(newOID)
 	if err != nil {
 		return err
 	}
-	return nativeoperation_model.UpdateScopeWhere(ctx, exec.Owner, string(encoded))
+	return nativeoperation_model.UpdateScopeExact(ctx, exec.Owner, exec.Generation, document.Original(), encoded)
 }

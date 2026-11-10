@@ -18,7 +18,7 @@ func CreateTeamInvite(ctx context.Context, inviter *user_model.User, team *org_m
 	// One authority writer owns the invite before its effects. The mailed
 	// notice is not a native authority effect and stays outside the claim.
 	var invite *org_model.TeamInvite
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("team/%d/invite", team.ID), 0, func(ctx context.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("team/%d/invite", team.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "team/invite", ID: team.ID}, func(ctx context.Context) error {
 		created, err := org_model.CreateTeamInvite(ctx, inviter, team, uname)
 		if err != nil {
 			return err

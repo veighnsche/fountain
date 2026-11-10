@@ -102,7 +102,7 @@ func registerSyncExternalUsers() {
 		// its effects, advancing the native revision so old permission
 		// observations go stale. Nested user, key and team updates reuse
 		// this ownership.
-		return nativeoperation_service.WithAuthorityOwnership(ctx, "directory-sync", 0, func(ctx context.Context) error {
+		return nativeoperation_service.WithAuthorityOwnershipFor(ctx, "directory-sync", 0, nativeoperation_service.AuthorityTarget{}, func(ctx context.Context) error {
 			return auth.SyncExternalUsers(ctx, realConfig.UpdateExisting)
 		})
 	})

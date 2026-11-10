@@ -6,7 +6,6 @@ package context
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	"forgejo.org/modules/extensions"
@@ -14,17 +13,10 @@ import (
 
 // policyErrorStatus preserves a policy veto versus a required runtime outage at
 // the shared web/API error boundary, including wrapped external-auth errors.
-// Native-mutation contention maps to 503 so every participating writer
-// reports busy uniformly without per-router handling. It matches the
-// models-level reservation errors; the service package cannot be imported
-// here (import cycle through the pull service), so the service-level
-// reservation sentinel — which shares the models sentinel's message and
-// documents the same HTTP 503 intent — is matched by its text.
+// Native-mutation contention maps to 503 through the neutral typed sentinel
+// shared by model and service adapters; this package need not import services.
 func policyErrorStatus(err error) int {
 	if errors.Is(err, nativeoperation_model.ErrBusy) || errors.Is(err, nativeoperation_model.ErrInhibited) {
-		return http.StatusServiceUnavailable
-	}
-	if err != nil && strings.Contains(err.Error(), nativeoperation_model.ErrBusy.Error()) {
 		return http.StatusServiceUnavailable
 	}
 	if errors.Is(err, extensions.ErrRequiredPolicyUnavailable) {

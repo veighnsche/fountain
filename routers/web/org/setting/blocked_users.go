@@ -87,7 +87,7 @@ func BlockedUsersUnblock(ctx *context.Context) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	orgID := ctx.Org.Organization.ID
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("org/%d/unblock/%d", orgID, u.ID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("org/%d/unblock/%d", orgID, u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "org/unblock", ID: orgID, ID2: u.ID}, func(ctx std_ctx.Context) error {
 		return user_model.UnblockUser(ctx, orgID, u.ID)
 	}); err != nil {
 		ctx.ServerError("UnblockUser", err)

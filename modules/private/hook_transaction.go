@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"forgejo.org/modules/git"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/setting"
 )
 
@@ -19,6 +20,7 @@ import (
 // proof authenticates the execution in addition to the channel's internal
 // token, and must never be logged.
 type TransactionOptions struct {
+	Origin       execcontext.GitExecutionOrigin
 	Phase        string
 	OldCommitIDs []string
 	NewCommitIDs []string

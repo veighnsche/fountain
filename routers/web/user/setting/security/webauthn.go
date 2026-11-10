@@ -106,7 +106,7 @@ func WebauthnRegisterPost(ctx *context.Context) {
 	// change before its effects, advancing the native revision so old
 	// permission observations go stale.
 	doerID := ctx.Doer.ID
-	if err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/webauthn", doerID), 0, func(ctx std_ctx.Context) error {
+	if err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/webauthn", doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/webauthn", ID: doerID}, func(ctx std_ctx.Context) error {
 		_, err := auth.CreateCredential(ctx, doerID, name, cred)
 		return err
 	}); err != nil {
@@ -135,7 +135,7 @@ func WebauthnDelete(ctx *context.Context) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	doerID := ctx.Doer.ID
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/webauthn", doerID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/webauthn", doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/webauthn", ID: doerID}, func(ctx std_ctx.Context) error {
 		_, err := auth.DeleteCredential(ctx, form.ID, doerID)
 		return err
 	}); err != nil {

@@ -44,7 +44,7 @@ func UnblockUser(ctx *context.Context) {
 	// stale.
 	doerID := ctx.Doer.ID
 	blockedID := ctx.FormInt64("user_id")
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/unblock/%d", doerID, blockedID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/unblock/%d", doerID, blockedID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/unblock", ID: doerID, ID2: blockedID}, func(ctx std_ctx.Context) error {
 		return user_model.UnblockUser(ctx, doerID, blockedID)
 	}); err != nil {
 		ctx.ServerError("UnblockUser", err)

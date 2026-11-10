@@ -51,7 +51,7 @@ func DeleteAccountLink(ctx *context.Context) {
 		// effects, advancing the native revision so old permission
 		// observations go stale.
 		doer := ctx.Doer
-		if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/account-link", doer.ID), 0, func(ctx std_ctx.Context) error {
+		if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/account-link", doer.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/account-link", ID: doer.ID}, func(ctx std_ctx.Context) error {
 			_, err := user_model.RemoveAccountLink(ctx, doer, id)
 			return err
 		}); err != nil {

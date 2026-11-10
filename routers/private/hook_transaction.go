@@ -38,12 +38,20 @@ func HookReferenceTransaction(ctx *context.PrivateContext) {
 	// no-ops, so other families keep their strict checking. A
 	// pull-creation owner likewise declares its derived PR ref, whose
 	// name is unknowable at claim time.
-	nativeoperation_service.RefineReceiveScope(ctx, opts.ExecProof, scoped)
-	nativeoperation_service.RefineCollabPullScope(ctx, opts.ExecProof, scoped)
+	_, refineErr := nativeoperation_service.RefineReceiveScopeChecked(ctx, opts.ExecProof, scoped)
+	if refineErr == nil {
+		_, refineErr = nativeoperation_service.RefineCollabPullScopeChecked(ctx, opts.ExecProof, scoped)
+	}
+	if refineErr != nil {
+		log.Error("Reference transaction scope refinement failed for %s/%s: %v", ownerName, repoName, refineErr)
+		ctx.JSON(http.StatusInternalServerError, private.Response{Err: "transaction check unavailable"})
+		return
+	}
 	decision, err := nativeoperation_service.Default().ClassifyTransaction(ctx, nativeoperation_service.TransactionRequest{
 		OwnerName: ownerName,
 		RepoName:  repoName,
 		Phase:     opts.Phase,
+		Origin:    opts.Origin,
 		Lines:     lines,
 		Proof:     opts.ExecProof,
 	})
@@ -98,7 +106,11 @@ func checkCompletionBinding(ctx *context.PrivateContext, opts *private.HookOptio
 	// declares its own effects, which the gate then admits as listed
 	// scope members. Idle pushes skip above; unproven or non-receive
 	// refinements are silent no-ops.
-	nativeoperation_service.RefineReceiveScope(ctx, opts.ExecProof, scoped)
+	if _, err := nativeoperation_service.RefineReceiveScopeChecked(ctx, opts.ExecProof, scoped); err != nil {
+		log.Error("Completion scope refinement failed for %s/%s: %v", ownerName, repoName, err)
+		ctx.JSON(http.StatusInternalServerError, private.HookPostReceiveResult{Err: "completion binding unavailable"})
+		return false
+	}
 	decision, err := nativeoperation_service.Default().ClassifyCompletion(ctx, repo.ID, refNames, opts.ExecProof, !opts.GetGitPushOptions().Empty())
 	if err != nil {
 		log.Error("Completion binding check failed for %s/%s: %v", ownerName, repoName, err)

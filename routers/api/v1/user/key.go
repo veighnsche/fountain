@@ -225,7 +225,7 @@ func CreateUserPublicKey(ctx *context.APIContext, form api.CreateKeyOption, uid 
 	// advancing the native revision so old permission observations go
 	// stale.
 	var key *asymkey_model.PublicKey
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/key", uid), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/key", uid), 0, nativeoperation_service.AuthorityTarget{Operation: "user/key", ID: uid}, func(ctx std_ctx.Context) error {
 		created, err := asymkey_model.AddPublicKey(ctx, uid, form.Title, content, 0)
 		if err != nil {
 			return err
@@ -325,7 +325,7 @@ func DeletePublicKey(ctx *context.APIContext) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	doer := ctx.Doer()
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("key/%d", id), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("key/%d", id), 0, nativeoperation_service.AuthorityTarget{Operation: "key", ID: id}, func(ctx std_ctx.Context) error {
 		return asymkey_service.DeletePublicKey(ctx, doer, id)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {

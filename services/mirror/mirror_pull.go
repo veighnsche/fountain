@@ -561,10 +561,6 @@ func SyncPullMirror(ctx context.Context, repoID int64) (err error) {
 		})
 }
 
-// wikiScopePrefix namespaces wiki ref entries in a mirror scope so recovery
-// checks them against the wiki repository instead of the main one.
-const wikiScopePrefix = "wiki:"
-
 // recordMirrorPreState records every current ref tip as an identity tuple
 // before the fetch, so recovery can tell a pre-fetch crash (tips unchanged)
 // from a post-fetch one. It refuses without ownership: recording without a
@@ -574,13 +570,13 @@ func recordMirrorPreState(ctx context.Context, m *repo_model.Mirror) error {
 	if exec == nil || exec.Owner == "" {
 		return errors.New("mirror pre-state recording requires ownership")
 	}
-	refs, err := listRefTips(ctx, m.Repo.RepoPath(), "")
+	refs, err := listRefTips(ctx, m.Repo.RepoPath(), nativeoperation.TargetCode)
 	if err != nil {
 		return err
 	}
 	if m.Repo.HasWiki() {
 		if _, err := os.Stat(m.Repo.WikiPath()); err == nil {
-			wikiRefs, err := listRefTips(ctx, m.Repo.WikiPath(), wikiScopePrefix)
+			wikiRefs, err := listRefTips(ctx, m.Repo.WikiPath(), nativeoperation.TargetWiki)
 			if err != nil {
 				return err
 			}
@@ -614,16 +610,16 @@ func recordMirrorPostState(ctx context.Context, m *repo_model.Mirror, results []
 		if err != nil {
 			tip = ""
 		}
-		refs = append(refs, nativeoperation_service.ScopedRef{Ref: result.refName.String(), NewOID: tip})
+		refs = append(refs, nativeoperation_service.ScopedRef{Ref: nativeoperation.EncodeScopedRefTarget(nativeoperation.TargetCode, result.refName.String()), RepositoryTarget: nativeoperation.TargetCode, NewOID: tip})
 	}
 	if m.Repo.HasWiki() {
 		if _, err := os.Stat(m.Repo.WikiPath()); err == nil {
-			wikiTips, err := listRefTips(ctx, m.Repo.WikiPath(), wikiScopePrefix)
+			wikiTips, err := listRefTips(ctx, m.Repo.WikiPath(), nativeoperation.TargetWiki)
 			if err != nil {
 				return err
 			}
 			for _, tip := range wikiTips {
-				refs = append(refs, nativeoperation_service.ScopedRef{Ref: tip.Ref, NewOID: tip.NewOID})
+				refs = append(refs, nativeoperation_service.ScopedRef{Ref: tip.Ref, RepositoryTarget: tip.RepositoryTarget, NewOID: tip.NewOID})
 			}
 		}
 	}
@@ -634,7 +630,7 @@ func recordMirrorPostState(ctx context.Context, m *repo_model.Mirror, results []
 }
 
 // listRefTips returns identity tuples for every ref in one repository.
-func listRefTips(ctx context.Context, repoPath, prefix string) ([]nativeoperation_service.ScopedRef, error) {
+func listRefTips(ctx context.Context, repoPath string, target nativeoperation.RepositoryTarget) ([]nativeoperation_service.ScopedRef, error) {
 	stdout, _, err := git.NewCommand(ctx, "for-each-ref", "--format=%(objectname) %(refname)").
 		RunStdString(&git.RunOpts{Dir: repoPath})
 	if err != nil {
@@ -646,7 +642,7 @@ func listRefTips(ctx context.Context, repoPath, prefix string) ([]nativeoperatio
 		if !ok || sha == "" || ref == "" {
 			continue
 		}
-		refs = append(refs, nativeoperation_service.ScopedRef{Ref: prefix + ref, OldOID: sha, NewOID: sha})
+		refs = append(refs, nativeoperation_service.ScopedRef{Ref: nativeoperation.EncodeScopedRefTarget(target, ref), RepositoryTarget: target, OldOID: sha, NewOID: sha})
 	}
 	return refs, nil
 }

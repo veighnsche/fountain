@@ -366,9 +366,15 @@ func (s *Service) executePRCreate(ctx context.Context, op *nativeoperation_model
 	scope.CompletionOldOID = prCreateOldTip(s.prCreateRefTip(owned, repository.RepoPath(), scope.CompletionRef))
 	scope.CompletionNewOID = pr.ExpectedHeadOID
 	scope.CompletionPhase = PRCreateCompletionPhase
-	if encoded, err := encodeScope(scope); err != nil {
+	reservation, document, err := scopeDocumentForOwner(execcontext.NewContext(releaseCtx, execution), owner)
+	if err != nil {
 		return sdk.OperationRecord{}, terminalResult{}, err
-	} else if err := nativeoperation_model.UpdateScopeWhere(releaseCtx, owner, encoded); err != nil {
+	}
+	encoded, err := document.WithCompletion(scope.CompletionRef, scope.CompletionOldOID, scope.CompletionNewOID, scope.CompletionPhase)
+	if err != nil {
+		return sdk.OperationRecord{}, terminalResult{}, err
+	}
+	if err := nativeoperation_model.UpdateScopeExact(releaseCtx, owner, reservation.Generation, document.Original(), encoded); err != nil {
 		return s.finalizePRCreate(releaseCtx, op, execution, nativeoperation_model.CompletionNeedsIntervention)
 	}
 

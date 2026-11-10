@@ -26,7 +26,7 @@ func TeamAddRepository(ctx context.Context, t *organization.Team, repo *repo_mod
 	// One authority writer owns the team permission change before its
 	// effects, advancing the native revision so old permission
 	// observations go stale.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("team/%d/repo/%d", t.ID, repo.ID), repo.ID, func(ctx context.Context) error {
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("team/%d/repo/%d", t.ID, repo.ID), repo.ID, nativeoperation_service.AuthorityTarget{Operation: "team/repo", ID: t.ID, ID2: repo.ID}, func(ctx context.Context) error {
 		return db.WithTx(ctx, func(ctx context.Context) error {
 			return models.AddRepository(ctx, t, repo)
 		})

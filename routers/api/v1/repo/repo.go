@@ -1185,16 +1185,7 @@ func updateRepoArchivedState(ctx *context.APIContext, opts api.EditRepoOption) e
 // setArchiveRepoStateOwned flips the archive state under one settings
 // ownership; archive flips gate every native writer.
 func setArchiveRepoStateOwned(ctx go_context.Context, repo *repo_model.Repository, isArchived bool) error {
-	return nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
-		nativeoperation_service.FamilyRepoSettings,
-		fmt.Sprintf("%d/archive", repo.ID),
-		nativeoperation_service.Scope{
-			Family:       nativeoperation_service.FamilyRepoSettings,
-			RepositoryID: repo.ID,
-		},
-		func(ctx go_context.Context) error {
-			return repo_model.SetArchiveRepoState(ctx, repo, isArchived)
-		})
+	return repo_service.SetArchiveState(ctx, repo, isArchived)
 }
 
 // updateMirror updates a repo's mirror Interval and EnablePrune

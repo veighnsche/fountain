@@ -5,7 +5,6 @@ package issue
 
 import (
 	"context"
-	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
 	"path/filepath"
 
 	nativeoperation_model "forgejo.org/models/nativeoperation"
@@ -16,14 +15,8 @@ import (
 
 const familyCollaboration = execcontext.FamilyCollaboration
 
-// collabScope mirrors the service Scope JSON fields the collaboration
-// writers record. Unknown fields in either direction are ignored by
-// encoding/json, so service-side additions never break this projection.
-type collabScope struct {
-	Kind         string `json:"kind"`
-	Family       string `json:"family,omitempty"`
-	RepositoryID int64  `json:"repository_id"`
-}
+// collabScope uses the shared persisted ownership contract.
+type collabScope = execcontext.Scope
 
 // withCollabOwnership claims the idle reservation for one issue-service
 // collaboration writer, advancing the revision before its effects, and
@@ -33,7 +26,7 @@ type collabScope struct {
 // (conditional operations, bound hook callbacks, enclosing service
 // claims) never claim twice.
 func withCollabOwnership(ctx context.Context, resource string, repositoryID int64, fn func(ctx context.Context) error) error {
-	encoded, err := json.Marshal(collabScope{
+	encoded, err := execcontext.EncodeWriterScope(collabScope{
 		Kind:         nativeoperation_model.OwnerOrdinary,
 		Family:       familyCollaboration,
 		RepositoryID: repositoryID,

@@ -305,7 +305,7 @@ func AccessTokenCreatePost(ctx *context.Context) {
 	// One authority writer owns the token change before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/token", ctx.Doer.ID), 0, func(ctx stdCtx.Context) error {
+	err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/token", ctx.Doer.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/token", ID: ctx.Doer.ID}, func(ctx stdCtx.Context) error {
 		return db.WithTx(ctx, func(ctx stdCtx.Context) error {
 			if err := auth_model.NewAccessToken(ctx, t); err != nil {
 				return err
@@ -331,7 +331,7 @@ func DeleteAccessToken(ctx *context.Context) {
 	// stale.
 	tokenID := ctx.FormInt64("id")
 	doerID := ctx.Doer.ID
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("token/%d", tokenID), 0, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("token/%d", tokenID), 0, nativeoperation_service.AuthorityTarget{Operation: "token", ID: tokenID}, func(ctx stdCtx.Context) error {
 		return auth_model.DeleteAccessTokenByID(ctx, tokenID, doerID)
 	}); err != nil {
 		ctx.Flash.Error("DeleteAccessTokenByID: " + err.Error())
@@ -350,7 +350,7 @@ func RegenerateAccessToken(ctx *context.Context) {
 	tokenID := ctx.FormInt64("id")
 	doerID := ctx.Doer.ID
 	var t *auth_model.AccessToken
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("token/%d", tokenID), 0, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("token/%d", tokenID), 0, nativeoperation_service.AuthorityTarget{Operation: "token", ID: tokenID}, func(ctx stdCtx.Context) error {
 		regenerated, err := auth_model.RegenerateAccessTokenByID(ctx, tokenID, doerID)
 		if err != nil {
 			return err

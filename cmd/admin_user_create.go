@@ -213,7 +213,7 @@ func runCreateUser(ctx context.Context, c *cli.Command) error {
 	// their effects, advancing the native revision so old permission
 	// observations go stale.
 	var token string
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%s", username), 0, func(ctx context.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%s", username), 0, nativeoperation_service.AuthorityTarget{}, func(ctx context.Context) error {
 		// create the user
 		if err := user_model.CreateUser(ctx, u, overwriteDefault); err != nil {
 			return fmt.Errorf("CreateUser: %w", err)

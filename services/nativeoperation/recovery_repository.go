@@ -67,18 +67,16 @@ func (s *Service) recoverReceive(ctx context.Context, assessment *RecoveryAssess
 	if gone {
 		return fenced(assessment, ReasonRecoveryMissingEvidence, "repository for the held scope no longer exists")
 	}
-	repoPath := repo.RepoPath()
-	if _, target, found := strings.Cut(resource, "/"); found {
-		switch target {
-		case "wiki":
-			repoPath = repo.WikiPath()
-		case "main":
-			// The default path already targets the main repository.
-		default:
-			return fenced(assessment, ReasonRecoveryUnknownFamily, fmt.Sprintf("receive target %q names no known repository", target))
-		}
-	} else if repo.HasWiki() {
+	target, marked, err := execcontext.ReceiveRepositoryTarget(scope.RepositoryTarget, resource)
+	if err != nil {
+		return fenced(assessment, ReasonRecoveryUnknownFamily, "receive target is contradictory or unknown")
+	}
+	if !marked && scope.RepositoryTarget == "" && repo.HasWiki() {
 		return fenced(assessment, ReasonRecoveryUncertainEffect, "unmarked receive against a repository with a wiki names no push target")
+	}
+	repoPath := repo.RepoPath()
+	if target == execcontext.TargetWiki {
+		repoPath = repo.WikiPath()
 	}
 	landed, pending := 0, 0
 	for _, tuple := range scope.Refs {
@@ -128,7 +126,7 @@ func (s *Service) recoverRefWrite(ctx context.Context, assessment *RecoveryAsses
 	if len(parts) != 3 {
 		return fenced(assessment, ReasonRecoveryUnknownFamily, "ref-write resource names no ref-write kind")
 	}
-	kind, refInfo := parts[1], parts[2]
+	kind := parts[1]
 	repo, gone, err := recoveryRepo(ctx, scope.RepositoryID)
 	if err != nil {
 		return RecoveryAssessment{}, err
@@ -136,8 +134,12 @@ func (s *Service) recoverRefWrite(ctx context.Context, assessment *RecoveryAsses
 	if gone {
 		return fenced(assessment, ReasonRecoveryMissingEvidence, "repository for the held scope no longer exists")
 	}
+	target, targetErr := execcontext.RefWriteRepositoryTarget(scope.RepositoryTarget, resource)
+	if targetErr != nil {
+		return fenced(assessment, ReasonRecoveryUnknownFamily, "ref-write target is contradictory or unknown")
+	}
 	repoPath := repo.RepoPath()
-	if strings.HasPrefix(refInfo, "wiki/") {
+	if target == execcontext.TargetWiki {
 		repoPath = repo.WikiPath()
 	}
 	if kind == RefWriteRename {
@@ -428,10 +430,12 @@ func (s *Service) recoverMirrorSync(ctx context.Context, assessment *RecoveryAss
 	}
 	for _, tuple := range scope.Refs {
 		repoPath := repo.RepoPath()
-		ref := tuple.Ref
-		if wikiRef, found := strings.CutPrefix(ref, "wiki:"); found {
+		target, ref, targetErr := execcontext.ScopedRefRepositoryTarget(tuple)
+		if targetErr != nil {
+			return fenced(assessment, ReasonRecoveryUnknownFamily, "mirror ref target is contradictory or unknown")
+		}
+		if target == execcontext.TargetWiki {
 			repoPath = repo.WikiPath()
-			ref = wikiRef
 		}
 		tip, absent, fence, err := s.recoveryTip(ctx, assessment, repoPath, ref)
 		if err != nil || fence {

@@ -1070,7 +1070,7 @@ func SignInOAuthCallback(ctx *context.Context) {
 			// advancing the native revision so old permission
 			// observations go stale.
 			doer := ctx.Doer
-			if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/account-link", doer.ID), 0, func(ctx go_context.Context) error {
+			if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/account-link", doer.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/account-link", ID: doer.ID}, func(ctx go_context.Context) error {
 				return externalaccount.LinkAccountToUser(ctx, doer, gothUser)
 			}); err != nil {
 				ctx.ServerError("UserLinkAccount", err)

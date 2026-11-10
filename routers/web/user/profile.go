@@ -389,7 +389,7 @@ func Action(ctx *context.Context) {
 		// stale.
 		doerID := ctx.Doer.ID
 		targetID := ctx.ContextUser.ID
-		err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/unblock/%d", doerID, targetID), 0, func(ctx std_ctx.Context) error {
+		err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/unblock/%d", doerID, targetID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/unblock", ID: doerID, ID2: targetID}, func(ctx std_ctx.Context) error {
 			return user_model.UnblockUser(ctx, doerID, targetID)
 		})
 	}

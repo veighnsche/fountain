@@ -65,7 +65,7 @@ func UnblockUser(ctx *context.APIContext, doer, blockUser *user_model.User) {
 	// One authority writer owns the block change before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/unblock/%d", doer.ID, blockUser.ID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/unblock/%d", doer.ID, blockUser.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/unblock", ID: doer.ID, ID2: blockUser.ID}, func(ctx std_ctx.Context) error {
 		return user_model.UnblockUser(ctx, doer.ID, blockUser.ID)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {

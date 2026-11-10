@@ -120,7 +120,7 @@ func settingsOpenIDVerify(ctx *context.Context) {
 	// One authority writer owns the identity change before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	if err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/openid", ctx.Doer.ID), 0, func(ctx std_ctx.Context) error {
+	if err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/openid", ctx.Doer.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/openid", ID: ctx.Doer.ID}, func(ctx std_ctx.Context) error {
 		return user_model.AddUserOpenID(ctx, oid)
 	}); err != nil {
 		if user_model.IsErrOpenIDAlreadyUsed(err) {
@@ -142,7 +142,7 @@ func DeleteOpenID(ctx *context.Context) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	oid := &user_model.UserOpenID{ID: ctx.FormInt64("id"), UID: ctx.Doer.ID}
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/openid", ctx.Doer.ID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/openid", ctx.Doer.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/openid", ID: ctx.Doer.ID}, func(ctx std_ctx.Context) error {
 		return user_model.DeleteUserOpenID(ctx, oid)
 	}); err != nil {
 		ctx.ServerError("DeleteUserOpenID", err)
@@ -161,7 +161,7 @@ func ToggleOpenIDVisibility(ctx *context.Context) {
 	// stale.
 	doerID := ctx.Doer.ID
 	openID := ctx.FormInt64("id")
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/openid", doerID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/openid", doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/openid", ID: doerID}, func(ctx std_ctx.Context) error {
 		return user_model.ToggleUserOpenIDVisibility(ctx, doerID, openID)
 	}); err != nil {
 		ctx.ServerError("ToggleUserOpenIDVisibility", err)

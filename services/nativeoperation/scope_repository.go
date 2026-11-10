@@ -31,26 +31,18 @@ func UpdateScopeRefResult(ctx context.Context, owner, newOID string) error {
 	if owner == "" || newOID == "" {
 		return nativeoperation_model.ErrWrongOwner
 	}
-	reservation, err := nativeoperation_model.ReadReservation(ctx)
+	reservation, document, err := scopeDocumentForOwner(ctx, owner)
 	if err != nil {
 		return err
 	}
-	if reservation.Owner != owner {
+	if previous := document.Scope().NewOID; previous != "" && previous != newOID {
 		return nativeoperation_model.ErrWrongOwner
 	}
-	scope, err := decodeScope(reservation.Scope)
+	encoded, err := document.WithNewOID(newOID)
 	if err != nil {
 		return err
 	}
-	if scope.NewOID != "" && scope.NewOID != newOID {
-		return nativeoperation_model.ErrWrongOwner
-	}
-	scope.NewOID = newOID
-	encoded, err := encodeScope(scope)
-	if err != nil {
-		return err
-	}
-	return nativeoperation_model.UpdateScopeWhere(ctx, owner, encoded)
+	return nativeoperation_model.UpdateScopeExact(ctx, owner, reservation.Generation, document.Original(), encoded)
 }
 
 // UpdateScopeRefs records realized end states for refs in the held owner's
@@ -62,34 +54,15 @@ func UpdateScopeRefs(ctx context.Context, owner string, refs []ScopedRef) error 
 	if owner == "" || len(refs) == 0 {
 		return nativeoperation_model.ErrWrongOwner
 	}
-	reservation, err := nativeoperation_model.ReadReservation(ctx)
+	reservation, document, err := scopeDocumentForOwner(ctx, owner)
 	if err != nil {
 		return err
 	}
-	if reservation.Owner != owner {
-		return nativeoperation_model.ErrWrongOwner
-	}
-	scope, err := decodeScope(reservation.Scope)
+	encoded, err := document.UpdateRefs(refs)
 	if err != nil {
 		return err
 	}
-	index := make(map[string]int, len(scope.Refs))
-	for i, prev := range scope.Refs {
-		index[prev.Ref] = i
-	}
-	for _, next := range refs {
-		if i, ok := index[next.Ref]; ok {
-			scope.Refs[i].NewOID = next.NewOID
-			continue
-		}
-		index[next.Ref] = len(scope.Refs)
-		scope.Refs = append(scope.Refs, ScopedRef{Ref: next.Ref, NewOID: next.NewOID})
-	}
-	encoded, err := encodeScope(scope)
-	if err != nil {
-		return err
-	}
-	return nativeoperation_model.UpdateScopeWhere(ctx, owner, encoded)
+	return nativeoperation_model.UpdateScopeExact(ctx, owner, reservation.Generation, document.Original(), encoded)
 }
 
 // AppendScopeRefs unions observed ref effects into the scope of the
@@ -102,35 +75,34 @@ func AppendScopeRefs(ctx context.Context, owner string, refs []ScopedRef) error 
 	if owner == "" || len(refs) == 0 {
 		return nativeoperation_model.ErrWrongOwner
 	}
-	reservation, err := nativeoperation_model.ReadReservation(ctx)
+	reservation, document, err := scopeDocumentForOwner(ctx, owner)
 	if err != nil {
 		return err
 	}
-	if reservation.Owner != owner {
-		return nativeoperation_model.ErrWrongOwner
-	}
-	scope, err := decodeScope(reservation.Scope)
+	encoded, err := document.AppendRefs(refs)
 	if err != nil {
-		return err
-	}
-	known := make(map[string]ScopedRef, len(scope.Refs)+len(refs))
-	for _, prev := range scope.Refs {
-		known[prev.Ref] = prev
-	}
-	for _, next := range refs {
-		prev, ok := known[next.Ref]
-		if !ok {
-			known[next.Ref] = next
-			scope.Refs = append(scope.Refs, next)
-			continue
-		}
-		if prev.OldOID != next.OldOID || prev.NewOID != next.NewOID {
+		if errors.Is(err, execcontext.ErrScopeConflict) {
 			return nativeoperation_model.ErrWrongOwner
 		}
-	}
-	encoded, err := encodeScope(scope)
-	if err != nil {
 		return err
 	}
-	return nativeoperation_model.UpdateScopeWhere(ctx, owner, encoded)
+	return nativeoperation_model.UpdateScopeExact(ctx, owner, reservation.Generation, document.Original(), encoded)
+}
+
+func scopeDocumentForOwner(ctx context.Context, owner string) (*nativeoperation_model.Reservation, *execcontext.ScopeDocument, error) {
+	reservation, err := nativeoperation_model.ReadReservation(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if reservation.Owner != owner {
+		return nil, nil, nativeoperation_model.ErrWrongOwner
+	}
+	if execution := execcontext.FromContext(ctx); execution != nil && (execution.Owner != owner || execution.Generation != reservation.Generation) {
+		return nil, nil, nativeoperation_model.ErrWrongOwner
+	}
+	document, err := execcontext.DecodeScopeDocument(reservation.Scope)
+	if err != nil {
+		return nil, nil, err
+	}
+	return reservation, document, nil
 }

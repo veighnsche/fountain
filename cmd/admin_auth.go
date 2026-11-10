@@ -79,12 +79,12 @@ func newAuthService() *authService {
 	return &authService{
 		initDB: initDB,
 		createAuthSource: func(ctx context.Context, source *auth_model.Source) error {
-			return nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("auth-source/%s", source.Name), 0, func(ctx context.Context) error {
+			return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("auth-source/%s", source.Name), 0, nativeoperation_service.AuthorityTarget{}, func(ctx context.Context) error {
 				return auth_model.CreateSource(ctx, source)
 			})
 		},
 		updateAuthSource: func(ctx context.Context, source *auth_model.Source) error {
-			return nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("auth-source/%d", source.ID), 0, func(ctx context.Context) error {
+			return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("auth-source/%d", source.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "auth-source", ID: source.ID}, func(ctx context.Context) error {
 				return auth_model.UpdateSource(ctx, source)
 			})
 		},
@@ -146,7 +146,7 @@ func runDeleteAuth(ctx context.Context, c *cli.Command) error {
 	// One authority writer owns the auth-source deletion before its
 	// effects, advancing the native revision so old permission
 	// observations go stale.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("auth-source/%d", source.ID), 0, func(ctx context.Context) error {
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("auth-source/%d", source.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "auth-source", ID: source.ID}, func(ctx context.Context) error {
 		return auth_service.DeleteSource(ctx, source)
 	})
 }

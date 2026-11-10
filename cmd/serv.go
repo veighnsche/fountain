@@ -385,6 +385,9 @@ func runServ(ctx context.Context, c *cli.Command) error {
 		repo_module.EnvKeyID+"="+fmt.Sprintf("%d", results.KeyID),
 		repo_module.EnvAppURL+"="+setting.AppURL,
 	)
+	if verb == "git-receive-pack" {
+		gitcmd.Env = execcontext.AppendGitOriginEnv(gitcmd.Env, execcontext.GitOriginReceiveSSH)
+	}
 	// to avoid breaking, here only use the minimal environment variables for the "gitea serv" command.
 	// it could be re-considered whether to use the same git.CommonGitCmdEnvs() as "git" command later.
 	gitcmd.Env = append(gitcmd.Env, git.CommonCmdServEnvs()...)

@@ -85,7 +85,7 @@ func TeamsAction(ctx *context.Context) {
 		// observations go stale.
 		team := ctx.Org.Team
 		doerID := ctx.Doer.ID
-		err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("team/%d/member/%d", team.ID, doerID), 0, func(ctx std_ctx.Context) error {
+		err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("team/%d/member/%d", team.ID, doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "team/member", ID: team.ID, ID2: doerID}, func(ctx std_ctx.Context) error {
 			return models.AddTeamMember(ctx, team, doerID)
 		})
 	case "leave":
@@ -94,7 +94,7 @@ func TeamsAction(ctx *context.Context) {
 		// observations go stale.
 		team := ctx.Org.Team
 		doerID := ctx.Doer.ID
-		err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("team/%d/member/%d", team.ID, doerID), 0, func(ctx std_ctx.Context) error {
+		err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("team/%d/member/%d", team.ID, doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "team/member", ID: team.ID, ID2: doerID}, func(ctx std_ctx.Context) error {
 			return models.RemoveTeamMember(ctx, team, doerID)
 		})
 		if err != nil {
@@ -124,7 +124,7 @@ func TeamsAction(ctx *context.Context) {
 		}
 
 		team := ctx.Org.Team
-		err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("team/%d/member/%d", team.ID, uid), 0, func(ctx std_ctx.Context) error {
+		err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("team/%d/member/%d", team.ID, uid), 0, nativeoperation_service.AuthorityTarget{Operation: "team/member", ID: team.ID, ID2: uid}, func(ctx std_ctx.Context) error {
 			return models.RemoveTeamMember(ctx, team, uid)
 		})
 		if err != nil {
@@ -182,7 +182,7 @@ func TeamsAction(ctx *context.Context) {
 			ctx.Flash.Error(ctx.Tr("org.teams.add_duplicate_users"))
 		} else {
 			team := ctx.Org.Team
-			err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("team/%d/member/%d", team.ID, u.ID), 0, func(ctx std_ctx.Context) error {
+			err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("team/%d/member/%d", team.ID, u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "team/member", ID: team.ID, ID2: u.ID}, func(ctx std_ctx.Context) error {
 				return models.AddTeamMember(ctx, team, u.ID)
 			})
 		}
@@ -204,7 +204,7 @@ func TeamsAction(ctx *context.Context) {
 		// advancing the native revision so old permission observations go
 		// stale.
 		teamID := ctx.Org.Team.ID
-		if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("team/%d/invite/%d", teamID, iid), 0, func(ctx std_ctx.Context) error {
+		if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("team/%d/invite/%d", teamID, iid), 0, nativeoperation_service.AuthorityTarget{Operation: "team/invite", ID: teamID, ID2: iid}, func(ctx std_ctx.Context) error {
 			return org_model.RemoveInviteByID(ctx, iid, teamID)
 		}); err != nil {
 			log.Error("Action(%s): %v", ctx.Params(":action"), err)
@@ -282,17 +282,17 @@ func TeamsRepoAction(ctx *context.Context) {
 		// observations go stale.
 		team := ctx.Org.Team
 		repoID := ctx.FormInt64("repoid")
-		err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("team/%d/repo/%d", team.ID, repoID), repoID, func(ctx std_ctx.Context) error {
+		err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("team/%d/repo/%d", team.ID, repoID), repoID, nativeoperation_service.AuthorityTarget{Operation: "team/repo", ID: team.ID, ID2: repoID}, func(ctx std_ctx.Context) error {
 			return repo_service.RemoveRepositoryFromTeam(ctx, team, repoID)
 		})
 	case "addall":
 		team := ctx.Org.Team
-		err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("team/%d/repos", team.ID), 0, func(ctx std_ctx.Context) error {
+		err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("team/%d/repos", team.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "team/repos", ID: team.ID}, func(ctx std_ctx.Context) error {
 			return models.AddAllRepositories(ctx, team)
 		})
 	case "removeall":
 		team := ctx.Org.Team
-		err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("team/%d/repos", team.ID), 0, func(ctx std_ctx.Context) error {
+		err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("team/%d/repos", team.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "team/repos", ID: team.ID}, func(ctx std_ctx.Context) error {
 			return models.RemoveAllRepositories(ctx, team)
 		})
 	}
@@ -396,7 +396,7 @@ func NewTeamPost(ctx *context.Context) {
 	// One authority writer owns the team change before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("org/%d/team", t.OrgID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("org/%d/team", t.OrgID), 0, nativeoperation_service.AuthorityTarget{Operation: "org/team", ID: t.OrgID}, func(ctx std_ctx.Context) error {
 		return models.NewTeam(ctx, t)
 	}); err != nil {
 		ctx.Data["Err_TeamName"] = true
@@ -588,7 +588,7 @@ func EditTeamPost(ctx *context.Context) {
 	// One authority writer owns the team change before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("team/%d", t.ID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("team/%d", t.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "team", ID: t.ID}, func(ctx std_ctx.Context) error {
 		return models.UpdateTeam(ctx, t, isAuthChanged, isIncludeAllChanged)
 	}); err != nil {
 		ctx.Data["Err_TeamName"] = true
@@ -609,7 +609,7 @@ func DeleteTeam(ctx *context.Context) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	team := ctx.Org.Team
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("team/%d", team.ID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("team/%d", team.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "team", ID: team.ID}, func(ctx std_ctx.Context) error {
 		return models.DeleteTeam(ctx, team)
 	}); err != nil {
 		ctx.Flash.Error("DeleteTeam: " + err.Error())
@@ -657,7 +657,7 @@ func TeamInvitePost(ctx *context.Context) {
 	// effects, advancing the native revision so old permission
 	// observations go stale.
 	doerID := ctx.Doer.ID
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("team/%d/member/%d", team.ID, doerID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("team/%d/member/%d", team.ID, doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "team/member", ID: team.ID, ID2: doerID}, func(ctx std_ctx.Context) error {
 		if err := models.AddTeamMember(ctx, team, doerID); err != nil {
 			return err
 		}

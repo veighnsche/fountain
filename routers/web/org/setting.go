@@ -112,7 +112,7 @@ func SettingsPost(ctx *context.Context) {
 		// One authority writer owns the login-identity change before its
 		// effects, advancing the native revision so old permission
 		// observations go stale.
-		err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("org/%d/email", org.ID), 0, func(ctx std_ctx.Context) error {
+		err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("org/%d/email", org.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "org/email", ID: org.ID}, func(ctx std_ctx.Context) error {
 			return user_model.DeletePrimaryEmailAddressOfUser(ctx, org.ID)
 		})
 		if err != nil {

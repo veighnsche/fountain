@@ -277,7 +277,7 @@ func Create(ctx *context.APIContext) {
 	// effects, advancing the native revision so old permission
 	// observations go stale.
 	doer := ctx.Doer()
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("org/%s", org.Name), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("org/%s", org.Name), 0, nativeoperation_service.AuthorityTarget{}, func(ctx std_ctx.Context) error {
 		return organization.CreateOrganization(ctx, org, doer)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {
@@ -410,7 +410,7 @@ func Edit(ctx *context.APIContext) {
 			// its effects, advancing the native revision so old
 			// permission observations go stale.
 			orgID := ctx.Org().Organization.ID
-			if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("org/%d/email", orgID), 0, func(ctx std_ctx.Context) error {
+			if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("org/%d/email", orgID), 0, nativeoperation_service.AuthorityTarget{Operation: "org/email", ID: orgID}, func(ctx std_ctx.Context) error {
 				return user_model.DeletePrimaryEmailAddressOfUser(ctx, orgID)
 			}); err != nil {
 				if nativeoperation_service.IsBusy(err) {

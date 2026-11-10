@@ -229,7 +229,7 @@ func CreateAccessToken(ctx *context.APIContext) {
 	// One authority writer owns the token change before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/token", ctx.Doer().ID), 0, func(ctx stdCtx.Context) error {
+	err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/token", ctx.Doer().ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/token", ID: ctx.Doer().ID}, func(ctx stdCtx.Context) error {
 		return db.WithTx(ctx, func(ctx stdCtx.Context) error {
 			if err := auth_model.NewAccessToken(ctx, t); err != nil {
 				return err
@@ -316,7 +316,7 @@ func DeleteAccessToken(ctx *context.APIContext) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	userID := ctx.User().ID
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("token/%d", tokenID), 0, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("token/%d", tokenID), 0, nativeoperation_service.AuthorityTarget{Operation: "token", ID: tokenID}, func(ctx stdCtx.Context) error {
 		return auth_model.DeleteAccessTokenByID(ctx, tokenID, userID)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {
@@ -365,7 +365,7 @@ func DeleteCurrentAccessToken(ctx *context.APIContext) {
 	// One authority writer owns the token withdrawal before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("token/%d", token.ID), 0, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("token/%d", token.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "token", ID: token.ID}, func(ctx stdCtx.Context) error {
 		return auth_model.DeleteAccessTokenByID(ctx, token.ID, token.UID)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {
@@ -414,7 +414,7 @@ func CreateOauth2Application(ctx *context.APIContext) {
 	var app *auth_model.OAuth2Application
 	var secret string
 	doerID := ctx.Doer().ID
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/oauth2-app", doerID), 0, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/oauth2-app", doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/oauth2-app", ID: doerID}, func(ctx stdCtx.Context) error {
 		created, err := auth_model.CreateOAuth2Application(ctx, auth_model.CreateOAuth2ApplicationOptions{
 			Name:               data.Name,
 			UserID:             doerID,
@@ -512,7 +512,7 @@ func DeleteOauth2Application(ctx *context.APIContext) {
 	// stale.
 	appID := ctx.ParamsInt64(":id")
 	doerID := ctx.Doer().ID
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("oauth2-app/%d", appID), 0, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("oauth2-app/%d", appID), 0, nativeoperation_service.AuthorityTarget{Operation: "oauth2-app", ID: appID}, func(ctx stdCtx.Context) error {
 		return auth_model.DeleteOAuth2Application(ctx, appID, doerID)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {
@@ -610,7 +610,7 @@ func UpdateOauth2Application(ctx *context.APIContext) {
 	// stale.
 	var app *auth_model.OAuth2Application
 	doerID := ctx.Doer().ID
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("oauth2-app/%d", appID), 0, func(ctx stdCtx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("oauth2-app/%d", appID), 0, nativeoperation_service.AuthorityTarget{Operation: "oauth2-app", ID: appID}, func(ctx stdCtx.Context) error {
 		updated, err := auth_model.UpdateOAuth2Application(ctx, auth_model.UpdateOAuth2ApplicationOptions{
 			Name:               data.Name,
 			UserID:             doerID,

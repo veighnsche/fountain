@@ -799,7 +799,7 @@ func handleAccountActivation(ctx *context.Context, user *user_model.User) {
 	// advancing the native revision so old permission observations go
 	// stale. Session and login-timestamp updates below are not authority
 	// effects and stay outside the claim.
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/activate", user.ID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/activate", user.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/activate", ID: user.ID}, func(ctx std_ctx.Context) error {
 		if err := user_model.UpdateUserCols(ctx, user, "is_active", "rands"); err != nil {
 			return err
 		}
@@ -873,7 +873,7 @@ func ActivateEmail(ctx *context.Context) {
 	// One authority writer owns the activation before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/email/activate", u.ID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/email/activate", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/email/activate", ID: u.ID}, func(ctx std_ctx.Context) error {
 		return user_model.ActivateEmail(ctx, email)
 	}); err != nil {
 		ctx.ServerError("ActivateEmail", err)

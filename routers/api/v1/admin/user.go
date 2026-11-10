@@ -140,7 +140,7 @@ func CreateUser(ctx *context.APIContext) {
 	// One authority writer owns the account creation before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%s", u.Name), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%s", u.Name), 0, nativeoperation_service.AuthorityTarget{}, func(ctx std_ctx.Context) error {
 		return user_model.AdminCreateUser(ctx, u, overwriteDefault)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {
@@ -416,7 +416,7 @@ func DeleteUserPublicKey(ctx *context.APIContext) {
 	// stale.
 	keyOwner := ctx.User()
 	keyID := ctx.ParamsInt64(":id")
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("key/%d", keyID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("key/%d", keyID), 0, nativeoperation_service.AuthorityTarget{Operation: "key", ID: keyID}, func(ctx std_ctx.Context) error {
 		return asymkey_service.DeletePublicKey(ctx, keyOwner, keyID)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {

@@ -69,7 +69,7 @@ func CreateOrg(ctx *context.APIContext) {
 	// effects, advancing the native revision so old permission
 	// observations go stale.
 	owner := ctx.User()
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("org/%s", org.Name), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("org/%s", org.Name), 0, nativeoperation_service.AuthorityTarget{}, func(ctx std_ctx.Context) error {
 		return organization.CreateOrganization(ctx, org, owner)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {

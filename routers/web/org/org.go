@@ -68,7 +68,7 @@ func CreatePost(ctx *context.Context) {
 	// effects, advancing the native revision so old permission
 	// observations go stale.
 	doer := ctx.Doer
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("org/%s", org.Name), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("org/%s", org.Name), 0, nativeoperation_service.AuthorityTarget{}, func(ctx std_ctx.Context) error {
 		return organization.CreateOrganization(ctx, org, doer)
 	}); err != nil {
 		ctx.Data["Err_OrgName"] = true

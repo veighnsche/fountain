@@ -157,7 +157,7 @@ func CreateUserGPGKey(ctx *context.APIContext, form api.CreateGPGKeyOption, uid 
 	// advancing the native revision so old permission observations go
 	// stale.
 	var keys []*asymkey_model.GPGKey
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/gpg-key", uid), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/gpg-key", uid), 0, nativeoperation_service.AuthorityTarget{Operation: "user/gpg-key", ID: uid}, func(ctx std_ctx.Context) error {
 		var err error
 		keys, err = asymkey_model.AddGPGKey(ctx, uid, form.ArmoredKey, token, form.Signature)
 		if err != nil && asymkey_model.IsErrGPGInvalidTokenSignature(err) {
@@ -243,7 +243,7 @@ func VerifyUserGPGKey(ctx *context.APIContext) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	doerID := ctx.Doer().ID
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/gpg-key/verify", doerID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/gpg-key/verify", doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/gpg-key/verify", ID: doerID}, func(ctx std_ctx.Context) error {
 		_, err := asymkey_model.VerifyGPGKey(ctx, doerID, form.KeyID, token, form.Signature)
 		if err != nil && asymkey_model.IsErrGPGInvalidTokenSignature(err) {
 			_, err = asymkey_model.VerifyGPGKey(ctx, doerID, form.KeyID, lastToken, form.Signature)
@@ -342,7 +342,7 @@ func DeleteGPGKey(ctx *context.APIContext) {
 	// stale.
 	doer := ctx.Doer()
 	keyID := ctx.ParamsInt64(":id")
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("gpg-key/%d", keyID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("gpg-key/%d", keyID), 0, nativeoperation_service.AuthorityTarget{Operation: "gpg-key", ID: keyID}, func(ctx std_ctx.Context) error {
 		return asymkey_model.DeleteGPGKey(ctx, doer, keyID)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {

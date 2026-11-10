@@ -155,7 +155,7 @@ func linkAccount(ctx *context.Context, u *user_model.User, gothUser goth.User, r
 		// One authority writer owns the identity link before its effects,
 		// advancing the native revision so old permission observations go
 		// stale.
-		if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/account-link", u.ID), 0, func(ctx std_ctx.Context) error {
+		if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/account-link", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/account-link", ID: u.ID}, func(ctx std_ctx.Context) error {
 			return externalaccount.LinkAccountToUser(ctx, u, gothUser)
 		}); err != nil {
 			ctx.ServerError("UserLinkAccount", err)

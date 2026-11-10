@@ -198,7 +198,7 @@ func NewUserPost(ctx *context.Context) {
 	// One authority writer owns the account creation before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%s", u.Name), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%s", u.Name), 0, nativeoperation_service.AuthorityTarget{}, func(ctx std_ctx.Context) error {
 		return user_model.AdminCreateUser(ctx, u, overwriteDefault)
 	}); err != nil {
 		switch {
@@ -479,7 +479,7 @@ func EditUserPost(ctx *context.Context) {
 		// One authority writer owns the credential reset before its
 		// effects, advancing the native revision so old permission
 		// observations go stale.
-		if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/credentials/reset", u.ID), 0, func(ctx std_ctx.Context) error {
+		if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/credentials/reset", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/credentials/reset", ID: u.ID}, func(ctx std_ctx.Context) error {
 			tf, err := auth.GetTwoFactorByUID(ctx, u.ID)
 			if err != nil && !auth.IsErrTwoFactorNotEnrolled(err) {
 				return err

@@ -75,7 +75,7 @@ func renameUser(ctx context.Context, u *user_model.User, newUserName string, doe
 	// One authority writer owns the identity change before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/rename", u.ID), 0, func(ctx context.Context) error {
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/rename", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/rename", ID: u.ID}, func(ctx context.Context) error {
 		return doRenameUser(ctx, u, newUserName, doerIsAdmin)
 	})
 }
@@ -215,7 +215,7 @@ func DeleteUser(ctx context.Context, u *user_model.User, purge bool) error {
 	// advancing the native revision so old permission observations go
 	// stale. Nested repository, organization and package removals reuse
 	// this ownership; their owning tasks reconcile their own effects.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/delete", u.ID), 0, func(ctx context.Context) error {
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/delete", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/delete", ID: u.ID}, func(ctx context.Context) error {
 		return doDeleteUser(ctx, u, purge)
 	})
 }
@@ -409,7 +409,7 @@ func DeleteInactiveUsers(ctx context.Context, olderThan time.Duration) error {
 	}
 	// One authority writer owns the whole sweep; each nested deletion
 	// reuses this ownership instead of claiming per user.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, "users/delete-inactive", 0, func(ctx context.Context) error {
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, "users/delete-inactive", 0, nativeoperation_service.AuthorityTarget{}, func(ctx context.Context) error {
 		return doDeleteInactiveUsers(ctx, users)
 	})
 }

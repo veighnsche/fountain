@@ -444,6 +444,9 @@ func serviceRPC(ctx *context.Context, h *serviceHandler, service string) error {
 
 	// set this for allow pre-receive and post-receive execute
 	h.environ = append(h.environ, "SSH_ORIGINAL_COMMAND="+service)
+	if service == "receive-pack" {
+		h.environ = execcontext.AppendGitOriginEnv(h.environ, execcontext.GitOriginReceiveHTTP)
+	}
 
 	if protocol := ctx.Req.Header.Get("Git-Protocol"); protocol != "" && safeGitProtocolHeader.MatchString(protocol) {
 		h.environ = append(h.environ, "GIT_PROTOCOL="+protocol)
@@ -495,18 +498,19 @@ func ServiceReceivePack(ctx *context.Context) {
 	// waits out short writer spans; a still-busy domain refuses the
 	// push with a retryable status. The receiver carries the execution
 	// capability for hook binding.
-	target := "main"
+	target := execcontext.TargetCode
 	if h.isWiki {
-		target = "wiki"
+		target = execcontext.TargetWiki
 	}
 	webCtx := ctx
 	if err := nativeoperation_service.Default().WithOrdinaryOwnershipWait(ctx,
 		nativeoperation_service.FamilyReceiveHTTP,
-		fmt.Sprintf("%d/%s", h.repo.ID, target),
+		execcontext.ReceiveResource(h.repo.ID, target),
 		nativeoperation_service.Scope{
-			Family:       nativeoperation_service.FamilyReceiveHTTP,
-			RepositoryID: h.repo.ID,
-			PusherID:     ctx.Doer.ID,
+			Family:           nativeoperation_service.FamilyReceiveHTTP,
+			RepositoryTarget: target,
+			RepositoryID:     h.repo.ID,
+			PusherID:         ctx.Doer.ID,
 		},
 		nativeoperation_service.ReceiveClaimTimeout,
 		func(ctx gocontext.Context) error {

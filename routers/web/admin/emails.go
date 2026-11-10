@@ -128,7 +128,7 @@ func ActivateEmail(ctx *context.Context) {
 	// One authority writer owns the activation change before its
 	// effects, advancing the native revision so old permission
 	// observations go stale.
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/email/activate", uid), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/email/activate", uid), 0, nativeoperation_service.AuthorityTarget{Operation: "user/email/activate", ID: uid}, func(ctx std_ctx.Context) error {
 		return user_model.ActivateUserEmail(ctx, uid, email, activate)
 	}); err != nil {
 		log.Error("ActivateUserEmail(%v,%v,%v): %v", uid, email, activate, err)

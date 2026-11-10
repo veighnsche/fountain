@@ -49,7 +49,7 @@ func RegenerateScratchTwoFactor(ctx *context.Context) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	doerID := ctx.Doer.ID
-	if err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/2fa", doerID), 0, func(ctx std_ctx.Context) error {
+	if err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/2fa", doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/2fa", ID: doerID}, func(ctx std_ctx.Context) error {
 		return auth.UpdateTwoFactor(ctx, t)
 	}); err != nil {
 		ctx.ServerError("SettingsTwoFactor: Failed to UpdateTwoFactor", err)
@@ -95,7 +95,7 @@ func disableTwoFactor(ctx *context.Context) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	doerID := ctx.Doer.ID
-	if err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/2fa", doerID), 0, func(ctx std_ctx.Context) error {
+	if err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/2fa", doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/2fa", ID: doerID}, func(ctx std_ctx.Context) error {
 		return auth.DeleteTwoFactorByID(ctx, t.ID, doerID)
 	}); err != nil {
 		if auth.IsErrTwoFactorNotEnrolled(err) {
@@ -273,7 +273,7 @@ func enrollTwoFactor(ctx *context.Context) {
 	// One authority writer owns the credential change before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/2fa", ctx.Doer.ID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/2fa", ctx.Doer.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/2fa", ID: ctx.Doer.ID}, func(ctx std_ctx.Context) error {
 		return auth.NewTwoFactor(ctx, twoFactor, secret)
 	}); err != nil {
 		// FIXME: We need to handle a unique constraint fail here it's entirely possible that another request has beaten us.

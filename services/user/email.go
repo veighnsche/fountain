@@ -28,7 +28,7 @@ func AdminAddOrSetPrimaryEmailAddress(ctx context.Context, u *user_model.User, e
 	// One authority writer owns the login-identity change before its
 	// effects, advancing the native revision so old permission
 	// observations go stale.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/email", u.ID), 0, func(ctx context.Context) error {
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/email", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/email", ID: u.ID}, func(ctx context.Context) error {
 		return doAdminAddOrSetPrimaryEmailAddress(ctx, u, emailStr)
 	})
 }
@@ -93,7 +93,7 @@ func ReplacePrimaryEmailAddress(ctx context.Context, u *user_model.User, emailSt
 	// One authority writer owns the login-identity change before its
 	// effects, advancing the native revision so old permission
 	// observations go stale.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/email", u.ID), 0, func(ctx context.Context) error {
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/email", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/email", ID: u.ID}, func(ctx context.Context) error {
 		return doReplacePrimaryEmailAddress(ctx, u, emailStr)
 	})
 }
@@ -150,7 +150,7 @@ func AddEmailAddresses(ctx context.Context, u *user_model.User, emails []string)
 	// One authority writer owns the login-identity change before its
 	// effects, advancing the native revision so old permission
 	// observations go stale. Nested calls reuse the enclosing ownership.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/email", u.ID), 0, func(ctx context.Context) error {
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/email", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/email", ID: u.ID}, func(ctx context.Context) error {
 		return doAddEmailAddresses(ctx, u, emails)
 	})
 }
@@ -191,7 +191,7 @@ func ReplaceInactivePrimaryEmail(ctx context.Context, oldEmail string, email *us
 	// effects, advancing the native revision so old permission
 	// observations go stale. The nested address addition reuses this
 	// ownership.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/email", email.UID), 0, func(ctx context.Context) error {
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/email", email.UID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/email", ID: email.UID}, func(ctx context.Context) error {
 		return doReplaceInactivePrimaryEmail(ctx, oldEmail, email)
 	})
 }
@@ -229,7 +229,7 @@ func DeleteEmailAddresses(ctx context.Context, u *user_model.User, emails []stri
 	// One authority writer owns the login-identity change before its
 	// effects, advancing the native revision so old permission
 	// observations go stale.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/email", u.ID), 0, func(ctx context.Context) error {
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/email", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/email", ID: u.ID}, func(ctx context.Context) error {
 		return doDeleteEmailAddresses(ctx, u, emails)
 	})
 }
@@ -263,7 +263,7 @@ func MakeEmailAddressPrimary(ctx context.Context, u *user_model.User, newPrimary
 	// One authority writer owns the login-identity change before its
 	// effects, advancing the native revision so old permission
 	// observations go stale.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/email", u.ID), 0, func(ctx context.Context) error {
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/email", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/email", ID: u.ID}, func(ctx context.Context) error {
 		return doMakeEmailAddressPrimary(ctx, u, newPrimaryEmail, notify)
 	})
 }

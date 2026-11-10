@@ -18,8 +18,8 @@ import (
 
 // Reservation owner kinds.
 const (
-	OwnerConditional = "conditional"
-	OwnerOrdinary    = "ordinary"
+	OwnerConditional = execcontext.OwnerConditional
+	OwnerOrdinary    = execcontext.OwnerOrdinary
 )
 
 // Reservation is the single exclusive native-mutation reservation (row id 1)
@@ -40,7 +40,7 @@ type Reservation struct {
 
 var (
 	// ErrBusy is returned when the reservation is held by another owner.
-	ErrBusy = errors.New("native mutation reservation is busy")
+	ErrBusy = execcontext.ErrBusy
 	// ErrStaleRevision is returned when a conditional claim's expected
 	// revision no longer equals the current idle revision.
 	ErrStaleRevision = errors.New("stale native revision")
@@ -57,7 +57,7 @@ var (
 	// writer domain: new ownership claims refuse until the operator lifts
 	// inhibition after reconciliation. It is retryable like ErrBusy and
 	// never releases or transfers an existing owner.
-	ErrInhibited = errors.New("native mutation domain is inhibited for offline recovery")
+	ErrInhibited = execcontext.ErrInhibited
 	// ErrOperationExpired is returned when a waiting conditional claim finds
 	// the operation past its admission deadline. The caller records the
 	// terminal refusal; nothing is claimed.

@@ -27,7 +27,7 @@ func BlockUser(ctx context.Context, userID, blockID int64) error {
 	// One authority writer owns the block change before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/block/%d", userID, blockID), 0, func(ctx context.Context) error {
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/block/%d", userID, blockID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/block", ID: userID, ID2: blockID}, func(ctx context.Context) error {
 		return doBlockUser(ctx, userID, blockID)
 	})
 }

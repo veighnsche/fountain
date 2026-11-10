@@ -16,7 +16,6 @@ import (
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
-	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/log"
 	nativeoperation "forgejo.org/modules/nativeoperation"
 	repo_module "forgejo.org/modules/repository"
@@ -100,37 +99,31 @@ func NormalizeWikiBranch(ctx context.Context, repo *repo_model.Repository, to st
 		return err
 	}
 
-	// One ref write owns the reservation before the native wiki
-	// rename, the default-branch update and the database write. The
-	// rename spans two refs, which the single-ref gate cannot
-	// express, so the native child stays unbound and the held
-	// reservation alone serializes it. Nested calls reuse the
-	// enclosing ownership instead of claiming again.
+	// The outer lease covers the native wiki rename and metadata changes.
 	objectFormat := git.ObjectFormatFromName(repo.ObjectFormatName)
 	return nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation.RefWriteResource(repo.ID, nativeoperation_service.RefWriteRename, "wiki/"+from+"->"+to),
+		nativeoperation.RefWriteResource(repo.ID, nativeoperation_service.RefWriteRename, nativeoperation.EncodeRefWriteTarget(nativeoperation.TargetWiki, from+"->"+to)),
 		nativeoperation_service.Scope{
-			Family:       nativeoperation_service.FamilyRefWrite,
-			RepositoryID: repo.ID,
+			Family:           nativeoperation_service.FamilyRefWrite,
+			RepositoryID:     repo.ID,
+			RepositoryTarget: nativeoperation.TargetWiki,
 			Refs: []nativeoperation_service.ScopedRef{
 				{Ref: git.BranchPrefix + from, OldOID: tip, NewOID: objectFormat.EmptyObjectID().String()},
 				{Ref: git.BranchPrefix + to, NewOID: tip},
 			},
 		},
 		func(ctx context.Context) error {
-			return normalizeWikiBranchOwned(ctx, repo, gitRepo, from, to)
+			return nativeoperation_service.Default().WithRefRename(ctx, repo, gitRepo, nativeoperation.TargetWiki, from, to, tip, func(run func() error) error {
+				return normalizeWikiBranchOwned(ctx, repo, to, run)
+			})
 		})
 }
 
 // normalizeWikiBranchOwned runs the wiki branch rename, default-branch
 // update and database write under the caller's ownership.
-func normalizeWikiBranchOwned(ctx context.Context, repo *repo_model.Repository, gitRepo *git.Repository, from, to string) error {
-	if err := gitRepo.RenameBranch(from, to); err != nil {
-		return err
-	}
-
-	if err := gitrepo.SetDefaultBranch(ctx, repo, to); err != nil {
+func normalizeWikiBranchOwned(ctx context.Context, repo *repo_model.Repository, to string, runRename func() error) error {
+	if err := runRename(); err != nil {
 		return err
 	}
 
@@ -196,12 +189,13 @@ func updateWikiPage(ctx context.Context, doer *user_model.User, repo *repo_model
 	// again.
 	return nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation.RefWriteResource(repo.ID, nativeoperation_service.RefWriteFile, "wiki/"+wikiRef),
+		nativeoperation.RefWriteResource(repo.ID, nativeoperation_service.RefWriteFile, nativeoperation.EncodeRefWriteTarget(nativeoperation.TargetWiki, wikiRef)),
 		nativeoperation_service.Scope{
-			Family:       nativeoperation_service.FamilyRefWrite,
-			RepositoryID: repo.ID,
-			Ref:          wikiRef,
-			OldOID:       oldTip,
+			Family:           nativeoperation_service.FamilyRefWrite,
+			RepositoryID:     repo.ID,
+			RepositoryTarget: nativeoperation.TargetWiki,
+			Ref:              wikiRef,
+			OldOID:           oldTip,
 		},
 		func(ctx context.Context) error {
 			return updateWikiPageOwned(ctx, doer, repo, oldWikiName, newWikiName, content, message, isNew)
@@ -392,12 +386,13 @@ func DeleteWikiPage(ctx context.Context, doer *user_model.User, repo *repo_model
 	// again.
 	return nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
-		nativeoperation.RefWriteResource(repo.ID, nativeoperation_service.RefWriteFile, "wiki/"+wikiRef),
+		nativeoperation.RefWriteResource(repo.ID, nativeoperation_service.RefWriteFile, nativeoperation.EncodeRefWriteTarget(nativeoperation.TargetWiki, wikiRef)),
 		nativeoperation_service.Scope{
-			Family:       nativeoperation_service.FamilyRefWrite,
-			RepositoryID: repo.ID,
-			Ref:          wikiRef,
-			OldOID:       oldTip,
+			Family:           nativeoperation_service.FamilyRefWrite,
+			RepositoryID:     repo.ID,
+			RepositoryTarget: nativeoperation.TargetWiki,
+			Ref:              wikiRef,
+			OldOID:           oldTip,
 		},
 		func(ctx context.Context) error {
 			return deleteWikiPageOwned(ctx, doer, repo, wikiName)

@@ -51,7 +51,7 @@ func runResetMFA(ctx context.Context, c *cli.Command) error {
 	// One authority writer owns the credential reset before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/credentials/reset", user.ID), 0, func(ctx context.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/credentials/reset", user.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/credentials/reset", ID: user.ID}, func(ctx context.Context) error {
 		webAuthnList, err := auth_model.GetWebAuthnCredentialsByUID(ctx, user.ID)
 		if err != nil {
 			return err

@@ -64,7 +64,7 @@ func UpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) er
 	// One authority writer owns the account change before its effects,
 	// advancing the native revision so old permission observations go
 	// stale. Telemetry-only updates above never claim.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/update", u.ID), 0, func(ctx context.Context) error {
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/update", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/update", ID: u.ID}, func(ctx context.Context) error {
 		return doUpdateUser(ctx, u, opts)
 	})
 }
@@ -186,7 +186,7 @@ func UpdateAuth(ctx context.Context, u *user_model.User, opts *UpdateAuthOptions
 	// One authority writer owns the credential change before its effects.
 	// The password-change notice below is not a native authority effect
 	// and stays outside the claim.
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/auth", u.ID), 0, func(ctx context.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/auth", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/auth", ID: u.ID}, func(ctx context.Context) error {
 		return doUpdateAuth(ctx, u, opts)
 	}); err != nil {
 		return err

@@ -322,26 +322,24 @@ func RenameBranch(ctx context.Context, repo *repo_model.Repository, doer *user_m
 		return "", err
 	}
 
-	// One ref write owns the reservation before the native rename and
-	// all database effects, advancing the revision so stale
-	// observations go stale. The rename spans two refs, which the
-	// single-ref gate cannot express, so the native child stays
-	// unbound and the held reservation alone serializes it. Nested
-	// calls reuse the enclosing ownership instead of claiming again.
+	// The outer lease covers native rename and its metadata transaction.
 	objectFormat := git.ObjectFormatFromName(repo.ObjectFormatName)
 	err = nativeoperation_service.Default().WithOrdinaryOwnership(ctx,
 		nativeoperation_service.FamilyRefWrite,
 		nativeoperation.RefWriteResource(repo.ID, nativeoperation_service.RefWriteRename, from+"->"+to),
 		nativeoperation_service.Scope{
-			Family:       nativeoperation_service.FamilyRefWrite,
-			RepositoryID: repo.ID,
+			Family:           nativeoperation_service.FamilyRefWrite,
+			RepositoryID:     repo.ID,
+			RepositoryTarget: nativeoperation.TargetCode,
 			Refs: []nativeoperation_service.ScopedRef{
 				{Ref: git.BranchPrefix + from, OldOID: tip, NewOID: objectFormat.EmptyObjectID().String()},
 				{Ref: git.BranchPrefix + to, NewOID: tip},
 			},
 		},
 		func(ctx context.Context) error {
-			return renameBranch(ctx, repo, gitRepo, from, to)
+			return nativeoperation_service.Default().WithRefRename(ctx, repo, gitRepo, nativeoperation.TargetCode, from, to, tip, func(run func() error) error {
+				return renameBranch(ctx, repo, from, to, run)
+			})
 		})
 	if err != nil {
 		return "", err
@@ -360,9 +358,9 @@ func RenameBranch(ctx context.Context, repo *repo_model.Repository, doer *user_m
 
 // renameBranch runs the branch-rename database and native effects under
 // the caller's ownership.
-func renameBranch(ctx context.Context, repo *repo_model.Repository, gitRepo *git.Repository, from, to string) error {
+func renameBranch(ctx context.Context, repo *repo_model.Repository, from, to string, runRename func() error) error {
 	if err := git_model.RenameBranch(ctx, repo, from, to, func(ctx context.Context, isDefault bool) error {
-		err2 := gitRepo.RenameBranch(from, to)
+		err2 := runRename()
 		if err2 != nil {
 			return err2
 		}

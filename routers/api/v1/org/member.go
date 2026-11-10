@@ -251,7 +251,7 @@ func PublicizeMember(ctx *context.APIContext) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	orgID := ctx.Org().Organization.ID
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("org/%d/member/%d", orgID, userToPublicize.ID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("org/%d/member/%d", orgID, userToPublicize.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "org/member", ID: orgID, ID2: userToPublicize.ID}, func(ctx std_ctx.Context) error {
 		return organization.ChangeOrgUserStatus(ctx, orgID, userToPublicize.ID, true)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {
@@ -302,7 +302,7 @@ func ConcealMember(ctx *context.APIContext) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	orgID := ctx.Org().Organization.ID
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("org/%d/member/%d", orgID, userToConceal.ID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("org/%d/member/%d", orgID, userToConceal.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "org/member", ID: orgID, ID2: userToConceal.ID}, func(ctx std_ctx.Context) error {
 		return organization.ChangeOrgUserStatus(ctx, orgID, userToConceal.ID, false)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {
@@ -347,7 +347,7 @@ func DeleteMember(ctx *context.APIContext) {
 	// advancing the native revision so old permission observations go
 	// stale.
 	orgID := ctx.Org().Organization.ID
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("org/%d/member/%d", orgID, member.ID), 0, func(ctx std_ctx.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("org/%d/member/%d", orgID, member.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "org/member", ID: orgID, ID2: member.ID}, func(ctx std_ctx.Context) error {
 		return models.RemoveOrgUser(ctx, orgID, member.ID)
 	}); err != nil {
 		if nativeoperation_service.IsBusy(err) {

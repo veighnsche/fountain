@@ -50,7 +50,7 @@ var (
 	ErrKindUnavailable = errors.New("operations_unavailable")
 	// ErrBusy reports a held reservation without recording anything, so the
 	// same ID may be retried after release (HTTP 503).
-	ErrBusy = errors.New("native mutation reservation is busy")
+	ErrBusy = execcontext.ErrBusy
 )
 
 // IsBusy reports whether err is a reservation-contention refusal. Offline

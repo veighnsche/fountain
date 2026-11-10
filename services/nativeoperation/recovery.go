@@ -544,6 +544,9 @@ func (s *Service) recoverConditionalReviewSubmit(ctx context.Context, assessment
 // recoverOrdinary reconciles one held ordinary writer with its family's own
 // evidence. A merge-tip comparison never releases another family.
 func (s *Service) recoverOrdinary(ctx context.Context, assessment *RecoveryAssessment, reservation *nativeoperation_model.Reservation, scope Scope) (RecoveryAssessment, error) {
+	if scope.NativeRename != nil {
+		return fenced(assessment, ReasonRecoveryUncertainEffect, "native branch rename metadata outcome is unverified")
+	}
 	switch scope.Family {
 	case FamilyBranchCreate:
 		return s.recoverBranchCreate(ctx, assessment, reservation, scope)

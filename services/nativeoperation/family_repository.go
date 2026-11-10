@@ -38,7 +38,7 @@ const (
 	// commits, release tags, PR ref updates, PR branch updates, ordinary
 	// merges, branch renames, default-branch changes and fork syncs. The
 	// resource string names the ref-write kind (see RefWrite* below).
-	FamilyRefWrite = "ref-write"
+	FamilyRefWrite = execcontext.FamilyRefWrite
 	// FamilyRepoLifecycle is one repository lifecycle operation: creation,
 	// deletion, fork, migration, template generation, adoption, transfer,
 	// rename or push-create. The resource string names the operation.
@@ -184,19 +184,20 @@ func (s *Service) ClaimSSHReceive(ctx context.Context, repoID, pusherID int64, v
 	if repoID <= 0 || pusherID < 0 || len(verifier) != 64 {
 		return "", 0, errors.New("ssh receive claim requires repository, pusher and execution verifier")
 	}
+	target := execcontext.TargetCode
+	if wiki {
+		target = execcontext.TargetWiki
+	}
 	scope, err := encodeScope(Scope{
-		Family:       FamilyReceiveSSH,
-		RepositoryID: repoID,
-		PusherID:     pusherID,
+		Family:           FamilyReceiveSSH,
+		RepositoryTarget: target,
+		RepositoryID:     repoID,
+		PusherID:         pusherID,
 	})
 	if err != nil {
 		return "", 0, err
 	}
-	target := "main"
-	if wiki {
-		target = "wiki"
-	}
-	owner = nativeownership.NewOwner(FamilyReceiveSSH, fmt.Sprintf("%d/%s", repoID, target))
+	owner = nativeownership.NewOwner(FamilyReceiveSSH, execcontext.ReceiveResource(repoID, target))
 	deadline := time.Now().Add(ReceiveClaimTimeout)
 	backoff := 100 * time.Millisecond
 	for {

@@ -40,7 +40,7 @@ func runRegenerateHooks(ctx context.Context, c *cli.Command) error {
 	// One authority writer owns the regeneration before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, "admin/regenerate-hooks", 0, func(ctx context.Context) error {
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, "admin/regenerate-hooks", 0, nativeoperation_service.AuthorityTarget{}, func(ctx context.Context) error {
 		return repo_service.SyncRepositoryHooks(graceful.GetManager().ShutdownContext())
 	})
 }
@@ -55,5 +55,5 @@ func runRegenerateKeys(ctx context.Context, c *cli.Command) error {
 	// One authority writer owns the regeneration before its effects,
 	// advancing the native revision so old permission observations go
 	// stale.
-	return nativeoperation_service.WithAuthorityOwnership(ctx, "admin/regenerate-keys", 0, asymkey_model.RewriteAllPublicKeys)
+	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, "admin/regenerate-keys", 0, nativeoperation_service.AuthorityTarget{}, asymkey_model.RewriteAllPublicKeys)
 }

@@ -5,7 +5,6 @@ package pull
 
 import (
 	"context"
-	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
 	"errors"
 	"path/filepath"
 	"time"
@@ -18,15 +17,8 @@ import (
 
 const familyCollaboration = execcontext.FamilyCollaboration
 
-// collabScope mirrors the service Scope JSON fields the collaboration
-// writers record. Unknown fields in either direction are ignored by
-// encoding/json, so service-side additions never break this projection.
-type collabScope struct {
-	Kind         string `json:"kind"`
-	Family       string `json:"family,omitempty"`
-	RepositoryID int64  `json:"repository_id"`
-	HeadRef      string `json:"head_ref,omitempty"`
-}
+// collabScope uses the shared persisted ownership contract.
+type collabScope = execcontext.Scope
 
 // withCollabOwnership claims the idle reservation for one pull-service
 // collaboration writer, advancing the revision before its effects, and
@@ -42,7 +34,7 @@ func withCollabOwnership(ctx context.Context, resource string, repositoryID int6
 func withCollabOwnershipScope(ctx context.Context, resource string, scope collabScope, fn func(context.Context) error) error {
 	scope.Kind = nativeoperation_model.OwnerOrdinary
 	scope.Family = familyCollaboration
-	encoded, err := json.Marshal(scope)
+	encoded, err := execcontext.EncodeWriterScope(scope)
 	if err != nil {
 		return err
 	}

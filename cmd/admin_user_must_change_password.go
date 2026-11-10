@@ -58,7 +58,7 @@ func runMustChangePassword(ctx context.Context, c *cli.Command) error {
 	// effects, advancing the native revision so old permission
 	// observations go stale.
 	var n int64
-	if err := nativeoperation_service.WithAuthorityOwnership(ctx, "users/must-change-password", 0, func(ctx context.Context) error {
+	if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, "users/must-change-password", 0, nativeoperation_service.AuthorityTarget{}, func(ctx context.Context) error {
 		updated, err := user_model.SetMustChangePassword(ctx, all, mustChangePassword, c.Args().Slice(), exclude)
 		if err != nil {
 			return err

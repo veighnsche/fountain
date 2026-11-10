@@ -22,7 +22,7 @@ import (
 // kind set. The handshake generation binds this revision so a same-kind
 // native upgrade invalidates previously registered Soda capability
 // markers; forgetting the bump leaves stale markers authoritative.
-const OperationsImplementationRevision = 2
+const OperationsImplementationRevision = 3
 
 // OperationsGeneration derives a stable handshake generation from the
 // operation implementation revision, the installed build identity and

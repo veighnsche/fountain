@@ -157,7 +157,13 @@ func (branch *Branch) GetCommit() (*Commit, error) {
 
 // RenameBranch rename a branch
 func (repo *Repository) RenameBranch(from, to string) error {
-	_, _, err := NewCommand(repo.Ctx, "branch", "-m").AddDynamicArguments(from, to).RunStdString(&RunOpts{Dir: repo.Path})
+	return repo.RenameBranchWithEnv(from, to, nil)
+}
+
+// RenameBranchWithEnv preserves native branch -m semantics while carrying the
+// admitted host identity and proof into each reference-transaction callback.
+func (repo *Repository) RenameBranchWithEnv(from, to string, env []string) error {
+	_, _, err := NewCommand(repo.Ctx, "branch", "-m").AddDynamicArguments(from, to).RunStdString(&RunOpts{Dir: repo.Path, Env: env})
 	return err
 }
 

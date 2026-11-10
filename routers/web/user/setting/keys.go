@@ -70,7 +70,7 @@ func KeysPost(ctx *context.Context) {
 		// advancing the native revision so old permission observations go
 		// stale.
 		doerID := ctx.Doer.ID
-		if err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/principal-key", doerID), 0, func(ctx std_ctx.Context) error {
+		if err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/principal-key", doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/principal-key", ID: doerID}, func(ctx std_ctx.Context) error {
 			_, err := asymkey_model.AddPrincipalKey(ctx, doerID, content, 0)
 			return err
 		}); err != nil {
@@ -102,7 +102,7 @@ func KeysPost(ctx *context.Context) {
 		// stale.
 		doerID := ctx.Doer.ID
 		var keys []*asymkey_model.GPGKey
-		if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/gpg-key", doerID), 0, func(ctx std_ctx.Context) error {
+		if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/gpg-key", doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/gpg-key", ID: doerID}, func(ctx std_ctx.Context) error {
 			var err error
 			keys, err = asymkey_model.AddGPGKey(ctx, doerID, form.Content, token, form.Signature)
 			if err != nil && asymkey_model.IsErrGPGInvalidTokenSignature(err) {
@@ -161,7 +161,7 @@ func KeysPost(ctx *context.Context) {
 		// stale.
 		doerID := ctx.Doer.ID
 		var keyID string
-		if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/gpg-key/verify", doerID), 0, func(ctx std_ctx.Context) error {
+		if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/gpg-key/verify", doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/gpg-key/verify", ID: doerID}, func(ctx std_ctx.Context) error {
 			var err error
 			keyID, err = asymkey_model.VerifyGPGKey(ctx, doerID, form.KeyID, token, form.Signature)
 			if err != nil && asymkey_model.IsErrGPGInvalidTokenSignature(err) {
@@ -211,7 +211,7 @@ func KeysPost(ctx *context.Context) {
 		// advancing the native revision so old permission observations go
 		// stale.
 		doerID := ctx.Doer.ID
-		if err = nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/key", doerID), 0, func(ctx std_ctx.Context) error {
+		if err = nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/key", doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/key", ID: doerID}, func(ctx std_ctx.Context) error {
 			_, err := asymkey_model.AddPublicKey(ctx, doerID, form.Title, content, 0)
 			return err
 		}); err != nil {
@@ -251,7 +251,7 @@ func KeysPost(ctx *context.Context) {
 		// stale.
 		doerID := ctx.Doer.ID
 		var fingerprint string
-		if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("user/%d/key/verify", doerID), 0, func(ctx std_ctx.Context) error {
+		if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/key/verify", doerID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/key/verify", ID: doerID}, func(ctx std_ctx.Context) error {
 			var err error
 			fingerprint, err = asymkey_model.VerifySSHKey(ctx, doerID, form.Fingerprint, token, form.Signature)
 			if err != nil && asymkey_model.IsErrSSHInvalidTokenSignature(err) {
@@ -293,7 +293,7 @@ func DeleteKey(ctx *context.Context) {
 		// stale.
 		doer := ctx.Doer
 		keyID := ctx.FormInt64("id")
-		if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("gpg-key/%d", keyID), 0, func(ctx std_ctx.Context) error {
+		if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("gpg-key/%d", keyID), 0, nativeoperation_service.AuthorityTarget{Operation: "gpg-key", ID: keyID}, func(ctx std_ctx.Context) error {
 			return asymkey_model.DeleteGPGKey(ctx, doer, keyID)
 		}); err != nil {
 			ctx.Flash.Error("DeleteGPGKey: " + err.Error())
@@ -321,7 +321,7 @@ func DeleteKey(ctx *context.Context) {
 		// advancing the native revision so old permission observations go
 		// stale.
 		doer := ctx.Doer
-		if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("key/%d", keyID), 0, func(ctx std_ctx.Context) error {
+		if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("key/%d", keyID), 0, nativeoperation_service.AuthorityTarget{Operation: "key", ID: keyID}, func(ctx std_ctx.Context) error {
 			return asymkey_service.DeletePublicKey(ctx, doer, keyID)
 		}); err != nil {
 			ctx.Flash.Error("DeletePublicKey: " + err.Error())
@@ -334,7 +334,7 @@ func DeleteKey(ctx *context.Context) {
 		// stale.
 		doer := ctx.Doer
 		principalID := ctx.FormInt64("id")
-		if err := nativeoperation_service.WithAuthorityOwnership(ctx, fmt.Sprintf("key/%d", principalID), 0, func(ctx std_ctx.Context) error {
+		if err := nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("key/%d", principalID), 0, nativeoperation_service.AuthorityTarget{Operation: "key", ID: principalID}, func(ctx std_ctx.Context) error {
 			return asymkey_service.DeletePublicKey(ctx, doer, principalID)
 		}); err != nil {
 			ctx.Flash.Error("DeletePublicKey: " + err.Error())
