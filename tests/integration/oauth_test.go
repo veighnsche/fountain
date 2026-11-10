@@ -1949,7 +1949,7 @@ func TestSignInOAuthCallbackSignInRetrieveError(t *testing.T) {
 // The desktop uses a public client and real S256 exchange. Enrollment metadata
 // cannot replace that authorization or activate execution/publication.
 func TestNativeDesktopEnrollment(t *testing.T) {
-	if os.Getenv("FACTORY_FOUNTAIN_NATIVE_PRODUCT_UI") == "1" {
+	if os.Getenv("FACTORY_FOUNTAIN_NATIVE_PRODUCT_UI") == "1" || os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_MERGE") == "1" {
 		// Real fixture file/branch creation needs the standard live hook server
 		// and its exact repository-root configuration, just like other Git tests.
 		onApplicationRun(t, func(t *testing.T, _ *url.URL) { testNativeDesktopEnrollment(t) })
@@ -2323,6 +2323,30 @@ func testNativeDesktopEnrollment(t *testing.T) {
 				defer test.MockVariableValue(&setting.AppPath, binary)()
 				defer test.MockVariableValue(&setting.CustomConf, hookConfig)()
 				require.NoError(t, repo_module.CreateDelegateHooks(repository.RepoPath()))
+				if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_MERGE") == "1" {
+					call(http.MethodPatch, "/api/v1/repos/user2/repo1", map[string]any{"has_actions": true, "allow_fast_forward_only_merge": true}, http.StatusOK)
+					workflow := `name: Native CI
+on: [pull_request]
+jobs:
+  exact-candidate:
+    runs-on: factory-native-conditional
+    if: startsWith(github.head_ref, 'soda/factory/')
+    steps:
+      - name: Check exact published candidate
+        env:
+          CI_ORIGIN: ${{ github.server_url }}
+          CI_COMMIT: ${{ github.sha }}
+        run: |
+          set -eu
+          git clone --no-checkout "$CI_ORIGIN/user2/repo1.git" checked
+          git -C checked fetch origin "$CI_COMMIT"
+          git -C checked checkout --detach "$CI_COMMIT"
+          test "$(git -C checked rev-parse HEAD)" = "$CI_COMMIT"
+          test "$(cat checked/native-publication-fixture.txt)" = 'Real candidate object for conditional publication qualification.'
+          git -C checked diff --check HEAD^ HEAD
+`
+					call(http.MethodPost, "/api/v1/repos/user2/repo1/contents/.forgejo/workflows/factory-native.yml", map[string]any{"branch": repository.DefaultBranch, "content": base64.StdEncoding.EncodeToString([]byte(workflow)), "message": "Configure actual native fixture CI"}, http.StatusCreated)
+				}
 				candidateRepo := filepath.Join(root, "candidate.git")
 				output, err := exec.Command("git", "clone", "--bare", repository.RepoPath(), candidateRepo).CombinedOutput()
 				require.NoError(t, err, string(output))
@@ -2377,6 +2401,9 @@ func testNativeDesktopEnrollment(t *testing.T) {
 				}
 				DecodeJSON(t, call(http.MethodPost, fmt.Sprintf("/api/v1/repos/user2/repo1/issues/%d/comments", objective.Number), map[string]string{"body": "Selected native context.\n"}, http.StatusCreated), &comment)
 				call(http.MethodPost, fmt.Sprintf("/api/v1/repos/user2/repo1/issues/%d/dependencies", objective.Number), map[string]any{"index": prerequisite.Number, "owner": "user2", "repo": "repo1"}, http.StatusCreated)
+				if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_MERGE") == "1" {
+					call(http.MethodPatch, fmt.Sprintf("/api/v1/repos/user2/repo1/issues/%d", prerequisite.Number), map[string]string{"state": "closed"}, http.StatusCreated)
+				}
 				fixture, err := json.Marshal(map[string]any{"number": objective.Number, "id": strconv.FormatInt(objective.ID, 10), "comment": strconv.FormatInt(comment.ID, 10), "dependency": strconv.FormatInt(prerequisite.ID, 10), "dependency_number": prerequisite.Number})
 				require.NoError(t, err)
 				require.NoFileExists(t, filepath.Join(root, "inputs-fixture.json"))
@@ -2389,6 +2416,7 @@ func testNativeDesktopEnrollment(t *testing.T) {
 			var receiveSends atomic.Int32
 			var pullSends atomic.Int32
 			var reviewSends atomic.Int32
+			var mergeSends atomic.Int32
 			var claimSends atomic.Int32
 			var lostPreparation atomic.Bool
 			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2487,11 +2515,26 @@ func testNativeDesktopEnrollment(t *testing.T) {
 					r.Body = io.NopCloser(bytes.NewReader(body))
 					var intent extension.OperationIntent
 					require.NoError(t, json.Unmarshal(body, &intent))
+					if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_MERGE") == "1" && intent.Kind == extension.OperationKindMerge {
+						mergeSends.Add(1)
+						recorder := httptest.NewRecorder()
+						testWebRoutes.ServeHTTP(recorder, r)
+						require.NoError(t, os.WriteFile(filepath.Join(root, "publication-merge-reply.json"), recorder.Body.Bytes(), 0600))
+						http.Error(w, "fixture lost original merge reply", http.StatusServiceUnavailable)
+						return
+					}
 					if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_REVIEW") == "1" && intent.Kind == extension.OperationKindReviewSubmit {
 						reviewSends.Add(1)
 						recorder := httptest.NewRecorder()
 						testWebRoutes.ServeHTTP(recorder, r)
 						require.NoError(t, os.WriteFile(filepath.Join(root, "publication-review-reply.json"), recorder.Body.Bytes(), 0600))
+						if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_MERGE") == "1" && recorder.Code == http.StatusOK {
+							var recorded extension.OperationRecord
+							require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &recorded))
+							if recorded.EffectState == extension.EffectCommitted && recorded.CompletionState == extension.CompletionComplete {
+								require.NoError(t, os.WriteFile(filepath.Join(root, "ci", "review-receipt-ready"), []byte(recorded.OperationID), 0600))
+							}
+						}
 						http.Error(w, "fixture lost original review reply", http.StatusServiceUnavailable)
 						return
 					}
@@ -2538,6 +2581,45 @@ func testNativeDesktopEnrollment(t *testing.T) {
 			server.StartTLS()
 			defer server.Close()
 			restoreURL := test.MockVariableValue(&setting.AppURL, server.URL+"/")
+			if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_MERGE") == "1" {
+				runnerRoot := filepath.Join(root, "ci")
+				for _, dir := range []string{runnerRoot, filepath.Join(runnerRoot, "home"), filepath.Join(runnerRoot, "tmp"), filepath.Join(runnerRoot, "work")} {
+					require.NoError(t, os.MkdirAll(dir, 0700))
+				}
+				var registration struct {
+					Token string `json:"token"`
+				}
+				ciSession := loginUser(t, "user2")
+				ciToken := getTokenForLoggedInUser(t, ciSession, auth_model.AccessTokenScopeWriteRepository)
+				defer func() {
+					jobs := MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/repos/user2/repo1/actions/runners/jobs?limit=50").AddTokenAuth(ciToken), http.StatusOK)
+					require.NoError(t, os.WriteFile(filepath.Join(runnerRoot, "jobs.json"), jobs.Body.Bytes(), 0600))
+					tasks := MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/repos/user2/repo1/actions/tasks?limit=50").AddTokenAuth(ciToken), http.StatusOK)
+					require.NoError(t, os.WriteFile(filepath.Join(runnerRoot, "tasks.json"), tasks.Body.Bytes(), 0600))
+					runs := MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/repos/user2/repo1/actions/runs?limit=50").AddTokenAuth(ciToken), http.StatusOK)
+					require.NoError(t, os.WriteFile(filepath.Join(runnerRoot, "runs.json"), runs.Body.Bytes(), 0600))
+				}()
+				DecodeJSON(t, MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/repos/user2/repo1/actions/runners/registration-token").AddTokenAuth(ciToken), http.StatusOK), &registration)
+				config := fmt.Sprintf("log:\n  level: warn\nrunner:\n  file: %s\n  capacity: 1\n  timeout: 2m\n  shutdown_timeout: 5s\n  insecure: false\n  fetch_interval: 1s\n  labels: [factory-native-conditional:host]\n  envs:\n    GIT_SSL_CAINFO: %s\n    SSL_CERT_FILE: %s\n    TMPDIR: %s\ncache:\n  enabled: false\nhost:\n  workdir_parent: %s\n", filepath.Join(runnerRoot, "runner.json"), filepath.Join(root, "ca.pem"), filepath.Join(root, "ca.pem"), filepath.Join(runnerRoot, "tmp"), filepath.Join(runnerRoot, "work"))
+				configPath := filepath.Join(runnerRoot, "config.yml")
+				require.NoError(t, os.WriteFile(configPath, []byte(config), 0600))
+				environment := append(os.Environ(), "SSL_CERT_FILE="+filepath.Join(root, "ca.pem"), "HOME="+filepath.Join(runnerRoot, "home"), "TMPDIR="+filepath.Join(runnerRoot, "tmp"))
+				register := exec.CommandContext(t.Context(), "/home/vince/.local/bin/forgejo-runner", "--config", configPath, "register", "--no-interactive", "--instance", server.URL, "--name", "factory-native-conditional", "--labels", "factory-native-conditional:host", "--token", registration.Token)
+				register.Env = environment
+				register.Dir = runnerRoot
+				registered, registerErr := register.CombinedOutput()
+				require.NoError(t, os.WriteFile(filepath.Join(runnerRoot, "register.log"), registered, 0600))
+				require.NoError(t, registerErr, "actual runner registration failed; inspect private retained log")
+				output, err := os.OpenFile(filepath.Join(runnerRoot, "runner.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+				require.NoError(t, err)
+				runner := exec.CommandContext(t.Context(), "/bin/bash", "-c", `trap 'exit 0' INT TERM; while [[ ! -f "$1" ]]; do sleep .05; done; exec /home/vince/.local/bin/forgejo-runner --config "$2" daemon`, "fixture-ci-after-review", filepath.Join(runnerRoot, "review-receipt-ready"), configPath)
+				runner.Env = environment
+				runner.Dir = runnerRoot
+				runner.Stdout = output
+				runner.Stderr = output
+				require.NoError(t, runner.Start())
+				defer func() { _ = runner.Process.Signal(os.Interrupt); _ = runner.Wait(); _ = output.Close() }()
+			}
 			command := exec.CommandContext(t.Context(), checker, "--fountain-controller-declared", filepath.Join(root, "profile"), server.URL, controlApp.ClientID)
 			command.Env = append(os.Environ(), "SSL_CERT_FILE="+filepath.Join(root, "ca.pem"))
 			command.Stdin = strings.NewReader(tokens.AccessToken + "\n" + controlTokens.AccessToken)
@@ -2555,6 +2637,9 @@ func testNativeDesktopEnrollment(t *testing.T) {
 			}
 			if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_REVIEW") == "1" {
 				require.EqualValues(t, 1, reviewSends.Load(), "original COMMENT review is never replayed")
+			}
+			if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_MERGE") == "1" {
+				require.EqualValues(t, 1, mergeSends.Load(), "original conditional merge is never replayed")
 			}
 			expectedClaims := 2
 			if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_PAYLOAD") != "" {

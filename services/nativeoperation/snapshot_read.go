@@ -886,7 +886,7 @@ func (l *snapshotLoader) checks(ctx context.Context, sha string) (*sdk.SnapshotC
 			SHA:         converted.SHA,
 			Context:     converted.Context,
 			State:       converted.State,
-			CreatorID:   snapshotIDString(converted.CreatorID),
+			CreatorID:   strconv.FormatInt(converted.CreatorID, 10),
 			CreatedUnix: converted.CreatedUnix,
 			UpdatedUnix: converted.UpdatedUnix,
 			Visible:     true,
