@@ -1948,7 +1948,17 @@ func TestSignInOAuthCallbackSignInRetrieveError(t *testing.T) {
 // The desktop uses a public client and real S256 exchange. Enrollment metadata
 // cannot replace that authorization or activate execution/publication.
 func TestNativeDesktopEnrollment(t *testing.T) {
+	if os.Getenv("FACTORY_FOUNTAIN_NATIVE_PRODUCT_UI") == "1" {
+		// Real fixture file/branch creation needs the standard live hook server
+		// and its exact repository-root configuration, just like other Git tests.
+		onApplicationRun(t, func(t *testing.T, _ *url.URL) { testNativeDesktopEnrollment(t) })
+		return
+	}
 	defer tests.PrepareTestEnv(t)()
+	testNativeDesktopEnrollment(t)
+}
+
+func testNativeDesktopEnrollment(t *testing.T) {
 	defer test.MockVariableValue(&setting.OAuth2.EnableAdditionalGrantScopes, true)()
 	clientID := "ce5a1322-42a7-11ed-b878-0242ac120002"
 	redirect := "http://127.0.0.1/"
@@ -2440,6 +2450,33 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 	if checker := os.Getenv("FACTORY_FOUNTAIN_NATIVE_CHECK"); checker != "" {
 		root := os.Getenv("FACTORY_FOUNTAIN_NATIVE_ROOT")
 		require.True(t, filepath.IsAbs(root) && strings.HasPrefix(root, "/home/"))
+		nativeBase := base
+		if os.Getenv("FACTORY_FOUNTAIN_NATIVE_PRODUCT_UI") == "1" {
+			// The historical fixture marks PR2 merged while its issue remains
+			// open. The native reader correctly refuses those contradictory facts.
+			// Leave that history intact. Prepare a separate repository and real
+			// branch/PR through authenticated APIs, never Factory phase facts.
+			fixtureToken := getTokenForLoggedInUser(t, session, auth_model.AccessTokenScopeWriteUser, auth_model.AccessTokenScopeWriteRepository, auth_model.AccessTokenScopeWriteIssue)
+			created := session.MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, "/api/v1/user/repos", api.CreateRepoOption{Name: "factory-native-reader", AutoInit: true, Readme: "Default", DefaultBranch: "main"}).SetHeader("Authorization", "Bearer "+fixtureToken), http.StatusCreated)
+			require.Equal(t, http.StatusCreated, created.Code)
+			var repository api.Repository
+			DecodeJSON(t, created, &repository)
+			require.Positive(t, repository.ID)
+			prefix := "/api/v1/repos/user2/factory-native-reader"
+			file := session.MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, prefix+"/contents/reader-note.md", api.CreateFileOptions{FileOptions: api.FileOptions{BranchName: "main", NewBranchName: "reader-change", Message: "Add native desktop reader fixture"}, ContentBase64: base64.StdEncoding.EncodeToString([]byte("Native desktop reader fixture.\n"))}).SetHeader("Authorization", "Bearer "+fixtureToken), http.StatusCreated)
+			require.Equal(t, http.StatusCreated, file.Code)
+			opened := session.MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, prefix+"/pulls", api.CreatePullRequestOption{Head: "reader-change", Base: "main", Title: "Read the native desktop candidate", Body: "Preserve this fixture text through native PR views."}).SetHeader("Authorization", "Bearer "+fixtureToken), http.StatusCreated)
+			require.Equal(t, http.StatusCreated, opened.Code)
+			var pull api.PullRequest
+			DecodeJSON(t, opened, &pull)
+			require.NotNil(t, pull.Head)
+			require.NotNil(t, pull.Base)
+			require.NotEqual(t, pull.Head.Sha, pull.Base.Sha)
+			captured, err := json.Marshal(map[string]any{"repository": repository.ID, "name": repository.FullName, "pull": pull.Index, "pull_id": pull.ID, "base": pull.Base.Sha, "head": pull.Head.Sha, "actor": "2"})
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(filepath.Join(root, "reader-fixture.json"), captured, 0o600))
+			nativeBase = prefix + "/factory/desktop/grants"
+		}
 		keyPair, err := tls.LoadX509KeyPair(filepath.Join(root, "server.pem"), filepath.Join(root, "server.key"))
 		require.NoError(t, err)
 		var enrollmentSends atomic.Int32
@@ -2450,7 +2487,7 @@ func TestNativeDesktopEnrollment(t *testing.T) {
 			defer test.MockVariableValue(&setting.OAuth2.AccessTokenExpirationTime, int64(5))()
 		}
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if os.Getenv("FACTORY_FOUNTAIN_NATIVE_OAUTH") == "1" && r.Method == http.MethodPost && r.URL.Path == base {
+			if os.Getenv("FACTORY_FOUNTAIN_NATIVE_OAUTH") == "1" && r.Method == http.MethodPost && r.URL.Path == nativeBase {
 				enrollmentSends.Add(1)
 				if lostEnrollment.CompareAndSwap(false, true) {
 					written := httptest.NewRecorder()
