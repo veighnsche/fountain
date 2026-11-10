@@ -146,7 +146,11 @@ export function createScopedStream(apiHref, websocketClass) {
     const socket = new websocketClass(`${wsBase.protocol}//${target.host}${target.pathname}`);
     if (options.signal) {
       if (options.signal.aborted) socket.close();
-      else options.signal.addEventListener('abort', () => socket.close(), {once: true});
+      else {
+        const abort = () => socket.close();
+        options.signal.addEventListener('abort', abort, {once: true});
+        socket.addEventListener?.('close', () => options.signal.removeEventListener('abort', abort), {once: true});
+      }
     }
     return {socket, close: (code, reason) => socket.close(code, reason)};
   };
@@ -215,11 +219,19 @@ export async function mountContribution(root, hooks = {}) {
     if (invalidated) return;
     invalidated = true;
     invalidationReason = reason;
+    signal?.removeEventListener('abort', onHostAbort);
     lifetime.abort();
     closeSockets();
     owner?.retire(reason);
   };
-  signal?.addEventListener('abort', () => invalidate('authority-revoked'), {once: true});
+  function onHostAbort() {
+    try {
+      invalidate('authority-revoked');
+    } catch (error) {
+      console.error('Could not retire aborted contribution', error);
+    }
+  }
+  signal?.addEventListener('abort', onHostAbort, {once: true});
   const rawRequest = createScopedRequest(parsed.apiHref, parsed.sessionGeneration, fetcher);
   const request = (relativePath, options = {}) => {
     if (isTerminal()) throw new TypeError('Contribution transport is retired');
@@ -247,7 +259,11 @@ export async function mountContribution(root, hooks = {}) {
   const stream = (...args) => {
     if (isTerminal()) throw new TypeError('Contribution transport is retired');
     const contribution = createScopedStream(parsed.apiHref, websocketClass)(...args);
-    sockets.add(contribution.socket);
+    const {socket} = contribution;
+    if (socket.readyState !== 3) {
+      sockets.add(socket);
+      socket.addEventListener?.('close', () => sockets.delete(socket), {once: true});
+    }
     return contribution;
   };
   const navigate = (path, {replace = false} = {}) => {
@@ -276,12 +292,14 @@ export async function mountContribution(root, hooks = {}) {
     module = await importer(parsed.entryHref);
   } catch (error) {
     if (invalidated) return null;
+    invalidate('contribution-unavailable');
     console.error('Could not load workspace view', error);
     root.textContent = 'Could not load this workspace view.';
     return null;
   }
   if (invalidated) return null;
   if (typeof module.mount !== 'function') {
+    invalidate('contribution-unavailable');
     root.textContent = 'Could not load this workspace view.';
     return null;
   }
@@ -308,6 +326,7 @@ export async function mountContribution(root, hooks = {}) {
     // Retire already disposes the handle; both states are terminal.
     if (state === 'disposed' || state === 'retired') return;
     state = 'disposed';
+    signal?.removeEventListener('abort', onHostAbort);
     lifetime.abort();
     closeSockets();
     handle.dispose?.();
@@ -343,6 +362,7 @@ export async function mountContribution(root, hooks = {}) {
     retire: (reason) => {
       if (state === 'retired' || state === 'disposed') return;
       state = 'retired';
+      signal?.removeEventListener('abort', onHostAbort);
       lifetime.abort();
       closeSockets();
       try {
