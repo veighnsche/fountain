@@ -1,27 +1,24 @@
 import {hideElem, showElem} from '../utils/dom.js';
-import {getComboMarkdownEditor, initComboMarkdownEditor} from './comp/ComboMarkdownEditor.js';
-import {contributionRootSelector} from '../native-lifecycle.js';
+import {initComboMarkdownEditor} from './comp/ComboMarkdownEditor.js';
+import {contributionRootSelector, createPageFeatureRun} from '../native-lifecycle.js';
 
 let attachmentsController = null;
 let releaseController = null;
-let releaseEditor = null;
 let newAttachmentCount = 0;
 
 export function retireRepoRelease() {
-  attachmentsController?.abort();
+  attachmentsController?.dispose();
   attachmentsController = null;
 }
 
 export function retireRepoReleaseNew() {
-  releaseController?.abort();
+  releaseController?.dispose();
   releaseController = null;
-  releaseEditor?.destroy();
-  releaseEditor = null;
 }
 
-export function initRepoRelease() {
+export function initRepoRelease(run = createPageFeatureRun()) {
   retireRepoRelease();
-  attachmentsController = new AbortController();
+  attachmentsController = run;
   const {signal} = attachmentsController;
   for (const el of document.querySelectorAll('.remove-rel-attach')) {
     if (el.closest(contributionRootSelector)) continue;
@@ -35,16 +32,19 @@ export function initRepoRelease() {
   }
 }
 
-export function initRepoReleaseNew() {
+export function initRepoReleaseNew(run = createPageFeatureRun()) {
   retireRepoReleaseNew();
   const root = document.querySelector('.repository.new.release');
   if (!root || root.closest(contributionRootSelector)) return;
-  releaseController = new AbortController();
+  releaseController = run;
   const {signal} = releaseController;
   newAttachmentCount = 0;
 
   initTagNameEditor(signal);
-  const initialized = initRepoReleaseEditor();
+  const initialized = initRepoReleaseEditor(run).catch((error) => {
+    run.dispose();
+    if (error?.name !== 'AbortError') throw error;
+  });
   initAddExternalLinkButton(signal);
   return initialized;
 }
@@ -81,17 +81,16 @@ function initTagNameEditor(signal) {
   }, {signal});
 }
 
-async function initRepoReleaseEditor() {
+async function initRepoReleaseEditor(run) {
   const editor = document.querySelector(
     '.repository.new.release .combo-markdown-editor',
   );
-  if (!editor) {
+  if (!editor || editor.closest(contributionRootSelector)) {
     return;
   }
-  const initialized = initComboMarkdownEditor(editor);
-  releaseEditor = getComboMarkdownEditor(editor);
-  const instance = await initialized;
-  if (releaseEditor !== instance || !editor.isConnected) instance.destroy();
+  const instance = await initComboMarkdownEditor(editor, {signal: run.signal});
+  const release = run.own(() => instance.destroy());
+  if (!run.current() || !editor.isConnected) release();
 }
 
 function initAddExternalLinkButton(signal) {

@@ -11,7 +11,7 @@ import {
   LineElement,
   Filler,
 } from 'chart.js';
-import {GET} from '../modules/fetch.js';
+import {createGraphRequest} from '../native-graph.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
 import {Line as ChartLine} from 'vue-chartjs';
 import {
@@ -20,7 +20,6 @@ import {
   fillEmptyStartDaysWithZeroes,
 } from '../utils/time.js';
 import {chartJsColors} from '../utils/color.js';
-import {sleep} from '../utils.js';
 import 'chartjs-adapter-dayjs-4/dist/chartjs-adapter-dayjs-4.esm';
 import $ from 'jquery';
 import {pathEscapeSegments} from '../utils/url.js';
@@ -70,7 +69,7 @@ export default {
   },
   data: () => ({
     isLoading: false,
-    graphController: null,
+    graphRequest: createGraphRequest(),
     errorText: '',
     totalStats: {},
     sortedContributors: {},
@@ -94,7 +93,7 @@ export default {
     });
   },
   beforeUnmount() {
-    this.graphController?.abort();
+    this.graphRequest.dispose();
     $(this.$el.querySelector('#repo-contributors')).dropdown('destroy');
   },
   methods: {
@@ -117,24 +116,8 @@ export default {
     },
 
     async fetchGraphData() {
-      this.graphController?.abort();
-      const controller = new AbortController();
-      this.graphController = controller;
-      this.isLoading = true;
-      try {
-        let response;
-        do {
-          if (controller.signal.aborted) return;
-          response = await GET(`${this.repoLink}/activity/contributors/data`, {signal: controller.signal});
-          if (controller.signal.aborted) return;
-          if (response.status === 202) {
-            await sleep(1000); // wait for 1 second before retrying
-          }
-        } while (response.status === 202);
-        if (controller.signal.aborted) return;
-        if (response.ok) {
-          const data = await response.json();
-          if (controller.signal.aborted) return;
+      return this.graphRequest.run(`${this.repoLink}/activity/contributors/data`, {
+        apply: (data) => {
           const {total, ...rest} = data;
           // below line might be deleted if we are sure go produces map always sorted by keys
           total.weeks = Object.fromEntries(Object.entries(total.weeks).map((x) => [parseInt(x[0]), x[1]]).sort((a, b) => a[0] - b[0]));
@@ -154,14 +137,10 @@ export default {
           this.sortContributors();
           this.totalStats = total;
           this.errorText = '';
-        } else {
-          this.errorText = response.statusText;
-        }
-      } catch (err) {
-        if (!controller.signal.aborted) this.errorText = err.message;
-      } finally {
-        if (!controller.signal.aborted) this.isLoading = false;
-      }
+        },
+        error: (message) => { this.errorText = message },
+        loading: (value) => { this.isLoading = value },
+      });
     },
 
     filterContributorWeeksByDateRange() {

@@ -7,24 +7,13 @@ import {attachRefIssueContextPopup} from './contextpopup.js';
 import {POST} from '../modules/fetch.js';
 import {initTab} from '../modules/tab.ts';
 import {showModal} from '../modules/modal.ts';
-import {contributionRootSelector, currentPageGeneration} from '../native-lifecycle.js';
+import {contributionRootSelector, createPageFeatureRun} from '../native-lifecycle.js';
 
-// Page-lifetime state for the repository editor. Every listener and the
-// CodeMirror view created by init are released by retire; re-init after
-// retire rebuilds them against the entered document.
-let editorView = null;
-let editorGeneration = -1;
-let editorTabController = null;
-let previewHandler = null;
-let previewTabEl = null;
-let quickPullEls = [];
-let filenameEl = null;
-let commitButtonEl = null;
-let commitHandler = null;
+let editorRun = null;
 
-function onPreviewClick(form) {
+function onPreviewClick(form, run) {
   return async function () {
-    const generation = editorGeneration;
+    if (!run.current()) return;
     const $this = $(this);
     let context = `${$this.data('context')}/`;
     const mode = $this.data('markup-mode') || 'comment';
@@ -37,27 +26,28 @@ function onPreviewClick(form) {
     formData.append('branch_path', $this.data('branch-path'));
     formData.append('text', form.find(`.tab[data-tab="${form.find('.switch').data('write')}"] textarea`).val());
     formData.append('file_path', $treePathEl.val());
+    const panel = form.find(`.tab[data-tab="${form.find('.switch').data('preview')}"]`);
     try {
-      const response = await POST($this.data('url'), {data: formData});
+      const response = await POST($this.data('url'), {data: formData, signal: run.signal});
+      if (!run.current()) return;
       const data = await response.text();
-      if (generation !== currentPageGeneration()) return;
-      renderPreviewPanelContent(form.find(`.tab[data-tab="${form.find('.switch').data('preview')}"]`), data);
+      if (!run.current()) return;
+      renderPreviewPanelContent(panel, data);
     } catch (error) {
-      if (generation === currentPageGeneration()) console.error('Error:', error);
+      if (run.current() && error?.name !== 'AbortError') console.error('Error:', error);
     }
   };
 }
 
-function initEditPreviewTab($form) {
+function initEditPreviewTab($form, run) {
   const $tabMenu = $form.find('.switch');
   if (!$tabMenu.length) return;
-  editorTabController = new AbortController();
-  initTab($tabMenu[0], {signal: editorTabController.signal});
+  initTab($tabMenu[0], {signal: run.signal});
   const $previewTab = $tabMenu.find(`.item[data-tab="${$tabMenu.data('preview')}"]`);
   if ($previewTab.length) {
-    previewTabEl = $previewTab[0];
-    previewHandler = onPreviewClick($form);
-    $previewTab.on('click', previewHandler);
+    const handler = onPreviewClick($form, run);
+    $previewTab.on('click', handler);
+    run.own(() => $previewTab.off('click', handler));
   }
 }
 
@@ -134,86 +124,65 @@ function onFilenameKeydown(e) {
   }
 }
 
-export function initRepoEditor() {
+export function initRepoEditor(run = createPageFeatureRun()) {
   const $form = $('.repository .edit.form');
   if ($form.length && $form[0].closest(contributionRootSelector)) return;
   retireRepoEditor();
-  editorGeneration = currentPageGeneration();
-  const generation = editorGeneration;
-  initEditPreviewTab($form);
+  editorRun = run;
+  initEditPreviewTab($form, run);
 
-  quickPullEls = Array.from(document.querySelectorAll('.js-quick-pull-choice-option'));
-  for (const el of quickPullEls) el.addEventListener('change', onQuickPullChange);
-
-  const $editFilename = $('#file-name');
-  filenameEl = $editFilename[0] ?? null;
-  if (filenameEl) {
-    filenameEl.addEventListener('input', onFilenameInput);
-    filenameEl.addEventListener('keydown', onFilenameKeydown);
+  for (const el of document.querySelectorAll('.js-quick-pull-choice-option')) {
+    if (!el.closest(contributionRootSelector)) el.addEventListener('change', onQuickPullChange, {signal: run.signal});
   }
-
+  const filename = document.getElementById('file-name');
+  if (filename && !filename.closest(contributionRootSelector)) {
+    filename.addEventListener('input', onFilenameInput, {signal: run.signal});
+    filename.addEventListener('keydown', onFilenameKeydown, {signal: run.signal});
+  }
   const $editArea = $('.repository.editor textarea#edit_area');
-  if (!$editArea.length || !filenameEl) return;
-
-  (async () => {
-    const editor = await createCodeEditor($editArea[0], filenameEl);
-    // The page retired while CodeMirror loaded: destroy the fresh view
-    // instead of wiring a detached editor.
-    if (generation !== currentPageGeneration()) {
-      destroyCodeEditor(editor);
+  if (!$editArea.length || $editArea[0].closest(contributionRootSelector) || !filename || filename.closest(contributionRootSelector)) return;
+  const commitButton = document.getElementById('commit-button');
+  const $editForm = $('.ui.edit.form');
+  const hasPosted = $('input[name="page_has_posted"]').val() === 'true';
+  const value = new URLSearchParams(window.location.search).get('value');
+  return (async () => {
+    const editor = await createCodeEditor($editArea[0], filename, run);
+    const release = run.own(() => destroyCodeEditor(editor));
+    if (!run.current() || !$editArea[0].isConnected) {
+      release();
       return;
     }
-    editorView = editor;
-    const commitButton = document.getElementById('commit-button');
-    commitButtonEl = commitButton;
-    const $editForm = $('.ui.edit.form');
     const dirtyFileClass = 'dirty-file';
-    if ($('input[name="page_has_posted"]').val() !== 'true' && commitButton) {
-      commitButton.disabled = true;
-    }
+    if (!hasPosted && commitButton) commitButton.disabled = true;
     $editForm.areYouSure({
       silent: true,
       dirtyClass: dirtyFileClass,
       fieldSelector: ':input:not(.commit-form-wrapper :input)',
       change($form2) {
+        if (!run.current()) return;
         const dirty = $form2[0]?.classList.contains(dirtyFileClass);
         if (commitButton) commitButton.disabled = !dirty;
       },
     });
-    const params = new URLSearchParams(window.location.search);
-    const value = params.get('value');
     if (value) editor.setValue(value);
-    commitHandler = (e) => {
+    commitButton?.addEventListener('click', (event) => {
       if (!$editArea.val()) {
-        e.preventDefault();
-        showModal('edit-empty-content-modal', () => { document.querySelector('.edit.form')?.requestSubmit() });
+        event.preventDefault();
+        showModal('edit-empty-content-modal', () => {
+          if (run.current()) $form[0]?.requestSubmit();
+        });
       }
-    };
-    commitButton?.addEventListener('click', commitHandler);
-  })();
+    }, {signal: run.signal});
+  })().catch((error) => {
+    run.dispose();
+    if (error?.name !== 'AbortError') throw error;
+  });
 }
 
 export function retireRepoEditor() {
-  editorTabController?.abort();
-  editorTabController = null;
-  if (previewTabEl && previewHandler) $(previewTabEl).off('click', previewHandler);
-  previewTabEl = null;
-  previewHandler = null;
-  for (const el of quickPullEls) el.removeEventListener('change', onQuickPullChange);
-  quickPullEls = [];
-  if (filenameEl) {
-    filenameEl.removeEventListener('input', onFilenameInput);
-    filenameEl.removeEventListener('keydown', onFilenameKeydown);
-    filenameEl = null;
-  }
-  if (commitButtonEl && commitHandler) commitButtonEl.removeEventListener('click', commitHandler);
-  commitButtonEl = null;
-  commitHandler = null;
-  if (editorView) destroyCodeEditor(editorView);
-  editorView = null;
-  editorGeneration = -1;
-  // areYouSure binds document-level dirty tracking per form; its handlers
-  // live on the outgoing form element and die with the region swap.
+  const run = editorRun;
+  editorRun = null;
+  run?.dispose();
 }
 
 export function renderPreviewPanelContent($panelPreviewer, data) {

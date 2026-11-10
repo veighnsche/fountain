@@ -1,21 +1,27 @@
-import {getComboMarkdownEditor, initComboMarkdownEditor} from './comp/ComboMarkdownEditor.js';
-import {contributionRootSelector} from '../native-lifecycle.js';
+import {initComboMarkdownEditor} from './comp/ComboMarkdownEditor.js';
+import {contributionRootSelector, createPageFeatureRun} from '../native-lifecycle.js';
 
-let milestoneEditor = null;
+let milestoneRun = null;
 
 export function retireRepoMilestoneEditor() {
-  milestoneEditor?.destroy();
-  milestoneEditor = null;
+  const run = milestoneRun;
+  milestoneRun = null;
+  run?.dispose();
 }
 
-export async function initRepoMilestoneEditor() {
+export async function initRepoMilestoneEditor(run = createPageFeatureRun()) {
   retireRepoMilestoneEditor();
+  milestoneRun = run;
   const editor = document.querySelector('.page-content.repository.milestone .combo-markdown-editor');
   if (!editor || editor.closest(contributionRootSelector)) {
     return;
   }
-  const initialized = initComboMarkdownEditor(editor);
-  milestoneEditor = getComboMarkdownEditor(editor);
-  const instance = await initialized;
-  if (milestoneEditor !== instance || !editor.isConnected) instance.destroy();
+  try {
+    const instance = await initComboMarkdownEditor(editor, {signal: run.signal});
+    const release = run.own(() => instance.destroy());
+    if (!run.current() || !editor.isConnected) release();
+  } catch (error) {
+    run.dispose();
+    if (error?.name !== 'AbortError') throw error;
+  }
 }

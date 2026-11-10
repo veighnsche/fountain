@@ -1,42 +1,30 @@
-import {createApp} from 'vue';
-import {contributionRootSelector, currentPageGeneration} from '../native-lifecycle.js';
+import {contributionRootSelector, createPageFeatureRun} from '../native-lifecycle.js';
+import {createNativeVueMount} from '../native-vue.js';
 
-let nativeMount = null;
+const nativeMount = createNativeVueMount();
 
 export function retireRepoRecentCommits() {
-  const mount = nativeMount;
-  nativeMount = null;
-  mount?.app?.unmount();
+  nativeMount.dispose();
 }
 
-export async function initRepoRecentCommits() {
+export async function initRepoRecentCommits(run = createPageFeatureRun()) {
   const el = document.getElementById('repo-recent-commits-chart');
-  if (!el?.closest('.page-content') || el.closest(contributionRootSelector) || nativeMount?.element === el) return;
-
-  retireRepoRecentCommits();
-  const mount = {element: el};
-  nativeMount = mount;
-  const generation = currentPageGeneration();
-
-  try {
-    const {default: RepoRecentCommits} = await import(/* webpackChunkName: "recent-commits-graph" */'../components/RepoRecentCommits.vue');
-    if (nativeMount !== mount || generation !== currentPageGeneration() || !el.isConnected || document.getElementById('repo-recent-commits-chart') !== el) {
-      if (nativeMount === mount) retireRepoRecentCommits();
-      return;
-    }
-    mount.app = createApp(RepoRecentCommits, {
-      locale: {
-        loadingTitle: el.getAttribute('data-locale-loading-title'),
-        loadingTitleFailed: el.getAttribute('data-locale-loading-title-failed'),
-        recentCommitsTitle: el.getAttribute('data-locale-recent-commits-title'),
-        loadingInfo: el.getAttribute('data-locale-loading-info'),
+  if (!el?.closest('.page-content') || el.closest(contributionRootSelector)) return;
+  const props = {
+    repoLink: window.config.pageData.repoLink || '',
+    locale: {
+      loadingTitle: el.getAttribute('data-locale-loading-title'),
+      loadingTitleFailed: el.getAttribute('data-locale-loading-title-failed'),
+      recentCommitsTitle: el.getAttribute('data-locale-recent-commits-title'),
+      loadingInfo: el.getAttribute('data-locale-loading-info'),
+    },
+  };
+  const failedMessage = el.getAttribute('data-locale-component-failed-to-load');
+  return nativeMount.mount([{element: el, props, current: () => Boolean(el.closest('.page-content'))}], run,
+    () => import(/* webpackChunkName: "recent-commits-graph" */'../components/RepoRecentCommits.vue'), {
+      onError(error) {
+        console.error('RepoRecentCommits failed to load', error);
+        el.textContent = failedMessage;
       },
     });
-    mount.app.mount(el);
-  } catch (err) {
-    if (nativeMount !== mount) return;
-    retireRepoRecentCommits();
-    console.error('RepoRecentCommits failed to load', err);
-    el.textContent = el.getAttribute('data-locale-component-failed-to-load');
-  }
 }

@@ -2,6 +2,7 @@
 import $ from 'jquery';
 import {SvgIcon} from '../svg.js';
 import {GET} from '../modules/fetch.js';
+import {getPageData} from '../native-lifecycle.js';
 
 const {appSubUrl, assetUrlPrefix} = window.config;
 
@@ -16,9 +17,12 @@ const commitStatus = {
 
 export default {
   components: {SvgIcon},
+  props: {
+    initialData: {type: Object, default: () => getPageData().dashboardRepoList || {}},
+    locationSearch: {type: String, default: () => window.location.search},
+  },
   data() {
-    const {pageData} = window.config;
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(this.locationSearch);
     const tab = params.get('repo-search-tab') || 'repos';
     const reposFilter = params.get('repo-search-filter') || 'all';
     const privateFilter = params.get('repo-search-private') || 'both';
@@ -67,7 +71,7 @@ export default {
       organizationId: 0,
 
       subUrl: appSubUrl,
-      ...pageData.dashboardRepoList,
+      ...this.initialData,
       activeIndex: -1, // don't select anything at load, first cursor down will select
     };
   },

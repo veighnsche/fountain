@@ -19,6 +19,11 @@ export interface EditorOptions {
   onContentChange?: (update: ViewUpdate) => void;
 }
 
+export interface EditorLifetime {
+  signal?: AbortSignal;
+  current?: () => boolean;
+}
+
 export interface CodemirrorEditor {
   codemirrorView: CodeMirrorView;
   codemirrorLanguage: CodeMirrorLanguage;
@@ -37,14 +42,36 @@ export async function createCodemirror(
   textarea: HTMLTextAreaElement,
   filename: string,
   editorOpts: EditorOptions,
+  lifetime: EditorLifetime = {},
 ): Promise<CodemirrorEditor> {
-  const codemirrorView = await import(/* webpackChunkName: "codemirror" */ '@codemirror/view');
-  const codemirrorCommands = await import(/* webpackChunkName: "codemirror" */ '@codemirror/commands');
-  const codemirrorState = await import(/* webpackChunkName: "codemirror" */ '@codemirror/state');
-  const codemirrorSearch = await import(/* webpackChunkName: "codemirror" */ '@codemirror/search');
-  const codemirrorLanguage = await import(/* webpackChunkName: "codemirror" */ '@codemirror/language');
-  const codemirrorAutocomplete = await import(/* webpackChunkName: "codemirror" */ '@codemirror/autocomplete');
-  const {tags: t} = await import(/* webpackChunkName: "codemirror" */ '@lezer/highlight');
+  const current = () => !lifetime.signal?.aborted && (lifetime.current?.() ?? true);
+  const assertCurrent = () => {
+    if (!current()) throw new DOMException('CodeMirror initialization was retired', 'AbortError');
+  };
+  const checkFailure = (error: unknown): never => {
+    assertCurrent();
+    throw error;
+  };
+  assertCurrent();
+  editorOpts = {...editorOpts};
+  const container = textarea.parentNode.querySelector('.codemirror-container');
+  const initialValue = textarea.value;
+  const darkTheme = isDarkTheme();
+  const hasSearchPanel = Boolean(document.getElementById('editor-find'));
+  const codemirrorView = await import(/* webpackChunkName: "codemirror" */ '@codemirror/view').catch(checkFailure);
+  assertCurrent();
+  const codemirrorCommands = await import(/* webpackChunkName: "codemirror" */ '@codemirror/commands').catch(checkFailure);
+  assertCurrent();
+  const codemirrorState = await import(/* webpackChunkName: "codemirror" */ '@codemirror/state').catch(checkFailure);
+  assertCurrent();
+  const codemirrorSearch = await import(/* webpackChunkName: "codemirror" */ '@codemirror/search').catch(checkFailure);
+  assertCurrent();
+  const codemirrorLanguage = await import(/* webpackChunkName: "codemirror" */ '@codemirror/language').catch(checkFailure);
+  assertCurrent();
+  const codemirrorAutocomplete = await import(/* webpackChunkName: "codemirror" */ '@codemirror/autocomplete').catch(checkFailure);
+  assertCurrent();
+  const {tags: t} = await import(/* webpackChunkName: "codemirror" */ '@lezer/highlight').catch(checkFailure);
+  assertCurrent();
 
   const languageDescriptions = languages(codemirrorLanguage);
   const code = codemirrorLanguage.LanguageDescription.matchFilename(
@@ -58,8 +85,6 @@ export async function createCodemirror(
       textarea.dispatchEvent(new Event('change'));
     }
   });
-
-  const darkTheme = isDarkTheme();
 
   const theme = codemirrorView.EditorView.theme(
     {
@@ -108,7 +133,7 @@ export async function createCodemirror(
         padding: '0.5em 0.5em',
       },
     },
-    {dark: isDarkTheme()},
+    {dark: darkTheme},
   );
 
   const highlightStyle = codemirrorLanguage.HighlightStyle.define([
@@ -147,14 +172,14 @@ export async function createCodemirror(
     {tag: t.link, color: darkTheme ? '#6a9955' : '#006ab1', textDecoration: 'underline'},
   ]);
 
-  const container = textarea.parentNode.querySelector('.codemirror-container');
-
   const wordWrap = new codemirrorState.Compartment();
   const language = new codemirrorState.Compartment();
   const tabSize = new codemirrorState.Compartment();
 
+  const initialLanguage = code ? await code.load().catch(checkFailure) : [];
+  assertCurrent();
   const view = new codemirrorView.EditorView({
-    doc: textarea.value,
+    doc: initialValue,
     parent: container,
     extensions: [
       codemirrorView.lineNumbers(),
@@ -170,7 +195,7 @@ export async function createCodemirror(
         ...codemirrorCommands.defaultKeymap,
         ...codemirrorCommands.historyKeymap,
         // If no search panel, then disable the search keymap
-        ...(document.getElementById('editor-find') ? codemirrorSearch.searchKeymap : []),
+        ...(hasSearchPanel ? codemirrorSearch.searchKeymap : []),
         ...codemirrorLanguage.foldKeymap,
         ...codemirrorAutocomplete.completionKeymap,
         codemirrorCommands.indentWithTab,
@@ -193,12 +218,17 @@ export async function createCodemirror(
       wordWrap.of(
         editorOpts.wordWrap ? codemirrorView.EditorView.lineWrapping : [],
       ),
-      language.of(code ? await code.load() : []),
-      codemirrorView.EditorView.updateListener.of(onContentChange),
+      language.of(initialLanguage),
+      codemirrorView.EditorView.updateListener.of((update) => { if (current()) onContentChange(update); }),
+      codemirrorView.ViewPlugin.define((registered) => ({destroy: () => window.codeEditors?.delete(registered)})),
       theme,
     ],
   });
-
+  if (!current()) {
+    const error = new DOMException('CodeMirror initialization was retired', 'AbortError') as DOMException & {cause?: unknown};
+    try { view.destroy() } catch (cause) { error.cause = cause }
+    throw error;
+  }
   exportEditor(view);
 
   container.querySelector('.editor-loading')?.remove();

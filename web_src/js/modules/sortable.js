@@ -1,7 +1,16 @@
-export async function createSortable(el, opts = {}) {
-  const {Sortable} = await import(/* webpackChunkName: "sortablejs" */'sortablejs');
+function retiredSortableError() {
+  return new DOMException('Sortable initialization was retired', 'AbortError');
+}
 
-  return new Sortable(el, {
+export async function createSortable(el, opts = {}, lifetime = {}) {
+  const current = () => !lifetime.signal?.aborted && (lifetime.current?.() ?? true);
+  if (!current()) throw retiredSortableError();
+  const {Sortable} = await import(/* webpackChunkName: "sortablejs" */'sortablejs').catch((error) => {
+    if (!current()) throw retiredSortableError();
+    throw error;
+  });
+  if (!current()) throw retiredSortableError();
+  const sortable = new Sortable(el, {
     animation: 150,
     ghostClass: 'card-ghost',
     onChoose: (e) => {
@@ -16,4 +25,10 @@ export async function createSortable(el, opts = {}) {
     },
     ...opts,
   });
+  if (!current()) {
+    const error = retiredSortableError();
+    try { sortable.destroy() } catch (cause) { error.cause = cause }
+    throw error;
+  }
+  return sortable;
 }

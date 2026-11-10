@@ -7,13 +7,17 @@
 // navigation. Registered page features must not double-initialize: re-entry
 // without retire is a no-op, and retire runs in reverse registration order.
 
+import {createFeatureRun} from './native-feature-run.js';
+export {setPageConfig} from './native-page-config.js';
+
 // Native features must not bind or retire contribution-owned subtrees: the
 // persistent panels home (including parked roots) and page/panel roots.
 export const contributionRootSelector = '[data-extension-panels],[data-extension-page],[data-extension-panel]';
 
 const pageFeatures = new Map();
 const globalFeatures = new Map();
-const activePageFeatures = new Set();
+const activePageFeatures = new Map();
+const pageRuns = new Set();
 let globalsInitialized = false;
 let pageGeneration = 0;
 let nativeNavigator = null;
@@ -44,35 +48,75 @@ export function initGlobalFeatures() {
 export function initPageFeatures() {
   for (const [name, feature] of pageFeatures) {
     if (activePageFeatures.has(name)) continue;
-    feature.init();
-    activePageFeatures.add(name);
+    const run = createPageFeatureRun();
+    const active = {feature, run};
+    activePageFeatures.set(name, active);
+    try {
+      const result = feature.init(run);
+      Promise.resolve(result).catch((error) => {
+        try {
+          stopFeature(name, active);
+        } catch (cleanupError) {
+          console.error(`Could not retire native feature "${name}"`, cleanupError);
+        }
+        if (error?.name !== 'AbortError') console.error(`Could not initialize native feature "${name}"`, error);
+      });
+    } catch (error) {
+      try {
+        stopFeature(name, active);
+      } catch (cleanupError) {
+        console.error(`Could not retire native feature "${name}"`, cleanupError);
+      }
+      throw error;
+    }
   }
 }
 
-export function retirePageFeatures() {
+function stopFeature(name, active) {
   let firstError;
-  for (const [name, feature] of Array.from(pageFeatures).reverse()) {
-    if (!activePageFeatures.has(name) || typeof feature.retire !== 'function') {
-      activePageFeatures.delete(name);
-      continue;
-    }
+  try {
+    active.run.dispose();
+  } catch (error) {
+    firstError = error;
+  }
+  if (activePageFeatures.get(name) === active) {
+    activePageFeatures.delete(name);
     try {
-      feature.retire();
+      active.feature.retire?.();
     } catch (error) {
       firstError ??= error;
     }
-    activePageFeatures.delete(name);
   }
-  pageGeneration++;
   if (firstError) throw firstError;
 }
 
-// Replaces the per-document page data wholesale: stale keys from the previous
-// document must not survive. Only per-page fields move here; document-stable
-// window.config values (appUrl, i18n, ...) stay untouched.
-export function setPageConfig(pageData) {
-  window.config.pageData = pageData ?? {};
-  window.config.mentionValues = Array.from(new Map((window.config.pageData.mentionValues ?? []).map((value) => [value.name, value])).values());
+export function retirePageFeatures() {
+  pageGeneration++;
+  const retiringRuns = Array.from(pageRuns).reverse();
+  let firstError;
+  for (const [name, active] of Array.from(activePageFeatures).reverse()) {
+    try {
+      stopFeature(name, active);
+    } catch (error) {
+      firstError ??= error;
+    }
+  }
+  for (const run of retiringRuns) {
+    try {
+      run.dispose();
+    } catch (error) {
+      firstError ??= error;
+    }
+  }
+  if (firstError) throw firstError;
+}
+
+export function createPageFeatureRun() {
+  const generation = pageGeneration;
+  const run = createFeatureRun(() => generation === pageGeneration);
+  pageRuns.add(run);
+  run.own(() => pageRuns.delete(run));
+  return run;
 }
 
 // Native leaf templates contribute contextual data without executing scripts.

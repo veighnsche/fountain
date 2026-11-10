@@ -120,7 +120,7 @@ import {initDirAuto} from './modules/dirauto.js';
 import {initRepositorySearch, retireRepositorySearch} from './features/repo-search.js';
 import {initColorPickers, retireColorPickers} from './features/colorpicker.js';
 import {initRepoMilestoneEditor, retireRepoMilestoneEditor} from './features/repo-milestone.js';
-import {initModalClose} from './modules/modal.ts';
+import {initModalClose, retireNativeModals} from './modules/modal.ts';
 import {initExtensionPages, initExtensionWorkspace} from './features/extensions.js';
 
 // Register first so reverse retirement cleans HTMX after other native
@@ -175,6 +175,7 @@ registerPageFeature('native-node-enhancement', {
   init: () => enhanceNativeNodes(document),
   retire: retireNativeNodes,
 });
+registerPageFeature('native-dialogs', {init: () => {}, retire: retireNativeModals});
 // Sortable table headers on admin list pages (/admin/users, /admin/orgs).
 registerPageFeature('native-table-sort', {
   init: initTableSort,

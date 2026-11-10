@@ -1,6 +1,6 @@
 import {basename, extname} from '../utils.js';
 import {hideElem, onInputDebounce, showElem} from '../utils/dom.js';
-import {createCodemirror, type CodemirrorEditor, type EditorOptions} from './codemirror.ts';
+import {createCodemirror, type CodemirrorEditor, type EditorOptions, type EditorLifetime} from './codemirror.ts';
 import {EditorView} from '@codemirror/view';
 import type {LanguageSupport} from '@codemirror/language';
 
@@ -10,6 +10,20 @@ interface EditorConfig {
 }
 
 export class SettableEditorView extends EditorView {
+  __codeEditorCleanup?: () => void;
+  private codeEditorDestroyed?: boolean;
+
+  public override destroy() {
+    if (this.codeEditorDestroyed) return;
+    this.codeEditorDestroyed = true;
+    try {
+      this.__codeEditorCleanup?.();
+    } finally {
+      this.__codeEditorCleanup = undefined;
+      super.destroy();
+    }
+  }
+
   public setValue(value: string) {
     // Replace \n with the actual newline character and unescape escaped \n
     value = value.replaceAll(/(?<!\\)\\n/g, '\n').replaceAll(/\\\\n/g, '\\n');
@@ -25,7 +39,8 @@ function getEditorconfig(input: HTMLInputElement): null | EditorConfig {
   }
 }
 
-async function updateEditor(editor: CodemirrorEditor, filename: string, lineWrapExts: string[]) {
+async function updateEditor(editor: CodemirrorEditor, filename: string, lineWrapExts: string[], current: () => boolean) {
+  if (!current()) return;
   const fileOption = getFileBasedOptions(filename, lineWrapExts);
   editor.view.dispatch({
     effects: editor.compartments.wordWrap.reconfigure(fileOption.wordWrap ? editor.codemirrorView.EditorView.lineWrapping : []),
@@ -34,9 +49,9 @@ async function updateEditor(editor: CodemirrorEditor, filename: string, lineWrap
   const currentLanguage = editor.compartments.language.get(editor.view.state) as Array<unknown> | LanguageSupport;
   const newLanguage = editor.codemirrorLanguage.LanguageDescription.matchFilename(editor.languages, filename);
   if (!currentLanguage || (currentLanguage as Array<unknown>).length === 0 || !newLanguage || (currentLanguage as LanguageSupport).language.name.toLowerCase() !== newLanguage.name.toLowerCase()) {
-    editor.view.dispatch({
-      effects: editor.compartments.language.reconfigure(newLanguage ? await newLanguage.load() : []),
-    });
+    const language = newLanguage ? await newLanguage.load() : [];
+    if (!current()) return;
+    editor.view.dispatch({effects: editor.compartments.language.reconfigure(language)});
   }
 }
 
@@ -65,29 +80,46 @@ function togglePreviewDisplay(previewable: boolean) {
   }
 }
 
-export async function createCodeEditor(textarea: HTMLTextAreaElement, filenameInput: HTMLInputElement): Promise<SettableEditorView> {
+export async function createCodeEditor(textarea: HTMLTextAreaElement, filenameInput: HTMLInputElement, lifetime: EditorLifetime = {}): Promise<SettableEditorView> {
+  let destroyed = false;
+  const current = () => !destroyed && !lifetime.signal?.aborted && (lifetime.current?.() ?? true);
+  if (!current()) throw new DOMException('Code editor initialization was retired', 'AbortError');
   const filename = basename(filenameInput.value);
   const previewableExts = new Set((textarea.getAttribute('data-previewable-extensions') || '').split(','));
   const lineWrapExts = (textarea.getAttribute('data-line-wrap-extensions') || '').split(',');
   const previewable = previewableExts.has(extname(filename));
   const editorConfig = getEditorconfig(filenameInput);
+  const searchButton = document.querySelector('#editor-find') as HTMLElement | null;
+  const switchEl = document.querySelector('#editor-bar .switch');
+  const writeTab = document.querySelector('#editor-bar .switch .item[data-tab="write"]');
 
   togglePreviewDisplay(previewable);
 
   const editor = await createCodemirror(textarea, filename, {
     ...getFileBasedOptions(filenameInput.value, lineWrapExts),
     ...getEditorConfigOptions(editorConfig),
-  });
+  }, lifetime);
+  if (!current()) {
+    editor.view.destroy();
+    throw new DOMException('Code editor initialization was retired', 'AbortError');
+  }
 
+  let filenameRevision = 0;
   const onFilenameInput = onInputDebounce(async () => {
-    const name = filenameInput.value;
-    togglePreviewDisplay(previewableExts.has(extname(name)));
-    await updateEditor(editor, name, lineWrapExts);
+    if (!current()) return;
+    const revision = ++filenameRevision;
+    try {
+      const name = filenameInput.value;
+      togglePreviewDisplay(previewableExts.has(extname(name)));
+      await updateEditor(editor, name, lineWrapExts, () => current() && revision === filenameRevision);
+    } catch (error) {
+      if (current() && revision === filenameRevision && error?.name !== 'AbortError') console.error('Could not update code editor language', error);
+    }
   });
   filenameInput.addEventListener('input', onFilenameInput);
 
-  const searchButton = document.querySelector('#editor-find') as HTMLElement | null;
   const onSearchClick = () => {
+    if (!current()) return;
     const search = editor.codemirrorSearch;
     const view = editor.view;
     if (search.searchPanelOpen(view.state)) search.closeSearchPanel(view);
@@ -95,33 +127,28 @@ export async function createCodeEditor(textarea: HTMLTextAreaElement, filenameIn
   };
   searchButton?.addEventListener('click', onSearchClick);
 
-  const switchEl = document.querySelector('#editor-bar .switch');
-  const writeTab = document.querySelector('#editor-bar .switch .item[data-tab="write"]');
   const onSwitchClick = () => {
-    if (!searchButton || !writeTab) return;
+    if (!current() || !searchButton || !writeTab) return;
     if (writeTab.classList.contains('active')) showElem(searchButton);
     else hideElem(searchButton);
   };
   switchEl?.addEventListener('click', onSwitchClick);
 
-  const view = Object.setPrototypeOf(editor.view, SettableEditorView.prototype) as SettableEditorView & {__codeEditorCleanup?: () => void};
+  const view = Object.setPrototypeOf(editor.view, SettableEditorView.prototype) as SettableEditorView;
   // Retirement destroys the CodeMirror view and every listener wired above.
   // The textarea keeps its last synced value, so no edit is lost on retire.
   view.__codeEditorCleanup = () => {
+    destroyed = true;
     filenameInput.removeEventListener('input', onFilenameInput);
     (onFilenameInput as unknown as {cancel?: () => void}).cancel?.();
     searchButton?.removeEventListener('click', onSearchClick);
     switchEl?.removeEventListener('click', onSwitchClick);
-    (window.codeEditors as unknown as Set<unknown> | undefined)?.delete(editor.view);
-    editor.view.destroy();
   };
   return view;
 }
 
 export function destroyCodeEditor(view: unknown) {
-  const cleanup = (view as {__codeEditorCleanup?: () => void} | null)?.__codeEditorCleanup;
-  if (typeof cleanup === 'function') cleanup();
-  else if (view && typeof (view as EditorView).destroy === 'function') (view as EditorView).destroy();
+  if (view && typeof (view as EditorView).destroy === 'function') (view as EditorView).destroy();
 }
 
 function getEditorConfigOptions(ec: null | EditorConfig): Pick<EditorOptions, 'indentSize' | 'tabSize' | 'indentStyle'> {

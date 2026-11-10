@@ -38,7 +38,7 @@ test('selection syncs panels and bulk action posts the checked ids once', async 
 
   document.querySelector('.issue-action').click();
   await vi.waitFor(() => expect(updateIssuesMeta).toHaveBeenCalledTimes(1));
-  expect(updateIssuesMeta).toHaveBeenCalledWith('/issues/action', 'close', '1', '9');
+  expect(updateIssuesMeta).toHaveBeenCalledWith('/issues/action', 'close', '1', '9', expect.objectContaining({signal: expect.any(AbortSignal), current: expect.any(Function)}));
 });
 
 test('retire detaches list handlers', async () => {

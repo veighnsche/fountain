@@ -7,15 +7,14 @@ import {showErrorToast} from '../modules/toast.js';
 import {createSortable} from '../modules/sortable.js';
 import {DELETE, POST} from '../modules/fetch.js';
 import {parseDom} from '../utils.js';
-import {contributionRootSelector} from '../native-lifecycle.js';
+import {contributionRootSelector, createPageFeatureRun} from '../native-lifecycle.js';
 
 // Element listeners and widget instances owned by the current page. Retire
 // removes exactly what init added; nodes inside retained contribution roots
 // are never bound or destroyed here.
 let bindings = [];
 let authorDropdownEl = null;
-let pinSortable = null;
-let pinSortableWanted = false;
+let listRun = null;
 
 function bind(target, type, handler) {
   target.addEventListener(type, handler);
@@ -26,7 +25,7 @@ function isNative(el) {
   return el && !el.closest(contributionRootSelector);
 }
 
-function initRepoIssueListCheckboxes() {
+function initRepoIssueListCheckboxes(run) {
   const issueSelectAll = document.querySelector('.issue-checkbox-all');
   if (!issueSelectAll || !isNative(issueSelectAll)) return; // logged out state
   const issueCheckboxes = Array.from(document.querySelectorAll('.issue-checkbox')).filter(isNative);
@@ -96,16 +95,17 @@ function initRepoIssueListCheckboxes() {
       // for delete
       if (action === 'delete') {
         const confirmText = e.target.getAttribute('data-action-delete-confirm');
-        if (!await confirmModal({content: confirmText, buttonColor: 'orange'})) {
+        if (!await confirmModal({content: confirmText, buttonColor: 'orange'}, run)) {
           return;
         }
       }
+      if (!run.current()) return;
 
       try {
-        await updateIssuesMeta(url, action, issueIDs, elementId);
-        window.location.reload();
+        await updateIssuesMeta(url, action, issueIDs, elementId, run);
+        if (run.current()) window.location.reload();
       } catch (err) {
-        showErrorToast(err.responseJSON?.error ?? err.message);
+        if (run.current()) showErrorToast(err.responseJSON?.error ?? err.message);
       }
     });
   }
@@ -179,7 +179,7 @@ function initRepoIssueListAuthorDropdown() {
   };
 }
 
-function initPinRemoveButton() {
+function initPinRemoveButton(run) {
   for (const button of document.getElementsByClassName('issue-card-unpin')) {
     if (!isNative(button)) continue;
     bind(button, 'click', async (event) => {
@@ -187,24 +187,34 @@ function initPinRemoveButton() {
       const id = Number(el.getAttribute('data-issue-id'));
 
       // Send the unpin request
-      const response = await DELETE(el.getAttribute('data-unpin-url'));
-      if (response.ok) {
-        // Delete the tooltip
-        el._tippy.destroy();
-        // Remove the Card
-        el.closest(`div.issue-card[data-issue-id="${id}"]`).remove();
+      try {
+        const response = await DELETE(el.getAttribute('data-unpin-url'));
+        if (!run.current()) return;
+        if (response.ok) {
+          // Delete the tooltip
+          el._tippy.destroy();
+          // Remove the Card
+          el.closest(`div.issue-card[data-issue-id="${id}"]`).remove();
+        }
+      } catch (error) {
+        if (run.current()) console.error(error);
       }
     });
   }
 }
 
-async function pinMoveEnd(e) {
+async function pinMoveEnd(e, run) {
+  if (!run.current()) return;
   const url = e.item.getAttribute('data-move-url');
   const id = Number(e.item.getAttribute('data-issue-id'));
-  await POST(url, {data: {id, position: e.newIndex + 1}});
+  try {
+    await POST(url, {data: {id, position: e.newIndex + 1}});
+  } catch (error) {
+    if (run.current()) console.error(error);
+  }
 }
 
-async function initIssuePinSort() {
+async function initIssuePinSort(run) {
   const pinDiv = document.getElementById('issue-pins');
 
   if (pinDiv === null || !isNative(pinDiv)) return;
@@ -212,22 +222,16 @@ async function initIssuePinSort() {
   // If the User is not a Repo Admin, we don't need to proceed
   if (!pinDiv.hasAttribute('data-is-repo-admin')) return;
 
-  initPinRemoveButton();
+  initPinRemoveButton(run);
 
   // If only one issue pinned, we don't need to make this Sortable
   if (pinDiv.children.length < 2) return;
 
-  pinSortableWanted = true;
   const instance = await createSortable(pinDiv, {
     group: 'shared',
-    onEnd: pinMoveEnd,
-  });
-  // The page may have retired while the sortable chunk loaded.
-  if (!pinSortableWanted) {
-    instance.destroy();
-    return;
-  }
-  pinSortable = instance;
+    onEnd: (event) => pinMoveEnd(event, run),
+  }, run);
+  run.own(() => instance.destroy());
 }
 
 function initArchivedLabelFilter() {
@@ -268,18 +272,28 @@ function initArchivedLabelFilter() {
 
 let listActive = false;
 
-export function initRepoIssueList() {
+export function initRepoIssueList(run = createPageFeatureRun()) {
   if (listActive) return;
   if (!document.querySelectorAll('.page-content.repository.issue-list, .page-content.repository.milestone-issue-list').length) return;
   listActive = true;
-  initRepoIssueListCheckboxes();
+  listRun = run;
+  initRepoIssueListCheckboxes(run);
   initRepoIssueListAuthorDropdown();
-  initIssuePinSort();
+  const pending = initIssuePinSort(run);
   initArchivedLabelFilter();
+  return pending;
 }
 
 export function retireRepoIssueList() {
   listActive = false;
+  const run = listRun;
+  listRun = null;
+  let firstError;
+  try {
+    run?.dispose();
+  } catch (error) {
+    firstError = error;
+  }
   for (const [target, type, handler] of bindings) {
     target.removeEventListener(type, handler);
   }
@@ -288,7 +302,5 @@ export function retireRepoIssueList() {
     if (authorDropdownEl.isConnected) $(authorDropdownEl).dropdown('destroy');
     authorDropdownEl = null;
   }
-  pinSortableWanted = false;
-  pinSortable?.destroy();
-  pinSortable = null;
+  if (firstError) throw firstError;
 }

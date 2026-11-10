@@ -8,7 +8,7 @@ import {toAbsoluteUrl} from '../utils.js';
 import {initDropzone} from './common-global.js';
 import {POST, GET} from '../modules/fetch.js';
 import {showErrorToast} from '../modules/toast.js';
-import {contributionRootSelector} from '../native-lifecycle.js';
+import {contributionRootSelector, createPageFeatureRun} from '../native-lifecycle.js';
 
 const {appSubUrl} = window.config;
 
@@ -26,6 +26,12 @@ function installDocumentHandlersOnce(key, install) {
 const nativeBindings = new Map();
 const jqueryBindings = new Map();
 const widgetInstances = new Map();
+let pullUpdateRun = null;
+let wipToggleRun = null;
+let reviewRun = null;
+let commentEditorsRun = null;
+let issueCommentsRun = null;
+let assignMeRun = null;
 
 function bucket(map, name) {
   if (!map.has(name)) map.set(name, []);
@@ -270,29 +276,35 @@ export function initRepoIssueCodeCommentCancel() {
   });
 }
 
-export function initRepoPullRequestUpdate() {
+export function initRepoPullRequestUpdate(run = createPageFeatureRun()) {
   // Pull Request update button
   const pullUpdateButton = document.querySelector('.update-button > button');
   if (!pullUpdateButton || pullUpdateButton.closest(contributionRootSelector)) return;
+  if (bucket(nativeBindings, 'pull-update').some(([element]) => element === pullUpdateButton)) return;
+  retireRepoPullRequestUpdate();
+  pullUpdateRun = run;
 
   bindNative('pull-update', pullUpdateButton, 'click', async (e) => {
     e.preventDefault();
+    if (!run.current() || pullUpdateButton.classList.contains('is-loading')) return;
     const redirect = pullUpdateButton.getAttribute('data-redirect');
     pullUpdateButton.classList.add('is-loading');
     let response;
     try {
       response = await POST(pullUpdateButton.getAttribute('data-do'));
     } catch (error) {
-      console.error(error);
+      if (run.current()) console.error(error);
     } finally {
-      pullUpdateButton.classList.remove('is-loading');
+      if (run.current()) pullUpdateButton.classList.remove('is-loading');
     }
+    if (!run.current()) return;
     let data;
     try {
       data = await response?.json(); // the response is probably not a JSON
     } catch (error) {
-      console.error(error);
+      if (run.current()) console.error(error);
     }
+    if (!run.current()) return;
     if (data?.redirect) {
       window.location.href = data.redirect;
     } else if (redirect) {
@@ -319,6 +331,8 @@ export function initRepoPullRequestUpdate() {
 }
 
 export function retireRepoPullRequestUpdate() {
+  pullUpdateRun?.dispose();
+  pullUpdateRun = null;
   unbindNative('pull-update');
   destroyWidgets('pull-update');
 }
@@ -412,29 +426,33 @@ export function retireRepoIssueWipTitle() {
   unbindJQuery('wip-title');
 }
 
-export async function updateIssuesMeta(url, action, issue_ids, id) {
+export async function updateIssuesMeta(url, action, issue_ids, id, run = undefined) {
+  if (run && !run.current()) return;
   try {
     const response = await POST(url, {data: new URLSearchParams({action, issue_ids, id})});
     if (!response.ok) {
       throw new Error('Failed to update issues meta');
     }
   } catch (error) {
-    console.error(error);
+    if (!run || run.current()) console.error(error);
   }
 }
 
-export function initRepoIssueComments() {
+export function initRepoIssueComments(run = createPageFeatureRun()) {
   if (!$('.repository.view.issue .timeline').length) return;
+  if (issueCommentsRun?.current()) run = issueCommentsRun;
+  issueCommentsRun = run;
 
   bindJQuery('issue-comments', $('.re-request-review'), 'click', async function (e) {
+    if (!run.current()) return;
     e.preventDefault();
     const url = this.getAttribute('data-update-url');
     const issueId = this.getAttribute('data-issue-id');
     const id = this.getAttribute('data-id');
     const isChecked = this.classList.contains('checked');
 
-    await updateIssuesMeta(url, isChecked ? 'detach' : 'attach', issueId, id);
-    window.location.reload();
+    await updateIssuesMeta(url, isChecked ? 'detach' : 'attach', issueId, id, run);
+    if (run.current()) window.location.reload();
   });
 
   installDocumentHandlersOnce('issue-comments-target', () => {
@@ -458,10 +476,13 @@ export function initRepoIssueComments() {
 }
 
 export function retireRepoIssueComments() {
+  issueCommentsRun?.dispose();
+  issueCommentsRun = null;
   unbindJQuery('issue-comments');
 }
 
-export async function handleReply($el) {
+export async function handleReply($el, run = reviewRun ?? createPageFeatureRun()) {
+  if (!run.current() || !$el[0]?.isConnected || $el[0].closest(contributionRootSelector)) return;
   hideElem($el);
   const $form = $el.closest('.comment-code-cloud').find('.comment-form');
   showElem($form);
@@ -473,14 +494,24 @@ export async function handleReply($el) {
     // When the page is loaded, the dropzone is initialized by initGlobalDropzone, but the editor is not initialized.
     // When the form is submitted and partially reload, none of them is initialized.
     const dropzone = $form.find('.dropzone')[0];
-    if (!dropzone.dropzone) await initDropzone(dropzone);
-    editor = await initComboMarkdownEditor($form.find('.combo-markdown-editor'));
+    if (dropzone && !dropzone.dropzone) {
+      await initDropzone(dropzone, undefined, run);
+      if (!run.current() || !$form[0].isConnected) return;
+    }
+  }
+  editor = await initComboMarkdownEditor($form.find('.combo-markdown-editor'), {signal: run.signal});
+  if (!run.current() || !$form[0].isConnected) {
+    editor.destroy();
+    return;
   }
   editor.focus();
   return editor;
 }
 
-export function initRepoPullRequestReview() {
+export function initRepoPullRequestReview(run = createPageFeatureRun()) {
+  if (reviewRun?.current()) return;
+  retireRepoPullRequestReview();
+  reviewRun = run;
   if (window.location.hash && window.location.hash.startsWith('#issuecomment-')) {
     // set scrollRestoration to 'manual' when there is a hash in url, so that the scroll position will not be remembered after refreshing
     if (window.history.scrollRestoration !== 'manual') {
@@ -541,17 +572,26 @@ export function initRepoPullRequestReview() {
 
     $(document).on('click', 'button.comment-form-reply', async function (e) {
       e.preventDefault();
-      await handleReply($(this));
+      const run = reviewRun;
+      if (!run?.current()) return;
+      try {
+        await handleReply($(this), run);
+      } catch (error) {
+        if (run.current()) console.error(error);
+      }
     });
   });
 
   const $reviewBox = $('.review-box-panel');
+  let initialized;
   if ($reviewBox.length === 1 && !getComboMarkdownEditor($reviewBox.find('.combo-markdown-editor'))) {
-    const _promise = initComboMarkdownEditor($reviewBox.find('.combo-markdown-editor'));
+    initialized = initComboMarkdownEditor($reviewBox.find('.combo-markdown-editor'), {signal: run.signal}).then((editor) => {
+      if (!run.current() || !$reviewBox[0].isConnected) editor.destroy();
+    });
   }
 
   // The following part is only for diff views
-  if (!$('.repository.pull.diff').length) return;
+  if (!$('.repository.pull.diff').length) return initialized;
 
   const $reviewBtn = $reviewBox.parent().find('.js-btn-review');
   const $panel = $reviewBox.parent().find('.review-box-panel');
@@ -578,6 +618,8 @@ export function initRepoPullRequestReview() {
     $(document).on('click', '.add-code-comment', async function (e) {
       if (e.target.classList.contains('btn-add-single')) return; // https://github.com/go-gitea/gitea/issues/4745
       e.preventDefault();
+      const run = reviewRun;
+      if (!run?.current() || this.closest(contributionRootSelector)) return;
 
       const isSplit = this.closest('.code-diff')?.classList.contains('code-diff-split');
       const side = this.getAttribute('data-side');
@@ -605,25 +647,35 @@ export function initRepoPullRequestReview() {
       const $commentCloud = $td.find('.comment-code-cloud');
       if (!$commentCloud.length && !$ntr.find('button[name="pending_review"]').length) {
         try {
-          const response = await GET(this.closest('[data-new-comment-url]')?.getAttribute('data-new-comment-url'));
+          const response = await GET(this.closest('[data-new-comment-url]')?.getAttribute('data-new-comment-url'), {signal: run.signal});
+          if (!run.current()) return;
           const html = await response.text();
+          if (!run.current() || !$td[0]?.isConnected) return;
           $td.html(html);
           $td.find("input[name='line']").val(idx);
           $td.find("input[name='side']").val(side === 'left' ? 'previous' : 'proposed');
           $td.find("input[name='path']").val(path);
 
-          await initDropzone($td.find('.dropzone')[0]);
-          const editor = await initComboMarkdownEditor($td.find('.combo-markdown-editor'));
+          await initDropzone($td.find('.dropzone')[0], undefined, run);
+          if (!run.current() || !$td[0].isConnected) return;
+          const editor = await initComboMarkdownEditor($td.find('.combo-markdown-editor'), {signal: run.signal});
+          if (!run.current() || !$td[0].isConnected) {
+            editor.destroy();
+            return;
+          }
           editor.focus();
         } catch (error) {
-          console.error(error);
+          if (run.current()) console.error(error);
         }
       }
     });
   });
+  return initialized;
 }
 
 export function retireRepoPullRequestReview() {
+  reviewRun?.dispose();
+  reviewRun = null;
   unbindJQuery('pr-review');
   destroyWidgets('pr-review');
 }
@@ -649,10 +701,13 @@ export function findWipPrefix(string, wipPrefixes) {
   return wipPrefixes.find((prefix) => string.toUpperCase().startsWith(prefix.toUpperCase()));
 }
 
-export function initRepoIssueWipToggle() {
+export function initRepoIssueWipToggle(run = createPageFeatureRun()) {
+  if (bucket(jqueryBindings, 'wip-toggle').length) return;
+  wipToggleRun = run;
   // Toggle WIP
   bindJQuery('wip-toggle', $('.toggle-wip a, .toggle-wip button'), 'click', async (e) => {
     e.preventDefault();
+    if (!run.current()) return;
     const toggleWip = e.currentTarget.closest('.toggle-wip');
     const title = toggleWip.getAttribute('data-title');
     const wipPrefixes = JSON.parse(toggleWip.getAttribute('data-wip-prefixes'));
@@ -664,17 +719,20 @@ export function initRepoIssueWipToggle() {
       params.append('title', prefix !== undefined ? title.slice(prefix.length).trim() : `${wipPrefixes[0].trim()} ${title}`);
 
       const response = await POST(updateUrl, {data: params});
+      if (!run.current()) return;
       if (!response.ok) {
         throw new Error('Failed to toggle WIP status');
       }
       window.location.reload();
     } catch (error) {
-      console.error(error);
+      if (run.current()) console.error(error);
     }
   });
 }
 
 export function retireRepoIssueWipToggle() {
+  wipToggleRun?.dispose();
+  wipToggleRun = null;
   unbindJQuery('wip-toggle');
 }
 
@@ -761,11 +819,14 @@ export function retireRepoIssueBranchSelect() {
   unbindNative('branch-select');
 }
 
-export function initRepoIssueAssignMe() {
+export function initRepoIssueAssignMe(run = createPageFeatureRun()) {
   // Assign to me button
   const assignMe = document.querySelector('.ui.assignees.list .item.no-select .select-assign-me');
   if (!assignMe || assignMe.closest(contributionRootSelector)) return;
+  if (assignMeRun?.current()) run = assignMeRun;
+  assignMeRun = run;
   bindNative('assign-me', assignMe, 'click', (e) => {
+    if (!run.current()) return;
     e.preventDefault();
     const selectMe = e.target;
     const noSelect = selectMe.parentElement;
@@ -778,8 +839,9 @@ export function initRepoIssueAssignMe() {
           selectMe.getAttribute('data-action'),
           selectMe.getAttribute('data-issue-id'),
           selectMe.getAttribute('data-id'),
+          run,
         );
-        reloadConfirmDraftComment();
+        if (run.current()) reloadConfirmDraftComment();
       })();
     } else {
       for (const item of selectorList.querySelectorAll('.item')) {
@@ -797,45 +859,55 @@ export function initRepoIssueAssignMe() {
 }
 
 export function retireRepoIssueAssignMe() {
+  assignMeRun?.dispose();
+  assignMeRun = null;
   unbindNative('assign-me');
 }
 
-export function initSingleCommentEditor($commentForm) {
+export function initSingleCommentEditor($commentForm, run = createPageFeatureRun()) {
   // pages:
   // * normal new issue/pr page, no status-button
   // * issue/pr view page, with comment form, has status-button
-  const opts = {};
+  commentEditorsRun = run;
+  const opts = {signal: run.signal};
   const statusButton = document.getElementById('status-button');
   if (statusButton) {
     opts.onContentChanged = (editor) => {
+      if (!run.current() || !statusButton.isConnected) return;
       const newText = statusButton.getAttribute(editor.value().trim() ? 'data-status-and-comment' : 'data-status');
       statusButton.querySelector('span').textContent = newText;
     };
   }
   const $editor = $commentForm.find('.combo-markdown-editor');
-  if (!getComboMarkdownEditor($editor)) {
-    initComboMarkdownEditor($editor, opts);
-  }
+  return initComboMarkdownEditor($editor, opts).then((editor) => {
+    if (!run.current() || !$commentForm[0].isConnected) editor.destroy();
+  });
 }
 
-export function initIssueTemplateCommentEditors($commentForm) {
+export function initIssueTemplateCommentEditors($commentForm, run = createPageFeatureRun()) {
   // pages:
   // * new issue with issue template
   const $comboFields = $commentForm.find('.combo-editor-dropzone');
+  commentEditorsRun = run;
 
   const initCombo = async ($combo) => {
     const $dropzoneContainer = $combo.find('.form-field-dropzone');
     const $formField = $combo.find('.form-field-real');
     const $markdownEditor = $combo.find('.combo-markdown-editor');
 
-    if (getComboMarkdownEditor($markdownEditor)) return;
     const editor = await initComboMarkdownEditor($markdownEditor, {
+      signal: run.signal,
       onContentChanged: (editor) => {
-        $formField.val(editor.value());
+        if (run.current() && $formField[0].isConnected) $formField.val(editor.value());
       },
     });
+    if (!run.current() || !$combo[0].isConnected) {
+      editor.destroy();
+      return;
+    }
 
-    $formField.on('focus.repoIssueTemplateEditors', async () => {
+    $formField.off('focus.repoIssueTemplateEditors').on('focus.repoIssueTemplateEditors', async () => {
+      if (!run.current()) return;
       // deactivate all markdown editors
       showElem($commentForm.find('.combo-editor-dropzone .form-field-real'));
       hideElem($commentForm.find('.combo-editor-dropzone .combo-markdown-editor'));
@@ -846,17 +918,21 @@ export function initIssueTemplateCommentEditors($commentForm) {
       showElem($markdownEditor);
       showElem($dropzoneContainer);
 
-      await editor.switchToUserPreference();
-      editor.focus();
+      try {
+        await editor.switchToUserPreference();
+        if (run.current() && $combo[0].isConnected) editor.focus();
+      } catch (error) {
+        if (run.current()) console.error(error);
+      }
     });
   };
 
-  for (const el of $comboFields) {
-    initCombo($(el));
-  }
+  return Promise.all(Array.from($comboFields, (el) => initCombo($(el))));
 }
 
 export function retireIssueTemplateCommentEditors() {
+  commentEditorsRun?.dispose();
+  commentEditorsRun = null;
   $('.combo-editor-dropzone .form-field-real').off('focus.repoIssueTemplateEditors');
 }
 

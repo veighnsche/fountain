@@ -11,10 +11,18 @@ export function pollingOk() {
 // They do not capture a retired workflow dispatch element.
 let actionsListBound = false;
 
+function onBeforeActionsPoll(event) {
+  const source = event.detail?.elt;
+  if (!source?.matches?.('[data-native-actions-poll]') || source.closest(contributionRootSelector)) return;
+  const visibilityChange = event.detail.requestConfig?.triggeringEvent?.type === 'visibilitychange';
+  if (visibilityChange ? document.visibilityState !== 'visible' : !pollingOk()) event.preventDefault();
+}
+
 export function initRepoActionsList() {
   window.pollingOk = pollingOk;
   if (actionsListBound) return;
   actionsListBound = true;
+  document.addEventListener('htmx:beforeRequest', onBeforeActionsPoll);
   document.addEventListener('click', (event) => {
     const dropdown = document.getElementById('workflow_dispatch_dropdown');
     if (!dropdown || dropdown.closest(contributionRootSelector)) return;

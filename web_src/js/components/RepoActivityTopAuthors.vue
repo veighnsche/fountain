@@ -22,12 +22,13 @@ Chart.register(
 export default {
   components: {Bar},
   props: {
+    initialAuthors: {type: Array, default: () => window.config.pageData.repoActivityTopAuthors || []},
     locale: {
       type: Object,
       required: true,
     },
   },
-  data: () => ({
+  data: (component) => ({
     colors: {
       barColor: 'green',
     },
@@ -38,7 +39,7 @@ export default {
     // * home_link: (...)
     // * login: (...)
     // * name: (...)
-    activityTopAuthors: (window.config.pageData.repoActivityTopAuthors || []).map((author) => ({...author})),
+    activityTopAuthors: component.initialAuthors.map((author) => ({...author})),
     i18nCommitActivity: this,
   }),
   computed: {

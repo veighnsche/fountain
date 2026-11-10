@@ -47,21 +47,44 @@ class ComboMarkdownEditor {
     this.elementIdSuffix = ComboMarkdownEditor.idSuffixCounter++;
     this.controller = new AbortController();
     this.controller.signal.addEventListener('abort', () => this.previewController?.abort(), {once: true});
+    this.onLifetimeAbort = () => {
+      try { this.destroy() } catch (error) { console.error('Could not destroy Markdown editor', error) }
+    };
+    options.signal?.addEventListener('abort', this.onLifetimeAbort, {once: true});
+    if (options.signal?.aborted) this.destroy();
   }
 
   destroy() {
     if (this.controller.signal.aborted) return;
     this.controller.abort();
-    cancelAnimationFrame(this.focusFrame);
-    this.ignoredTabToast?.hideToast();
-    this.textareaAutosize?.destroy();
-    this.switchToTextarea();
-    if (this.linkModal) $(this.linkModal).modal('destroy');
-    if (this.container._giteaComboMarkdownEditor === this) delete this.container._giteaComboMarkdownEditor;
-    if (this.textarea?._giteaComboMarkdownEditor === this) delete this.textarea._giteaComboMarkdownEditor;
+    let firstError;
+    for (const cleanup of [
+      () => this.options.signal?.removeEventListener('abort', this.onLifetimeAbort),
+      () => cancelAnimationFrame(this.focusFrame),
+      () => this.ignoredTabToast?.hideToast(),
+      () => this.textareaAutosize?.destroy(),
+      () => this.switchToTextarea(),
+      ...[this.tableModal, this.linkModal].filter(Boolean).map(({element, parent}) => () => {
+        try {
+          $(element).modal('hide');
+          $(element).modal('destroy');
+        } finally {
+          if (parent?.isConnected) parent.append(element);
+          else element.remove();
+        }
+      }),
+      () => {
+        if (this.container._giteaComboMarkdownEditor === this) delete this.container._giteaComboMarkdownEditor;
+        if (this.textarea?._giteaComboMarkdownEditor === this) delete this.textarea._giteaComboMarkdownEditor;
+      },
+    ]) {
+      try { cleanup() } catch (error) { firstError ??= error }
+    }
+    if (firstError) throw firstError;
   }
 
   async init() {
+    if (this.controller.signal.aborted) return;
     this.prepareEasyMDEToolbarActions();
     this.setupContainer();
     this.setupTab();
@@ -209,7 +232,11 @@ class ComboMarkdownEditor {
     easymdeButton?.addEventListener('click', async (e) => {
       e.preventDefault();
       this.userPreferredEditor = 'easymde';
-      await this.switchToEasyMDE();
+      try {
+        await this.switchToEasyMDE();
+      } catch (error) {
+        if (!this.controller.signal.aborted) console.error('Could not initialize Markdown editor', error);
+      }
     }, {signal: this.controller.signal});
 
     if (this.dropzone) {
@@ -275,10 +302,11 @@ class ComboMarkdownEditor {
       formData.append('wiki', this.previewWiki);
       try {
         const response = await POST(this.previewUrl, {data: formData, signal: controller.signal});
+        if (controller.signal.aborted || this.controller.signal.aborted) return;
         const data = await response.text();
         if (!controller.signal.aborted && !this.controller.signal.aborted) renderPreviewPanelContent($(panelPreviewer), data);
       } catch (error) {
-        if (!controller.signal.aborted && !this.controller.signal.aborted) throw error;
+        if (!controller.signal.aborted && !this.controller.signal.aborted) console.error('Could not render Markdown preview', error);
       }
     }, {signal: this.controller.signal});
   }
@@ -318,6 +346,7 @@ class ComboMarkdownEditor {
 
   setupTableInserter() {
     const newTableModal = this.container.querySelector('div[data-modal-name="new-markdown-table"]');
+    this.tableModal = {element: newTableModal, parent: newTableModal.parentElement};
     newTableModal.setAttribute('data-markdown-table-modal-id', this.elementIdSuffix);
 
     const button = newTableModal.querySelector('button[data-selector-name="ok-button"]');
@@ -353,7 +382,7 @@ class ComboMarkdownEditor {
 
   setupLinkInserter() {
     const newLinkModal = this.container.querySelector('div[data-modal-name="new-markdown-link"]');
-    this.linkModal = newLinkModal;
+    this.linkModal = {element: newLinkModal, parent: newLinkModal.parentElement};
     newLinkModal.setAttribute('data-markdown-link-modal-id', this.elementIdSuffix);
     const textarea = document.getElementById(`_combo_markdown_editor_${this.elementIdSuffix}`);
 
@@ -407,18 +436,22 @@ class ComboMarkdownEditor {
   }
 
   switchToTextarea() {
-    if (this.tribute) this.tribute.detach(this.tributeElement);
+    const tribute = this.tribute;
+    const easyMDE = this.easyMDE;
     this.tribute = null;
-    if (!this.easyMDE) return;
-    showElem(this.textareaMarkdownToolbar);
-    if (this.easyMDE) {
-      this.easyMDE.toTextArea();
-      this.easyMDE = null;
+    this.easyMDE = null;
+    try {
+      tribute?.detach(this.tributeElement);
+    } finally {
+      if (easyMDE) {
+        showElem(this.textareaMarkdownToolbar);
+        easyMDE.toTextArea();
+      }
     }
   }
 
   async switchToEasyMDE() {
-    if (this.easyMDE) return;
+    if (this.controller.signal.aborted || this.easyMDE) return;
     // EasyMDE's CSS should be loaded via webpack config, otherwise our own styles can not overwrite the default styles.
     const {default: EasyMDE} = await import(/* webpackChunkName: "easymde" */'easymde');
     if (this.controller.signal.aborted || this.easyMDE) return;
@@ -436,42 +469,53 @@ class ComboMarkdownEditor {
     };
     easyMDEOpt.toolbar = this.parseEasyMDEToolbar(EasyMDE, easyMDEOpt.toolbar ?? this.easyMDEToolbarDefault);
 
-    this.easyMDE = new EasyMDE(easyMDEOpt);
-    this.easyMDE.codemirror.on('change', (...args) => {this.options?.onContentChanged?.(this, ...args)});
-    this.easyMDE.codemirror.setOption('extraKeys', {
-      'Cmd-Enter': (cm) => handleGlobalEnterQuickSubmit(cm.getTextArea()),
-      'Ctrl-Enter': (cm) => handleGlobalEnterQuickSubmit(cm.getTextArea()),
-      Enter: (cm) => {
-        const tributeContainer = document.querySelector('.tribute-container');
-        if (!tributeContainer || tributeContainer.style.display === 'none') {
-          cm.execCommand('newlineAndIndent');
-        }
-      },
-      Up: (cm) => {
-        const tributeContainer = document.querySelector('.tribute-container');
-        if (!tributeContainer || tributeContainer.style.display === 'none') {
-          return cm.execCommand('goLineUp');
-        }
-      },
-      Down: (cm) => {
-        const tributeContainer = document.querySelector('.tribute-container');
-        if (!tributeContainer || tributeContainer.style.display === 'none') {
-          return cm.execCommand('goLineDown');
-        }
-      },
-    });
-    this.applyEditorHeights(this.container.querySelector('.CodeMirror-scroll'), this.options.editorHeights);
-    const easyMDE = this.easyMDE;
-    const input = easyMDE.codemirror.getInputField();
-    const tribute = await attachTribute(input, {mentions: true, emoji: true});
-    if (this.controller.signal.aborted || this.easyMDE !== easyMDE) {
-      tribute.detach(input);
+    const easyMDE = new EasyMDE(easyMDEOpt);
+    if (this.controller.signal.aborted) {
+      easyMDE.toTextArea();
       return;
     }
-    this.tribute = tribute;
-    this.tributeElement = input;
-    initEasyMDEPaste(easyMDE, this.dropzone, {signal: this.controller.signal});
-    hideElem(this.textareaMarkdownToolbar);
+    this.easyMDE = easyMDE;
+    try {
+      easyMDE.codemirror.on('change', (...args) => {this.options?.onContentChanged?.(this, ...args)});
+      easyMDE.codemirror.setOption('extraKeys', {
+        'Cmd-Enter': (cm) => handleGlobalEnterQuickSubmit(cm.getTextArea()),
+        'Ctrl-Enter': (cm) => handleGlobalEnterQuickSubmit(cm.getTextArea()),
+        Enter: (cm) => {
+          const tributeContainer = document.querySelector('.tribute-container');
+          if (!tributeContainer || tributeContainer.style.display === 'none') {
+            cm.execCommand('newlineAndIndent');
+          }
+        },
+        Up: (cm) => {
+          const tributeContainer = document.querySelector('.tribute-container');
+          if (!tributeContainer || tributeContainer.style.display === 'none') {
+            return cm.execCommand('goLineUp');
+          }
+        },
+        Down: (cm) => {
+          const tributeContainer = document.querySelector('.tribute-container');
+          if (!tributeContainer || tributeContainer.style.display === 'none') {
+            return cm.execCommand('goLineDown');
+          }
+        },
+      });
+      this.applyEditorHeights(this.container.querySelector('.CodeMirror-scroll'), this.options.editorHeights);
+      const input = easyMDE.codemirror.getInputField();
+      const tribute = await attachTribute(input, {mentions: true, emoji: true});
+      if (this.controller.signal.aborted || this.easyMDE !== easyMDE) {
+        tribute.detach(input);
+        return;
+      }
+      this.tribute = tribute;
+      this.tributeElement = input;
+      initEasyMDEPaste(easyMDE, this.dropzone, {signal: this.controller.signal});
+      hideElem(this.textareaMarkdownToolbar);
+    } catch (error) {
+      if (this.easyMDE === easyMDE) {
+        try { this.switchToTextarea() } catch (cleanupError) { console.error('Could not destroy Markdown editor', cleanupError) }
+      }
+      throw error;
+    }
   }
 
   value(v = undefined) {
@@ -695,7 +739,7 @@ export async function initComboMarkdownEditor(container, options = {}) {
   }
   const editor = new ComboMarkdownEditor(container, options);
   editor.initialized = editor.init().catch((error) => {
-    editor.destroy();
+    try { editor.destroy() } catch (cleanupError) { console.error('Could not destroy Markdown editor', cleanupError) }
     throw error;
   });
   await editor.initialized;

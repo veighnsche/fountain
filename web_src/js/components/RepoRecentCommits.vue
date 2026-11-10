@@ -7,7 +7,7 @@ import {
   LinearScale,
   TimeScale,
 } from 'chart.js';
-import {GET} from '../modules/fetch.js';
+import {createGraphRequest} from '../native-graph.js';
 import {Bar} from 'vue-chartjs';
 import {
   startDaysBetween,
@@ -15,7 +15,6 @@ import {
   fillEmptyStartDaysWithZeroes,
 } from '../utils/time.js';
 import {chartJsColors} from '../utils/color.js';
-import {sleep} from '../utils.js';
 import 'chartjs-adapter-dayjs-4/dist/chartjs-adapter-dayjs-4.esm';
 
 Chart.defaults.color = chartJsColors.text;
@@ -31,6 +30,7 @@ Chart.register(
 export default {
   components: {Bar, SvgIcon},
   props: {
+    repoLink: {type: String, default: () => window.config.pageData.repoLink || ''},
     locale: {
       type: Object,
       required: true,
@@ -38,50 +38,29 @@ export default {
   },
   data: () => ({
     isLoading: false,
-    graphController: null,
+    graphRequest: createGraphRequest(),
     errorText: '',
-    repoLink: window.config.pageData.repoLink || '',
     data: [],
   }),
   mounted() {
     this.fetchGraphData();
   },
   beforeUnmount() {
-    this.graphController?.abort();
+    this.graphRequest.dispose();
   },
   methods: {
     async fetchGraphData() {
-      this.graphController?.abort();
-      const controller = new AbortController();
-      this.graphController = controller;
-      this.isLoading = true;
-      try {
-        let response;
-        do {
-          if (controller.signal.aborted) return;
-          response = await GET(`${this.repoLink}/activity/recent-commits/data`, {signal: controller.signal});
-          if (controller.signal.aborted) return;
-          if (response.status === 202) {
-            await sleep(1000); // wait for 1 second before retrying
-          }
-        } while (response.status === 202);
-        if (controller.signal.aborted) return;
-        if (response.ok) {
-          const data = await response.json();
-          if (controller.signal.aborted) return;
+      return this.graphRequest.run(`${this.repoLink}/activity/recent-commits/data`, {
+        apply: (data) => {
           const start = Object.values(data)[0].week;
           const end = firstStartDateAfterDate(new Date());
           const startDays = startDaysBetween(start, end);
           this.data = fillEmptyStartDaysWithZeroes(startDays, data).slice(-52);
           this.errorText = '';
-        } else {
-          this.errorText = response.statusText;
-        }
-      } catch (err) {
-        if (!controller.signal.aborted) this.errorText = err.message;
-      } finally {
-        if (!controller.signal.aborted) this.isLoading = false;
-      }
+        },
+        error: (message) => { this.errorText = message },
+        loading: (value) => { this.isLoading = value },
+      });
     },
 
     toGraphData(data) {

@@ -2,66 +2,17 @@ import {initMarkupContent} from '../markup/content.js';
 import {validateTextareaNonEmpty, initComboMarkdownEditor} from './comp/ComboMarkdownEditor.js';
 import {fomanticMobileScreen} from '../modules/fomantic.js';
 import {POST} from '../modules/fetch.js';
-import {contributionRootSelector, currentPageGeneration} from '../native-lifecycle.js';
+import {contributionRootSelector, createPageFeatureRun} from '../native-lifecycle.js';
 
-let wikiTimer = null;
-let wikiGeneration = -1;
-let wikiEditor = null;
-let wikiForm = null;
-let wikiSubmitHandler = null;
-let tocHandler = null;
+let wikiState = null;
 
-function stopWikiPolling() {
-  if (wikiTimer !== null) clearTimeout(wikiTimer);
-  wikiTimer = null;
-}
-
-async function initRepoWikiFormEditor(generation) {
-  const editArea = document.querySelector('.repository.wiki .combo-markdown-editor textarea');
-  if (!editArea) return;
-  const form = document.querySelector('.repository.wiki.new .ui.form');
-  if (!form) return;
-  const editorContainer = form.querySelector('.combo-markdown-editor');
-  if (!editorContainer) return;
-  wikiForm = form;
-  let renderRequesting = false;
-  let lastContent;
-  const renderEasyMDEPreview = async function () {
-    if (generation !== currentPageGeneration()) return;
-    const previewFull = editorContainer.querySelector('.EasyMDEContainer .editor-preview-active');
-    const previewSide = editorContainer.querySelector('.EasyMDEContainer .editor-preview-active-side');
-    const previewTarget = previewSide || previewFull;
-    const newContent = editArea.value;
-    if (wikiEditor && previewTarget && lastContent !== newContent) {
-      if (renderRequesting) {
-        wikiTimer = setTimeout(renderEasyMDEPreview, 1000);
-        return;
-      }
-      renderRequesting = true;
-      const formData = new FormData();
-      formData.append('mode', wikiEditor.previewMode);
-      formData.append('context', wikiEditor.previewContext);
-      formData.append('text', newContent);
-      formData.append('wiki', wikiEditor.previewWiki);
-      try {
-        const response = await POST(wikiEditor.previewUrl, {data: formData});
-        const data = await response.text();
-        if (generation !== currentPageGeneration()) return;
-        lastContent = newContent;
-        previewTarget.innerHTML = `<div class="markup ui segment">${data}</div>`;
-        initMarkupContent();
-      } catch (error) {
-        if (generation === currentPageGeneration()) console.error('Error rendering preview:', error);
-      } finally {
-        renderRequesting = false;
-        if (generation === currentPageGeneration()) wikiTimer = setTimeout(renderEasyMDEPreview, 1000);
-      }
-    } else {
-      wikiTimer = setTimeout(renderEasyMDEPreview, 1000);
-    }
-  };
-  wikiTimer = setTimeout(renderEasyMDEPreview, 0);
+async function initRepoWikiFormEditor(root, run) {
+  const form = root.querySelector('.repository.wiki.new .ui.form');
+  const editorContainer = form?.querySelector('.combo-markdown-editor');
+  const editArea = editorContainer?.querySelector('textarea');
+  if (!editArea || editArea.closest(contributionRootSelector)) return;
   const editor = await initComboMarkdownEditor(editorContainer, {
+    signal: run.signal,
     useScene: 'wiki',
     editorHeights: {minHeight: '300px', height: 'calc(100vh - 600px)'},
     previewMode: 'gfm',
@@ -77,52 +28,86 @@ async function initRepoWikiFormEditor(generation) {
       ],
     },
   });
-  if (generation !== currentPageGeneration()) {
-    // Retired while EasyMDE loaded: tear the fresh editor back down.
-    try { editor.easyMDE?.toTextArea?.() } catch { /* editor never attached */ }
+  const release = run.own(() => editor.destroy?.());
+  if (!run.current() || !root.isConnected) {
+    release();
     return;
   }
-  wikiEditor = editor;
-  wikiSubmitHandler = (e) => {
+  form.addEventListener('submit', (event) => {
     if (!validateTextareaNonEmpty(editArea)) {
-      e.preventDefault();
-      e.stopPropagation();
+      event.preventDefault();
+      event.stopPropagation();
     }
+  }, {signal: run.signal});
+  let timer;
+  let renderRequesting = false;
+  let lastContent;
+  const current = () => run.current() && root.isConnected;
+  const schedule = (delay = 1000) => {
+    if (current()) timer = setTimeout(renderEasyMDEPreview, delay);
   };
-  form.addEventListener('submit', wikiSubmitHandler);
+  async function renderEasyMDEPreview() {
+    if (!current()) return;
+    const previewFull = editorContainer.querySelector('.EasyMDEContainer .editor-preview-active');
+    const previewSide = editorContainer.querySelector('.EasyMDEContainer .editor-preview-active-side');
+    const previewTarget = previewSide || previewFull;
+    const newContent = editArea.value;
+    if (!previewTarget || lastContent === newContent || renderRequesting) {
+      schedule();
+      return;
+    }
+    renderRequesting = true;
+    const formData = new FormData();
+    formData.append('mode', editor.previewMode);
+    formData.append('context', editor.previewContext);
+    formData.append('text', newContent);
+    formData.append('wiki', editor.previewWiki);
+    try {
+      const response = await POST(editor.previewUrl, {data: formData, signal: run.signal});
+      if (!current()) return;
+      const data = await response.text();
+      if (!current()) return;
+      lastContent = newContent;
+      previewTarget.innerHTML = `<div class="markup ui segment">${data}</div>`;
+      initMarkupContent();
+    } catch (error) {
+      if (current() && error?.name !== 'AbortError') console.error('Error rendering preview:', error);
+    } finally {
+      renderRequesting = false;
+      schedule();
+    }
+  }
+  run.own(() => clearTimeout(timer));
+  schedule(0);
 }
 
 function collapseWikiTocForMobile(collapse) {
   if (collapse) document.querySelector('.wiki-content-toc details')?.removeAttribute('open');
 }
 
-function onTocChange(e) {
-  collapseWikiTocForMobile(e.matches);
-}
-
-export function initRepoWikiForm() {
-  if (!document.querySelector('.page-content.repository.wiki')) return;
-  if (document.querySelector('.page-content.repository.wiki')?.closest(contributionRootSelector)) return;
-  if (tocHandler) return;
+export function initRepoWikiForm(run = createPageFeatureRun()) {
+  const root = document.querySelector('.page-content.repository.wiki');
+  if (!root || root.closest(contributionRootSelector)) return;
+  if (wikiState?.root === root && wikiState.run.current()) {
+    if (run !== wikiState.run) run.dispose();
+    return wikiState.initialized;
+  }
   retireRepoWikiForm();
-  wikiGeneration = currentPageGeneration();
-  tocHandler = onTocChange;
-  fomanticMobileScreen.addEventListener('change', tocHandler);
+  const state = {root, run, initialized: null};
+  wikiState = state;
+  const onTocChange = (event) => { if (run.current()) collapseWikiTocForMobile(event.matches); };
+  fomanticMobileScreen.addEventListener('change', onTocChange);
+  run.own(() => fomanticMobileScreen.removeEventListener('change', onTocChange));
   collapseWikiTocForMobile(fomanticMobileScreen.matches);
-  initRepoWikiFormEditor(wikiGeneration);
+  state.initialized = initRepoWikiFormEditor(root, run).catch((error) => {
+    run.dispose();
+    throw error;
+  });
+  return state.initialized;
 }
 
 export function retireRepoWikiForm() {
-  stopWikiPolling();
-  if (tocHandler) fomanticMobileScreen.removeEventListener('change', tocHandler);
-  tocHandler = null;
-  if (wikiForm && wikiSubmitHandler) wikiForm.removeEventListener('submit', wikiSubmitHandler);
-  wikiForm = null;
-  wikiSubmitHandler = null;
-  if (wikiEditor) {
-    try { wikiEditor.easyMDE?.toTextArea?.() } catch { /* already detached */ }
-    if (wikiEditor.container) delete wikiEditor.container._giteaComboMarkdownEditor;
-  }
-  wikiEditor = null;
-  wikiGeneration = -1;
+  const state = wikiState;
+  wikiState = null;
+  state?.run.dispose();
 }

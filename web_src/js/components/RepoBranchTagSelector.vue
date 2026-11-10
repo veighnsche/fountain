@@ -9,14 +9,31 @@ import {GET} from '../modules/fetch.js';
 export default {
   components: {SvgIcon},
 
+  props: {
+    initialData: {type: Object, default: () => ({})},
+  },
+
   // Native selector state is supplied by the feature entry; request/listener
   // lifetime stays with this mounted component.
-  data: () => ({requestController: new AbortController(), retired: false}),
+  data() {
+    return {
+      requestController: new AbortController(), retired: false,
+      items: [],
+      searchTerm: '',
+      refNameText: '',
+      menuVisible: false,
+      release: null,
+      isViewTag: false,
+      isViewBranch: false,
+      isViewTree: false,
+      active: 0,
+      isLoading: false,
+      hasListInitialized: {branches: false, tags: false},
+      ...this.initialData,
+    };
+  },
 
   computed: {
-    active() {
-      return !this.filteredItems.length && this.showCreateNewBranch ? 0 : -1;
-    },
     filteredItems() {
       return this.items.filter((item) => {
         return ((this.mode === 'branches' && item.branch) || (this.mode === 'tags' && item.tag)) &&

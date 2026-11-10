@@ -9,7 +9,7 @@ import {
   LineElement,
   Filler,
 } from 'chart.js';
-import {GET} from '../modules/fetch.js';
+import {createGraphRequest} from '../native-graph.js';
 import {Line as ChartLine} from 'vue-chartjs';
 import {
   startDaysBetween,
@@ -17,7 +17,6 @@ import {
   fillEmptyStartDaysWithZeroes,
 } from '../utils/time.js';
 import {chartJsColors} from '../utils/color.js';
-import {sleep} from '../utils.js';
 import 'chartjs-adapter-dayjs-4/dist/chartjs-adapter-dayjs-4.esm';
 
 Chart.defaults.color = chartJsColors.text;
@@ -35,6 +34,7 @@ Chart.register(
 export default {
   components: {ChartLine, SvgIcon},
   props: {
+    repoLink: {type: String, default: () => window.config.pageData.repoLink || ''},
     locale: {
       type: Object,
       required: true,
@@ -42,37 +42,20 @@ export default {
   },
   data: () => ({
     isLoading: false,
-    graphController: null,
+    graphRequest: createGraphRequest(),
     errorText: '',
-    repoLink: window.config.pageData.repoLink || '',
     data: [],
   }),
   mounted() {
     this.fetchGraphData();
   },
   beforeUnmount() {
-    this.graphController?.abort();
+    this.graphRequest.dispose();
   },
   methods: {
     async fetchGraphData() {
-      this.graphController?.abort();
-      const controller = new AbortController();
-      this.graphController = controller;
-      this.isLoading = true;
-      try {
-        let response;
-        do {
-          if (controller.signal.aborted) return;
-          response = await GET(`${this.repoLink}/activity/code-frequency/data`, {signal: controller.signal});
-          if (controller.signal.aborted) return;
-          if (response.status === 202) {
-            await sleep(1000); // wait for 1 second before retrying
-          }
-        } while (response.status === 202);
-        if (controller.signal.aborted) return;
-        if (response.ok) {
-          const data = await response.json();
-          if (controller.signal.aborted) return;
+      return this.graphRequest.run(`${this.repoLink}/activity/code-frequency/data`, {
+        apply: (data) => {
           this.data = data;
           const weekValues = Object.values(this.data);
           const start = weekValues[0].week;
@@ -80,14 +63,10 @@ export default {
           const startDays = startDaysBetween(start, end);
           this.data = fillEmptyStartDaysWithZeroes(startDays, this.data);
           this.errorText = '';
-        } else {
-          this.errorText = response.statusText;
-        }
-      } catch (err) {
-        if (!controller.signal.aborted) this.errorText = err.message;
-      } finally {
-        if (!controller.signal.aborted) this.isLoading = false;
-      }
+        },
+        error: (message) => { this.errorText = message },
+        loading: (value) => { this.isLoading = value },
+      });
     },
 
     toGraphData(data) {

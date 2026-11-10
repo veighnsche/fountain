@@ -34,7 +34,7 @@ test('history menus are built from the current repository context and removed on
   installIssuePage();
   GET.mockResolvedValue(overviewResponse());
   await initRepoIssueContentHistory();
-  expect(GET).toHaveBeenCalledWith('/owner/repo/issues/7/content-history/overview');
+  expect(GET).toHaveBeenCalledWith('/owner/repo/issues/7/content-history/overview', {signal: expect.any(AbortSignal)});
   expect(document.querySelectorAll('.content-history-menu')).toHaveLength(2);
   retireRepoIssueContentHistory();
   expect(document.querySelectorAll('.content-history-menu')).toHaveLength(0);

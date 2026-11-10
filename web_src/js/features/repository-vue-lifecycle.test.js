@@ -174,8 +174,9 @@ test('branch selectors unmount every native instance and read fresh configuratio
   const captured = [];
   vi.doMock(entry.component, () => ({
     default: {
+      props: ['initialData'],
       data: () => ({requestController: new AbortController(), retired: false}),
-      mounted() { captured.push(this.repoLink) },
+      mounted() { captured.push(this.initialData.repoLink) },
       unmounted() { events.push('unmounted') },
       render() { return h('span', {class: 'repository-vue-probe'}) },
     },

@@ -209,6 +209,7 @@
 							{{$hasPendingPullRequestMergeTip = ctx.Locale.Tr "repo.pulls.auto_merge_has_pending_schedule" .PendingPullRequestMerge.Doer.Name $createdPRMergeStr}}
 						{{end}}
 						<div class="divider"></div>
+						{{$hideAutoMerge := and $canMergeNow (not $notAllOverridableChecksOk)}}
 						<script type="application/json" data-native-page-data="pullRequestMergeForm">{
 								"baseLink": {{.Link}},
 								"textCancel": {{ctx.Locale.Tr "cancel"}},
@@ -239,14 +240,14 @@
 									"textDoMerge": {{ctx.Locale.Tr "repo.pulls.merge_pull_request"}},
 									"mergeTitleFieldText": {{.DefaultMergeMessage}},
 									"mergeMessageFieldText": {{.DefaultMergeBody}},
-									"hideAutoMerge": {{and $canMergeNow (not $notAllOverridableChecksOk)}}
+									"hideAutoMerge": {{$hideAutoMerge}}
 								},
 								{
 									"name": "rebase",
 									"allowed": {{$prUnit.PullRequestsConfig.AllowRebase}},
 									"textDoMerge": {{ctx.Locale.Tr "repo.pulls.rebase_merge_pull_request"}},
 									"hideMergeMessageTexts": true,
-									"hideAutoMerge": {{and $canMergeNow (not $notAllOverridableChecksOk)}}
+									"hideAutoMerge": {{$hideAutoMerge}}
 								},
 								{
 									"name": "rebase-merge",
@@ -254,7 +255,7 @@
 									"textDoMerge": {{ctx.Locale.Tr "repo.pulls.rebase_merge_commit_pull_request"}},
 									"mergeTitleFieldText": {{.DefaultMergeMessage}},
 									"mergeMessageFieldText": {{.DefaultMergeBody}},
-									"hideAutoMerge": {{and $canMergeNow (not $notAllOverridableChecksOk)}}
+									"hideAutoMerge": {{$hideAutoMerge}}
 								},
 								{
 									"name": "squash",
@@ -262,14 +263,14 @@
 									"textDoMerge": {{ctx.Locale.Tr "repo.pulls.squash_merge_pull_request"}},
 									"mergeTitleFieldText": {{.DefaultSquashMergeMessage}},
 									"mergeMessageFieldText": {{printf "%s%s" .GetCommitMessages .DefaultSquashMergeBody}},
-									"hideAutoMerge": {{and $canMergeNow (not $notAllOverridableChecksOk)}}
+									"hideAutoMerge": {{$hideAutoMerge}}
 								},
 								{
 									"name": "fast-forward-only",
 									"allowed": {{and $prUnit.PullRequestsConfig.AllowFastForwardOnly (eq .Issue.PullRequest.CommitsBehind 0)}},
 									"textDoMerge": {{ctx.Locale.Tr "repo.pulls.fast_forward_only_merge_pull_request"}},
 									"hideMergeMessageTexts": true,
-									"hideAutoMerge": {{and $canMergeNow (not $notAllOverridableChecksOk)}}
+									"hideAutoMerge": {{$hideAutoMerge}}
 								},
 								{
 									"name": "manually-merged",

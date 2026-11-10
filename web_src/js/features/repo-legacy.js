@@ -19,7 +19,7 @@ import {POST} from '../modules/fetch.js';
 import {MarkdownQuote} from '@github/quote-selection';
 import {toAbsoluteUrl} from '../utils.js';
 import {initDropzone, initGlobalShowModal, initDisabledInputs} from './common-global.js';
-import {contributionRootSelector} from '../native-lifecycle.js';
+import {contributionRootSelector, createPageFeatureRun} from '../native-lifecycle.js';
 import '../vendor/jquery.are-you-sure.js';
 
 // Comment-form click bindings (branch selector, sidebar list submits and
@@ -29,6 +29,7 @@ import '../vendor/jquery.are-you-sure.js';
 const commentFormClickBindings = [];
 const commentFormWidgets = [];
 let repositoryState = null;
+let commentFormState = null;
 const repositoryBindings = new Set();
 
 function bindRepository($elements, events, handler) {
@@ -43,7 +44,7 @@ function bindRepository($elements, events, handler) {
 export function retireRepository() {
   const state = repositoryState;
   repositoryState = null;
-  state?.controller.abort();
+  state?.controller.dispose();
   for (const element of repositoryBindings) $(element).off('.repositoryNative');
   repositoryBindings.clear();
   retireCompLabelEdit();
@@ -53,8 +54,12 @@ export function retireRepository() {
 }
 
 function bindCommentFormClicks($elements, handler) {
+  const run = commentFormState?.run;
   for (const el of $elements.get()) {
-    $(el).off('click.repoCommentForm').on('click.repoCommentForm', handler);
+    $(el).off('click.repoCommentForm').on('click.repoCommentForm', function (event) {
+      if (!run?.current()) return;
+      return handler.call(this, event);
+    });
     if (!commentFormClickBindings.includes(el)) commentFormClickBindings.push(el);
   }
 }
@@ -66,6 +71,8 @@ function trackCommentFormWidget($elements) {
 }
 
 export function retireRepoCommentForm() {
+  commentFormState?.run.dispose();
+  commentFormState = null;
   for (const el of commentFormClickBindings) {
     $(el).off('click.repoCommentForm');
   }
@@ -77,17 +84,33 @@ export function retireRepoCommentForm() {
   retireIssueTemplateCommentEditors();
 }
 
-export function initRepoCommentForm() {
+export function initRepoCommentForm(run = createPageFeatureRun()) {
   const $commentForm = $('.comment.form');
   if (!$commentForm.length) return;
   if ($commentForm[0].closest(contributionRootSelector)) return;
+  if (commentFormState?.form !== $commentForm[0] || !commentFormState.run.current()) {
+    retireRepoCommentForm();
+    commentFormState = {form: $commentForm[0], run};
+  }
+  run = commentFormState.run;
 
+  async function updateAndReload(...args) {
+    if (!run.current()) return;
+    try {
+      await updateIssuesMeta(...args, run);
+      if (run.current()) reloadConfirmDraftComment();
+    } catch (error) {
+      if (run.current()) console.error(error);
+    }
+  }
+
+  let initialized;
   if ($commentForm.find('.field.combo-editor-dropzone').length) {
     // at the moment, if a form has multiple combo-markdown-editors, it must be an issue template form
-    initIssueTemplateCommentEditors($commentForm);
+    initialized = initIssueTemplateCommentEditors($commentForm, run);
   } else if ($commentForm.find('.combo-markdown-editor').length) {
     // it's quite unclear about the "comment form" elements, sometimes it's for issue comment, sometimes it's for file editor/uploader message
-    initSingleCommentEditor($commentForm);
+    initialized = initSingleCommentEditor($commentForm, run);
   }
 
   // Fresh comment forms must keep the native dirty-leave protection that
@@ -117,9 +140,9 @@ export function initRepoCommentForm() {
         params.append('ref', selectedValue);
         try {
           await POST(form.getAttribute('action'), {data: params});
-          window.location.reload();
+          if (run.current()) window.location.reload();
         } catch (error) {
-          console.error(error);
+          if (run.current()) console.error(error);
         }
       } else if (editMode === '') {
         $selectBranch.find('.ui .branch-name').text(selectedValue);
@@ -152,19 +175,23 @@ export function initRepoCommentForm() {
         unselectable: '.disabled, .filtered, .tw-hidden',
       },
       async onHide() {
+        if (!run.current()) return;
         hasUpdateAction = $listMenu.data('action') === 'update'; // Update the var
         if (hasUpdateAction) {
           // TODO: Add batch functionality and make this 1 network request.
           const itemEntries = Object.entries(items);
           for (const [elementId, item] of itemEntries) {
+            if (!run.current()) return;
             await updateIssuesMeta(
               item['update-url'],
               item.action,
               item['issue-id'],
               elementId,
+              run,
             );
+            if (!run.current()) return;
           }
-          if (itemEntries.length) {
+          if (itemEntries.length && run.current()) {
             reloadConfirmDraftComment();
           }
         }
@@ -253,15 +280,12 @@ export function initRepoCommentForm() {
     bindCommentFormClicks($listMenu.find('.no-select.item'), function (e) {
       e.preventDefault();
       if (hasUpdateAction) {
-        (async () => {
-          await updateIssuesMeta(
-            $listMenu.data('update-url'),
-            'clear',
-            $listMenu.data('issue-id'),
-            '',
-          );
-          reloadConfirmDraftComment();
-        })();
+        updateAndReload(
+          $listMenu.data('update-url'),
+          'clear',
+          $listMenu.data('issue-id'),
+          '',
+        );
       }
 
       $(this).parent().find('.item').each(function () {
@@ -300,15 +324,12 @@ export function initRepoCommentForm() {
 
       $(this).addClass('selected active');
       if (hasUpdateAction) {
-        (async () => {
-          await updateIssuesMeta(
-            $menu.data('update-url'),
-            '',
-            $menu.data('issue-id'),
-            $(this).data('id'),
-          );
-          reloadConfirmDraftComment();
-        })();
+        updateAndReload(
+          $menu.data('update-url'),
+          '',
+          $menu.data('issue-id'),
+          $(this).data('id'),
+        );
       }
 
       let icon = '';
@@ -336,15 +357,12 @@ export function initRepoCommentForm() {
       });
 
       if (hasUpdateAction) {
-        (async () => {
-          await updateIssuesMeta(
-            $menu.data('update-url'),
-            '',
-            $menu.data('issue-id'),
-            $(this).data('id'),
-          );
-          reloadConfirmDraftComment();
-        })();
+        updateAndReload(
+          $menu.data('update-url'),
+          '',
+          $menu.data('issue-id'),
+          $(this).data('id'),
+        );
       }
 
       $list.find('.selected').html('');
@@ -357,11 +375,13 @@ export function initRepoCommentForm() {
   selectItem('.select-project', '#project_id');
   selectItem('.select-milestone', '#milestone_id');
   selectItem('.select-assignee', '#assignee_ids');
+  return initialized;
 }
 
 async function onEditContent(event) {
   const state = repositoryState;
-  if (!state || !state.root.contains(this) || this.closest(contributionRootSelector)) return;
+  if (!state?.controller.current() || !state.root.contains(this) || this.closest(contributionRootSelector)) return;
+  const run = state.controller;
   const {signal} = state.controller;
   event.preventDefault();
 
@@ -374,6 +394,7 @@ async function onEditContent(event) {
 
   const cancelAndReset = (e) => {
     e.preventDefault();
+    if (!run.current()) return;
     showElem(renderContent);
     hideElem(editContentZone);
     comboMarkdownEditor.value(rawContent.textContent);
@@ -382,6 +403,7 @@ async function onEditContent(event) {
 
   const saveAndRefresh = async (e) => {
     e.preventDefault();
+    if (!run.current()) return;
     showElem(renderContent);
     hideElem(editContentZone);
     const dropzone = editContentZone.querySelector('.dropzone')?.dropzone;
@@ -398,8 +420,9 @@ async function onEditContent(event) {
       }
 
       const response = await POST(editContentZone.getAttribute('data-update-url'), {data: params, signal});
+      if (!run.current()) return;
       const data = await response.json();
-      if (signal.aborted || !editContentZone.isConnected) return;
+      if (!run.current() || !editContentZone.isConnected) return;
       if (response.status === 400) {
         showErrorToast(data.errorMessage);
         return;
@@ -428,7 +451,7 @@ async function onEditContent(event) {
       initMarkupContent();
       initCommentContent();
     } catch (error) {
-      if (!signal.aborted) console.error(error);
+      if (run.current()) console.error(error);
     }
   };
 
@@ -437,10 +460,10 @@ async function onEditContent(event) {
     editContentZone.innerHTML = document.getElementById('issue-comment-editor-template').innerHTML;
     initDisabledInputs(editContentZone);
     const dropzone = editContentZone.querySelector('.dropzone');
-    if (dropzone && !dropzone.dropzone) await initDropzone(dropzone, editContentZone);
-    if (signal.aborted || !editContentZone.isConnected) return;
-    comboMarkdownEditor = await initComboMarkdownEditor(editContentZone.querySelector('.combo-markdown-editor'));
-    if (signal.aborted || !editContentZone.isConnected) {
+    if (dropzone && !dropzone.dropzone) await initDropzone(dropzone, editContentZone, run);
+    if (!run.current() || !editContentZone.isConnected) return;
+    comboMarkdownEditor = await initComboMarkdownEditor(editContentZone.querySelector('.combo-markdown-editor'), {signal});
+    if (!run.current() || !editContentZone.isConnected) {
       comboMarkdownEditor.destroy();
       return;
     }
@@ -449,6 +472,8 @@ async function onEditContent(event) {
     editContentZone.querySelector('button[data-button-name="cancel-edit"]').addEventListener('click', cancelAndReset, {signal});
     editContentZone.querySelector('button[data-button-name="save-edit"]').addEventListener('click', saveAndRefresh, {signal});
   } else {
+    comboMarkdownEditor = await initComboMarkdownEditor(editContentZone.querySelector('.combo-markdown-editor'), {signal});
+    if (!run.current() || !editContentZone.isConnected) return;
     const tabEditor = editContentZone.querySelector('.combo-markdown-editor').querySelector('.switch > [data-tab-for=markdown-writer]');
     tabEditor?.click();
   }
@@ -464,11 +489,11 @@ async function onEditContent(event) {
   comboMarkdownEditor.focus();
 }
 
-export function initRepository() {
+export function initRepository(run = createPageFeatureRun()) {
   retireRepository();
   const root = document.querySelector('.page-content.repository');
   if (!root || root.closest(contributionRootSelector)) return;
-  repositoryState = {root, controller: new AbortController()};
+  repositoryState = {root, controller: run, pendingEditors: new Set()};
 
   // Options
   if ($('.repository.settings.options').length > 0) {
@@ -633,43 +658,62 @@ function initRepoIssueCommentEdit() {
   if (commentEditInstalled) return;
   commentEditInstalled = true;
   // Edit issue or comment content
-  $(document).on('click', '.edit-content', onEditContent);
+  $(document).on('click', '.edit-content', function (event) {
+    const state = repositoryState;
+    if (!state) return;
+    const zone = this.closest('.header')?.nextElementSibling?.querySelector('.edit-content-zone');
+    if (state.pendingEditors.has(zone)) return;
+    state.pendingEditors.add(zone);
+    onEditContent.call(this, event).catch((error) => {
+      if (state.controller.current()) console.error(error);
+    }).finally(() => {
+      state.pendingEditors.delete(zone);
+    });
+  });
 
   // Quote reply
-  $(document).on('click', '.quote-reply', async (event) => {
-    const state = repositoryState;
-    if (!state || !state.root.contains(event.target) || event.target.closest(contributionRootSelector)) return;
-    event.preventDefault();
-    const quote = new MarkdownQuote('', preprocessFragment(event.target.getAttribute('data-context')));
-
-    let editorTextArea;
-    if (event.target.classList.contains('quote-reply-diff')) {
-      // Temporarily store the range so it doesn't get lost (likely caused by async code).
-      const currentRange = quote.range;
-
-      const replyButton = event.target.closest('.comment-code-cloud').querySelector('button.comment-form-reply');
-      editorTextArea = (await handleReply($(replyButton))).textarea;
-      if (state.controller.signal.aborted || !editorTextArea.isConnected) return;
-
-      quote.range = currentRange;
-    } else {
-      editorTextArea = document.querySelector('#comment-form .combo-markdown-editor textarea');
-    }
-
-    // Select the whole comment body if there's no selection.
-    if (quote.range.collapsed) {
-      quote.select(document.querySelector(`#${event.target.getAttribute('data-target')}`));
-    }
-
-    // If the selection is in the comment body, then insert the quote.
-    if (quote.closest(`#${event.target.getAttribute('data-target')}`)) {
-      // Chromium quirk: Temporarily store the range so it doesn't get lost, caused by appending text in another element.
-      const currentRange = quote.range;
-
-      editorTextArea.value += `@${event.target.getAttribute('data-author')} wrote in ${toAbsoluteUrl(event.target.getAttribute('data-reference-url'))}:`;
-
-      quote.range = currentRange;
-      quote.insert(editorTextArea);
-    }
+  $(document).on('click', '.quote-reply', (event) => {
+    const run = repositoryState?.controller;
+    onQuoteReply(event).catch((error) => {
+      if (run?.current()) console.error(error);
+    });
   });
+}
+
+async function onQuoteReply(event) {
+  const state = repositoryState;
+  if (!state?.controller.current() || !state.root.contains(event.target) || event.target.closest(contributionRootSelector)) return;
+  event.preventDefault();
+  const quote = new MarkdownQuote('', preprocessFragment(event.target.getAttribute('data-context')));
+
+  let editorTextArea;
+  if (event.target.classList.contains('quote-reply-diff')) {
+    // Temporarily store the range so it doesn't get lost (likely caused by async code).
+    const currentRange = quote.range;
+
+    const replyButton = event.target.closest('.comment-code-cloud').querySelector('button.comment-form-reply');
+    const editor = await handleReply($(replyButton), state.controller);
+    if (!state.controller.current() || !editor?.textarea?.isConnected) return;
+    editorTextArea = editor.textarea;
+
+    quote.range = currentRange;
+  } else {
+    editorTextArea = document.querySelector('#comment-form .combo-markdown-editor textarea');
+  }
+
+  // Select the whole comment body if there's no selection.
+  if (quote.range.collapsed) {
+    quote.select(document.querySelector(`#${event.target.getAttribute('data-target')}`));
+  }
+
+  // If the selection is in the comment body, then insert the quote.
+  if (quote.closest(`#${event.target.getAttribute('data-target')}`)) {
+    // Chromium quirk: Temporarily store the range so it doesn't get lost, caused by appending text in another element.
+    const currentRange = quote.range;
+
+    editorTextArea.value += `@${event.target.getAttribute('data-author')} wrote in ${toAbsoluteUrl(event.target.getAttribute('data-reference-url'))}:`;
+
+    quote.range = currentRange;
+    quote.insert(editorTextArea);
+  }
 }

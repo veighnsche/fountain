@@ -214,7 +214,7 @@ test('a git-hook editor settling after retirement is destroyed and removed from 
   const result = deferred();
   createCodemirror.mockReturnValue(result.promise);
   document.body.innerHTML = '<div class="edit githook"><span class="hook-filename">hook</span><textarea id="content"></textarea></div>';
-  const view = {destroy: vi.fn()};
+  const view = {destroy: vi.fn(() => window.codeEditors.delete(view))};
   window.codeEditors = new Set([view]);
   const initialized = initRepoSettingGitHook();
   retireRepoSettingGitHook();

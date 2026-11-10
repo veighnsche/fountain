@@ -3,7 +3,7 @@ import {minimatch} from 'minimatch';
 import {onInputDebounce, toggleElem} from '../utils/dom.js';
 import {POST} from '../modules/fetch.js';
 import {createCodemirror} from './codemirror.ts';
-import {contributionRootSelector} from '../native-lifecycle.js';
+import {contributionRootSelector, createPageFeatureRun} from '../native-lifecycle.js';
 
 const {appSubUrl} = window.config;
 let teamSearch = null;
@@ -19,10 +19,7 @@ export function retireRepoSettingSearchTeamBox() {
 export function retireRepoSettingGitHook() {
   const current = gitHook;
   gitHook = null;
-  if (current?.editor) {
-    window.codeEditors?.delete(current.editor.view);
-    current.editor.view.destroy();
-  }
+  current?.run.dispose();
 }
 
 export function retireRepoSettingBranches() {
@@ -125,22 +122,23 @@ export function initRepoSettingSearchTeamBox() {
   });
 }
 
-export async function initRepoSettingGitHook() {
+export async function initRepoSettingGitHook(run = createPageFeatureRun()) {
   retireRepoSettingGitHook();
   const root = document.querySelector('.edit.githook');
   if (!root || root.closest(contributionRootSelector)) return;
   const filename = root.querySelector('.hook-filename').textContent;
   const element = root.querySelector('#content');
   if (!element || element.closest(contributionRootSelector)) return;
-  const current = {element, editor: null};
+  const current = {element, run};
   gitHook = current;
-  const editor = await createCodemirror(element, filename, {language: 'shell'});
-  if (gitHook !== current || !element.isConnected) {
-    window.codeEditors?.delete(editor.view);
-    editor.view.destroy();
-    return;
+  try {
+    const editor = await createCodemirror(element, filename, {language: 'shell'}, run);
+    const release = run.own(() => editor.view.destroy());
+    if (!run.current() || !element.isConnected) release();
+  } catch (error) {
+    run.dispose();
+    if (error?.name !== 'AbortError') throw error;
   }
-  current.editor = editor;
 }
 
 export function initRepoSettingBranches() {

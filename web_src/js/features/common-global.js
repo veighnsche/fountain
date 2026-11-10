@@ -13,7 +13,9 @@ import {showErrorToast} from '../modules/toast.js';
 import {request, POST, GET} from '../modules/fetch.js';
 import '../htmx.js';
 import {initTab} from '../modules/tab.ts';
-import {contributionRootSelector} from '../native-lifecycle.js';
+import {contributionRootSelector, createPageFeatureRun} from '../native-lifecycle.js';
+import {createFeatureRun} from '../native-feature-run.js';
+import {getNativeModalRun, trackNativeModal} from '../modules/modal.ts';
 
 const {appUrl, appSubUrl, i18n} = window.config;
 
@@ -22,7 +24,7 @@ const {appUrl, appSubUrl, i18n} = window.config;
 // with their nodes (the vendor plugin has no destroy; its listeners die with
 // the replaced node). Sign-in pages and 'ignore-dirty' forms stay exempt.
 const enhancedForms = new Set();
-const enhancedDropzones = new Set();
+const enhancedDropzones = new Map();
 
 function scopedElements(root, selector) {
   const found = Array.from(root.querySelectorAll(selector));
@@ -42,8 +44,9 @@ function enhanceNativeForms(root) {
 function enhanceNativeDropzones(root) {
   for (const el of scopedElements(root, '.dropzone')) {
     if (enhancedDropzones.has(el) || el.dropzone || el.closest(contributionRootSelector)) continue;
-    enhancedDropzones.add(el);
-    initDropzone(el).catch((error) => console.error(error));
+    initDropzone(el).catch((error) => {
+      if (error.name !== 'AbortError') console.error(error);
+    });
   }
 }
 
@@ -85,6 +88,7 @@ export function initGlobalEnterQuickSubmit() {
   if (quickSubmitBound) return;
   quickSubmitBound = true;
   $(document).on('keydown', '.js-quick-submit', (e) => {
+    if (e.target.closest(contributionRootSelector)) return;
     if (((e.ctrlKey && !e.altKey) || e.metaKey) && (e.key === 'Enter')) {
       handleGlobalEnterQuickSubmit(e.target);
       return false;
@@ -97,6 +101,7 @@ export function initGlobalButtonClickOnEnter() {
   if (buttonClickOnEnterBound) return;
   buttonClickOnEnterBound = true;
   $(document).on('keypress', 'div.ui.button,span.ui.button', (e) => {
+    if (e.target.closest(contributionRootSelector)) return;
     if (e.code === ' ' || e.code === 'Enter') {
       e.target.click();
       e.preventDefault();
@@ -119,11 +124,13 @@ function fetchActionDoRedirect(redirect) {
   form.submit();
 }
 
-async function fetchActionDoRequest(actionElem, url, opt) {
+async function fetchActionDoRequest(actionElem, url, opt, run = createPageFeatureRun()) {
   try {
     const resp = await request(url, opt);
+    if (!run.current()) return;
     if (resp.status === 200) {
       let {redirect} = await resp.json();
+      if (!run.current()) return;
       redirect = redirect || actionElem.getAttribute('data-redirect');
       actionElem.classList.remove('dirty'); // remove the areYouSure check before reloading
       if (redirect) {
@@ -134,6 +141,7 @@ async function fetchActionDoRequest(actionElem, url, opt) {
       return;
     } else if (resp.status >= 400 && resp.status < 500) {
       const data = await resp.json();
+      if (!run.current()) return;
       // the code was quite messy, sometimes the backend uses "err", sometimes it uses "error", and even "user_error"
       // but at the moment, as a new approach, we only use "errorMessage" here, backend can use JSONError() to respond.
       if (data.errorMessage) {
@@ -145,16 +153,16 @@ async function fetchActionDoRequest(actionElem, url, opt) {
       showErrorToast(`server error: ${resp.status}`);
     }
   } catch (e) {
-    if (e.name !== 'AbortError') {
+    if (run.current() && e.name !== 'AbortError') {
       console.error('error when doRequest', e);
       showErrorToast(`${i18n.network_error} ${e}`);
     }
   }
-  actionElem.classList.remove('is-loading', 'loading-icon-2px');
+  if (run.current()) actionElem.classList.remove('is-loading', 'loading-icon-2px');
 }
 
 async function formFetchAction(e) {
-  if (!e.target.classList.contains('form-fetch-action')) return;
+  if (!e.target.classList.contains('form-fetch-action') || e.target.closest(contributionRootSelector)) return;
 
   e.preventDefault();
   const formEl = e.target;
@@ -277,6 +285,7 @@ export function enhanceNativeNodes(root = document) {
 // and drops all detached tracked nodes so retired pages are never pinned.
 // Live chrome and persistent contribution homes are untouched.
 export function retireNativeNodes() {
+  let firstError;
   // Tooltip poppers are appended outside their target, so removing the
   // outgoing region alone would orphan them; destroy region-owned
   // instances while the region is still attached (retire precedes swap).
@@ -305,12 +314,17 @@ export function retireNativeNodes() {
       enhancedForms.delete(el);
     }
   }
-  for (const el of enhancedDropzones) {
+  for (const [el, state] of enhancedDropzones) {
     if (!el.isConnected || el.closest('.page-content')) {
-      if (el.isConnected) el.dropzone?.destroy();
       enhancedDropzones.delete(el);
+      try {
+        state.run.dispose();
+      } catch (error) {
+        firstError ??= error;
+      }
     }
   }
+  if (firstError) throw firstError;
 }
 
 // Sometimes unrelated inputs are stored in forms for convenience, for example,
@@ -327,13 +341,26 @@ export function initGlobalDropzone() {
   enhanceNativeDropzones(document);
 }
 
-export async function initDropzone(dropzoneEl, zone = undefined) {
-  if (!dropzoneEl) return;
+export function initDropzone(dropzoneEl, zone = undefined, run = undefined) {
+  if (!dropzoneEl) return Promise.resolve();
+  const existing = enhancedDropzones.get(dropzoneEl);
+  if (existing) return existing.promise;
+  run ??= getNativeModalRun(dropzoneEl) ?? (dropzoneEl.closest('.page-content') ? createPageFeatureRun() : createFeatureRun());
+  const state = {run};
+  enhancedDropzones.set(dropzoneEl, state);
+  state.promise = mountDropzone(dropzoneEl, zone, run).catch((error) => {
+    if (enhancedDropzones.get(dropzoneEl) === state) enhancedDropzones.delete(dropzoneEl);
+    throw error;
+  });
+  return state.promise;
+}
 
+async function mountDropzone(dropzoneEl, zone, run) {
   let disableRemovedfileEvent = false; // when resetting the dropzone (removeAllFiles), disable the "removedfile" event
   let fileUuidDict = {}; // to record: if a comment has been saved, then the uploaded files won't be deleted from server when clicking the Remove in the dropzone
 
   const initFilePreview = (file, data, isReload = false) => {
+    if (!run.current()) return;
     file.uuid = data.uuid;
     fileUuidDict[file.uuid] = {submitted: isReload};
     const input = document.createElement('input');
@@ -362,12 +389,17 @@ export async function initDropzone(dropzoneEl, zone = undefined) {
       } else if (file.type.startsWith('video/')) {
         fileMarkdown = `<video src="/attachments/${file.uuid}" title="${htmlEscape(name)}" controls></video>`;
       }
-      const success = await clippie(fileMarkdown);
-      showTemporaryTooltip(e.target, success ? i18n.copy_success : i18n.copy_error);
+      try {
+        const success = await clippie(fileMarkdown);
+        if (run.current()) showTemporaryTooltip(e.target, success ? i18n.copy_success : i18n.copy_error);
+      } catch (error) {
+        if (run.current()) console.error(error);
+      }
     });
     file.previewTemplate.append(copyLinkElement);
   };
   const updateDropzoneState = () => {
+    if (!run.current()) return;
     dropzoneEl.classList.toggle('dz-started', dropzoneEl.querySelector('.dz-preview'));
   };
 
@@ -388,27 +420,29 @@ export async function initDropzone(dropzoneEl, zone = undefined) {
     init() {
       this.on('success', initFilePreview);
       this.on('removedfile', async (file) => {
+        if (!run.current() || disableRemovedfileEvent) return;
         document.getElementById(file.uuid)?.remove();
         document.querySelector(`input[name="files_fullpath[${file.uuid}]"]`)?.remove();
-        if (disableRemovedfileEvent) return;
         if (dropzoneEl.getAttribute('data-remove-url') && !fileUuidDict[file.uuid].submitted) {
           try {
             await POST(dropzoneEl.getAttribute('data-remove-url'), {data: new URLSearchParams({file: file.uuid})});
           } catch (error) {
-            console.error(error);
+            if (run.current()) console.error(error);
           }
         }
         updateDropzoneState();
       });
       this.on('error', function (file, message) {
+        if (!run.current()) return;
         showErrorToast(message);
         this.removeFile(file);
       });
       this.on('reload', async () => {
-        if (!zone || !dz.removeAllFiles) return;
+        if (!run.current() || !zone || !dz.removeAllFiles) return;
         try {
-          const response = await GET(zone.getAttribute('data-attachment-url'));
+          const response = await GET(zone.getAttribute('data-attachment-url'), {signal: run.signal});
           const data = await response.json();
+          if (!run.current()) return;
           // do not trigger the "removedfile" event, otherwise the attachments would be deleted from server
           disableRemovedfileEvent = true;
           dz.removeAllFiles(true);
@@ -429,11 +463,12 @@ export async function initDropzone(dropzoneEl, zone = undefined) {
             fileUuidDict[attachment.uuid] = {submitted: true};
           }
         } catch (error) {
-          console.error(error);
+          if (run.current()) console.error(error);
         }
         updateDropzoneState();
       });
       this.on('create-thumbnail', (attachment, file) => {
+        if (!run.current()) return;
         if (attachment.type && /image.*/.test(attachment.type)) {
           // When a new issue is created, a thumbnail cannot be fetch, so we need to create it locally.
           // The implementation is took from the dropzone library (`dropzone.js` > `_processThumbnailQueue()`)
@@ -444,12 +479,16 @@ export async function initDropzone(dropzoneEl, zone = undefined) {
             dz.options.thumbnailMethod,
             true,
             (dataUrl) => {
-              dz.emit('thumbnail', attachment, dataUrl);
+              if (run.current()) dz.emit('thumbnail', attachment, dataUrl);
             },
           );
         }
       });
     },
+  }, run);
+  run.own(() => {
+    disableRemovedfileEvent = true;
+    dz.destroy();
   });
 }
 
@@ -458,14 +497,16 @@ async function linkAction(e) {
   // Then the browser is redirected to: the "redirect" in response, or "data-redirect" attribute, or current URL by reloading.
   // If the "link-action" has "data-modal-confirm" attribute, a confirm modal dialog will be shown before taking action.
   const el = e.target.closest('.link-action');
-  if (!el) return;
+  if (!el || el.closest(contributionRootSelector)) return;
 
   e.preventDefault();
+  const run = createPageFeatureRun();
   const url = el.getAttribute('data-url');
   const doRequest = async () => {
+    if (!run.current()) return;
     el.disabled = true;
-    await fetchActionDoRequest(el, url, {method: 'POST'});
-    el.disabled = false;
+    await fetchActionDoRequest(el, url, {method: 'POST'}, run);
+    if (run.current()) el.disabled = false;
   };
 
   const modalConfirmContent = htmlEscape(el.getAttribute('data-modal-confirm') || '');
@@ -475,13 +516,15 @@ async function linkAction(e) {
   }
 
   const isRisky = el.classList.contains('red') || el.classList.contains('yellow') || el.classList.contains('orange') || el.classList.contains('negative');
-  if (await confirmModal({content: modalConfirmContent, buttonColor: isRisky ? 'orange' : 'primary'})) {
+  if (await confirmModal({content: modalConfirmContent, buttonColor: isRisky ? 'orange' : 'primary'}, run)) {
     await doRequest();
   }
 }
 
 function showDeletePopup(e, trigger = e.target) {
+  if (trigger.closest(contributionRootSelector)) return;
   e.preventDefault();
+  const run = createPageFeatureRun();
   const $this = $(trigger);
   const dataArray = $this.data();
 
@@ -491,6 +534,10 @@ function showDeletePopup(e, trigger = e.target) {
   }
 
   const $dialog = $(`#${modalID}`);
+  const current = trackNativeModal($dialog[0], () => {
+    $dialog.modal('hide').modal('destroy');
+  });
+  if (!current()) return;
   $dialog.find('.name').text($this.data('name'));
   for (const [key, value] of Object.entries(dataArray)) {
     if (key && key.startsWith('data')) {
@@ -501,6 +548,7 @@ function showDeletePopup(e, trigger = e.target) {
   $dialog.modal({
     closable: false,
     onApprove: async () => {
+      if (!run.current() || !current()) return false;
       if ($this.data('type') === 'form') {
         document.querySelector($this.data('form')).requestSubmit();
         return;
@@ -519,10 +567,15 @@ function showDeletePopup(e, trigger = e.target) {
         }
       }
 
-      const response = await POST($this.data('url'), {data: postData});
-      if (response.ok) {
-        const data = await response.json();
-        window.location.href = data.redirect;
+      try {
+        const response = await POST($this.data('url'), {data: postData});
+        if (!run.current()) return;
+        if (response.ok) {
+          const data = await response.json();
+          if (run.current()) window.location.href = data.redirect;
+        }
+      } catch (error) {
+        if (run.current()) console.error(error);
       }
     },
   }).modal('show');
@@ -541,6 +594,7 @@ export function initGlobalLinkActions() {
   });
 
   document.addEventListener('htmx:confirm', (e) => {
+    if ((e.detail?.elt ?? e.target).closest?.(contributionRootSelector)) return;
     e.preventDefault();
     // htmx:confirm is triggered for every HTMX request, even those that don't
     // have the `hx-confirm` attribute specified. To avoid opening modals for
@@ -559,13 +613,17 @@ export function initGlobalLinkActions() {
 // and repeated init calls cannot stack duplicate modal actions.
 function showModalAction(e) {
   const trigger = e.target.closest('.show-modal');
-  if (!trigger) return;
+  if (!trigger || trigger.closest(contributionRootSelector)) return;
   e.preventDefault();
   const modalSelector = trigger.getAttribute('data-modal');
   const $modal = $(modalSelector);
   if (!$modal.length) {
     throw new Error('no modal for this action');
   }
+  const current = trackNativeModal($modal[0], () => {
+    $modal.modal('hide').modal('destroy');
+  });
+  if (!current()) return;
   const modalAttrPrefix = 'data-modal-';
   for (const attrib of trigger.attributes) {
     if (!attrib.name.startsWith(modalAttrPrefix)) {
@@ -591,6 +649,7 @@ function showModalAction(e) {
 
   $modal.modal('setting', {
     onApprove: () => {
+      if (!current()) return false;
       // "form-fetch-action" can handle network errors gracefully,
       // so keep the modal dialog to make users can re-submit the form if anything wrong happens.
       if ($modal.find('.form-fetch-action').length) return false;
@@ -608,6 +667,7 @@ export function initGlobalShowModal() {
 // Panel toggles query live DOM at event time, so one delegated document
 // handler covers transplanted buttons with no per-element rebinding.
 function panelAction(e) {
+  if (e.target.closest(contributionRootSelector)) return;
   const showButton = e.target.closest('.show-panel');
   if (showButton) {
     // a '.show-panel' element can show a panel, by `data-panel="selector"`
@@ -651,6 +711,7 @@ export function initGlobalButtons() {
     // However, Gitea misuses the modal dialog and put the cancel buttons inside forms, so we must prevent the form submission.
     // There are a few cancel buttons in non-modal forms, and there are some dynamically created forms (eg: the "Edit Issue Content")
     document.addEventListener('click', (e) => {
+      if (e.target.closest(contributionRootSelector)) return;
       if (e.target.matches('form button.ui.cancel.button')) {
         e.preventDefault();
       }
