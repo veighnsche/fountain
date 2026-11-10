@@ -118,19 +118,20 @@ func readDesktopSnapshot(ctx *context.APIContext, issuesOnly bool) {
 				ctx.Error(http.StatusForbidden, "desktop snapshot", errors.New("issue-only enrollment refuses code, PR and execution facts"))
 				return
 			}
+		}
 		if request.PullNumber != "" {
 			ctx.Error(http.StatusForbidden, "desktop snapshot", errors.New("issue-only enrollment refuses PR selectors"))
 			return
 		}
 		if request.IssueIndex != "" {
-			index, _ := strconv.ParseInt(request.IssueIndex,10,64)
-			issue, err := issues_model.GetIssueByIndex(ctx,ctx.Repo().Repository.ID,index)
+			index, _ := strconv.ParseInt(request.IssueIndex, 10, 64)
+			issue, err := issues_model.GetIssueByIndex(ctx, ctx.Repo().Repository.ID, index)
 			if err != nil || issue.IsPull {
-				ctx.Error(http.StatusForbidden,"desktop snapshot",errors.New("plain issue selection required"))
+				ctx.Error(http.StatusForbidden, "desktop snapshot", errors.New("plain issue selection required"))
 				return
 			}
 		} else if len(request.CommentIDs) != 0 {
-			ctx.Error(http.StatusForbidden,"desktop snapshot",errors.New("issue comments require their exact plain issue"))
+			ctx.Error(http.StatusForbidden, "desktop snapshot", errors.New("issue comments require their exact plain issue"))
 			return
 		}
 	}

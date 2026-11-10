@@ -600,3 +600,5 @@ These **25** entries retain their current behavior or compatibility surface. Rel
 - [ ] F10 — native operation execution/recovery.
 - Comments step: skipped by user selection. Tests cleanup step: skipped by user selection. Existing tests stay as the regression baseline; meaningful new regression tests may cover changed behavior.
 - Fresh independent review and final baseline/full qualification comparison remain pending.
+
+- Baseline prerequisite repaired: the issue-only family loop in `routers/api/v1/repo/desktop_source.go` lacked its closing brace. Added that brace and formatted the Fountain-owned file; the pinned Go/SQLite host build now succeeds. No test expectations or business rules changed. Evidence: `.artifacts/untangle-refactor/build-repair.{stdout,stderr}`.
