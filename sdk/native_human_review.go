@@ -16,16 +16,20 @@ import (
 	"forgejo.org/extension-sdk/operationcontract"
 )
 
-const OperationKindHumanReview = "pull_request.human_review.apply"
-const HumanReviewAuthorizationRevision = "native-human-request"
-const HumanReviewEventDraft = "PENDING"
-const HumanReviewEventComment = "COMMENT"
-const MaxHumanReviewBodyBytes = 64 << 10
+const (
+	OperationKindHumanReview         = "pull_request.human_review.apply"
+	HumanReviewAuthorizationRevision = "native-human-request"
+	HumanReviewEventDraft            = "PENDING"
+	HumanReviewEventComment          = "COMMENT"
+	MaxHumanReviewBodyBytes          = 64 << 10
+)
 
-const OperationHumanReviewSubmit = "repository.human_review.submit"
-const OperationHumanReviewGet = "repository.human_review.get"
-const OperationHumanReviewCancel = "repository.human_review.cancel"
-const MaxHumanReviewCallbackBytes = 512 << 10
+const (
+	OperationHumanReviewSubmit  = "repository.human_review.submit"
+	OperationHumanReviewGet     = "repository.human_review.get"
+	OperationHumanReviewCancel  = "repository.human_review.cancel"
+	MaxHumanReviewCallbackBytes = 512 << 10
+)
 
 var (
 	ErrHumanReviewQuery       = errors.New("invalid human review request")

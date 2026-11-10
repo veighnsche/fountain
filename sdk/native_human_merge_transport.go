@@ -11,13 +11,17 @@ import (
 	"strconv"
 )
 
-const OperationHumanMergeSubmit = "repository.human_merge.submit"
-const OperationHumanMergeGet = "repository.human_merge.get"
-const OperationHumanMergeCancel = "repository.human_merge.cancel"
+const (
+	OperationHumanMergeSubmit = "repository.human_merge.submit"
+	OperationHumanMergeGet    = "repository.human_merge.get"
+	OperationHumanMergeCancel = "repository.human_merge.cancel"
+)
 
-var ErrHumanMergeAdmission = errors.New("current human merge admission is required")
-var ErrHumanMergeConflict = errors.New("human merge operation conflicts")
-var ErrHumanMergeUnavailable = errors.New("native human merge service is unavailable")
+var (
+	ErrHumanMergeAdmission   = errors.New("current human merge admission is required")
+	ErrHumanMergeConflict    = errors.New("human merge operation conflicts")
+	ErrHumanMergeUnavailable = errors.New("native human merge service is unavailable")
+)
 
 func ValidHumanMergeInstallationID(installation string) bool {
 	return validInstallationID(installation)

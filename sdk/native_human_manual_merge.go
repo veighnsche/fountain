@@ -16,17 +16,23 @@ import (
 	"forgejo.org/extension-sdk/operationcontract"
 )
 
-const OperationKindHumanManualMerge = "pull_request.human_manual_merge.apply"
-const HumanManualMergeAuthorizationRevision = "native-human-request"
+const (
+	OperationKindHumanManualMerge         = "pull_request.human_manual_merge.apply"
+	HumanManualMergeAuthorizationRevision = "native-human-request"
+)
 
-const OperationHumanManualMergeSubmit = "repository.human_manual_merge.submit"
-const OperationHumanManualMergeGet = "repository.human_manual_merge.get"
-const OperationHumanManualMergeCancel = "repository.human_manual_merge.cancel"
+const (
+	OperationHumanManualMergeSubmit = "repository.human_manual_merge.submit"
+	OperationHumanManualMergeGet    = "repository.human_manual_merge.get"
+	OperationHumanManualMergeCancel = "repository.human_manual_merge.cancel"
+)
 
-var ErrHumanManualMergeQuery = errors.New("invalid human manual merge command")
-var ErrHumanManualMergeAdmission = errors.New("current human manual merge admission is required")
-var ErrHumanManualMergeConflict = errors.New("human manual merge operation conflicts")
-var ErrHumanManualMergeUnavailable = errors.New("native human manual merge service is unavailable")
+var (
+	ErrHumanManualMergeQuery       = errors.New("invalid human manual merge command")
+	ErrHumanManualMergeAdmission   = errors.New("current human manual merge admission is required")
+	ErrHumanManualMergeConflict    = errors.New("human manual merge operation conflicts")
+	ErrHumanManualMergeUnavailable = errors.New("native human manual merge service is unavailable")
+)
 
 // HumanManualMergeRequest marks an existing reachable commit in SQL. It cannot
 // select a ref-push method, create a commit or convey authority to change Git.

@@ -72,6 +72,7 @@ func ValidRepositoryCommentPage(p *RepositoryCommentPage, repository string, q R
 	}
 	return p.NextCursor == "" || last != "" && p.NextCursor == last
 }
+
 func (a Authority) RepositoryComments(ctx context.Context, repository string, q RepositoryCommentsRequest) (RepositoryCommentPage, error) {
 	if !decimalID(repository) || !ValidRepositoryCommentsRequest(q) {
 		return RepositoryCommentPage{}, errors.New("invalid discussion request")

@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -euo pipefail
+tool_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+source "$tool_dir/fountain-release-names.sh"
+source "$tool_dir/fountain-toolchain.sh"
 [[ $# == 4 ]]
 image=$1 version=$2 commit=$3 out=$4
+fountain_release_names "$version"
 engine=${CONTAINER_ENGINE:-docker}
 [[ $image =~ ^sha256:[0-9a-f]{64}$ && $out == /home/* ]]
-[[ $("$engine" image inspect --format '{{.Os}}/{{.Architecture}}' "$image") == linux/amd64 ]]
+toolchain=$(fountain_go_toolchain "$out/source")
+metadata=$(cd "$out/source/sdk" && GOTOOLCHAIN="$toolchain" GOWORK=off GOFLAGS=-mod=readonly go run ./cmd/fountain-metadata)
+browser=$(jq -er '.browser_contract | numbers | select(. == floor and . >= 0)' <<< "$metadata")
+[[ $("$engine" image inspect --format '{{.Os}}/{{.Architecture}}' "$image") == "$fountain_platform" ]]
 [[ $("$engine" image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image") == "$version" ]]
 [[ $("$engine" image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image") == "$commit" ]]
 "$engine" run --rm "$image" forgejo --version | tee "$out/version.txt"
-grep -F "$version+gitea-1.22.0" "$out/version.txt"
+grep -F "$fountain_full_version" "$out/version.txt"
 grep -F 'bindata' "$out/version.txt"
-grep -E '(^|[[:space:],])go1\.26\.10([[:space:],:]|$)' "$out/version.txt"
+toolchain_pattern=${toolchain//./\\.}
+grep -E "(^|[[:space:],])$toolchain_pattern([[:space:],:]|$)" "$out/version.txt"
 mkdir "$out/data"
 # Required packages use the same pinned catalog and verified archive cache as
 # production bootstrap. The fixture URL is deliberately unreachable: the native
@@ -20,8 +28,8 @@ tar --format=ustar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
   -C "$out/example" -cf - extension.json backend assets | gzip -1n > "$out/example.tar.gz"
 package_sha=$(sha256sum "$out/example.tar.gz" | cut -d ' ' -f 1)
 package_size=$(stat -c %s "$out/example.tar.gz")
-jq --arg sha "$package_sha" --argjson size "$package_size" \
-  '{version:1,packages:[{id:.id,version:.version,url:"https://fixture.invalid/example.tar.gz",size:$size,sha256:$sha,required:true,fountain_protocol:.protocol,browser_contract:1,capabilities:.capabilities}]}' \
+jq --arg sha "$package_sha" --argjson size "$package_size" --argjson browser "$browser" \
+  '{version:1,packages:[{id:.id,version:.version,url:"https://fixture.invalid/example.tar.gz",size:$size,sha256:$sha,required:true,fountain_protocol:.protocol,browser_contract:$browser,capabilities:.capabilities}]}' \
   "$out/example/extension.json" > "$out/catalog.json"
 # The host admits a catalog owned by root or its service UID, but the fixture
 # carries the checkout owner's UID instead. Stamp it with the image's own
@@ -79,7 +87,7 @@ ready() {
 }
 verify() {
   ready
-  "$engine" exec "$container" curl -fsS http://localhost:3000/api/v1/version | jq -e --arg v "$version+gitea-1.22.0" '.version == $v'
+  "$engine" exec "$container" curl -fsS http://localhost:3000/api/v1/version | jq -e --arg v "$fountain_full_version" '.version == $v'
   for asset in js/index.js css/index.css licenses.txt; do
     "$engine" exec "$container" curl -fsS "http://localhost:3000/assets/$asset" > "$out/$(basename "$asset")"
     test -s "$out/$(basename "$asset")"

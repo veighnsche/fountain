@@ -64,6 +64,7 @@ func ValidRepositoryReviewPage(p *RepositoryReviewPage, repository string, q Rep
 	}
 	return p.NextCursor == "" || last != "" && p.NextCursor == last
 }
+
 func (a Authority) RepositoryReviews(ctx context.Context, repository string, q RepositoryReviewsRequest) (RepositoryReviewPage, error) {
 	if !positivePullID(repository) || !ValidRepositoryReviewsRequest(q) {
 		return RepositoryReviewPage{}, errors.New("invalid review request")

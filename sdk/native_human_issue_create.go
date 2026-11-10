@@ -16,14 +16,16 @@ import (
 	"forgejo.org/extension-sdk/operationcontract"
 )
 
-const OperationKindHumanIssueCreate = "issue.create"
-const HumanIssueCreateAuthorizationRevision = "native-human-request"
-const MaxHumanIssueCreateTitleBytes = 255
-const MaxHumanIssueCreateBodyBytes = 64 << 10
-const MaxHumanIssueCreateCallbackBytes = 512 << 10
-const OperationHumanIssueCreateSubmit = "repository.issue.create.submit"
-const OperationHumanIssueCreateGet = "repository.issue.create.get"
-const OperationHumanIssueCreateCancel = "repository.issue.create.cancel"
+const (
+	OperationKindHumanIssueCreate         = "issue.create"
+	HumanIssueCreateAuthorizationRevision = "native-human-request"
+	MaxHumanIssueCreateTitleBytes         = 255
+	MaxHumanIssueCreateBodyBytes          = 64 << 10
+	MaxHumanIssueCreateCallbackBytes      = 512 << 10
+	OperationHumanIssueCreateSubmit       = "repository.issue.create.submit"
+	OperationHumanIssueCreateGet          = "repository.issue.create.get"
+	OperationHumanIssueCreateCancel       = "repository.issue.create.cancel"
+)
 
 var (
 	ErrHumanIssueCreateQuery       = errors.New("invalid human issue creation request")

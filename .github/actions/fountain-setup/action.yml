@@ -17,13 +17,16 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        source tools/fountain-policy.sh
+        source tools/fountain-toolchain.sh
+        fountain_go_toolchain "$PWD" >/dev/null
         if [[ $GITHUB_REF == refs/tags/* ]]; then
-          [[ $GITHUB_REF_NAME == "ci/fountain-$GITHUB_SHA" || $GITHUB_REF_NAME == "ci/fountain-full-$GITHUB_SHA" ]]
+          [[ $GITHUB_REF_NAME == "$fountain_ci_tag_prefix$GITHUB_SHA" || $GITHUB_REF_NAME == "$fountain_full_ci_tag_prefix$GITHUB_SHA" ]]
         fi
         echo "TMPDIR=$(mktemp -d "$HOME/fc.XXXXXXXX")" >> "$GITHUB_ENV"
     - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
       with:
-        go-version: '1.26.10'
+        go-version-file: go.mod
         cache-dependency-path: |
           go.sum
           sdk/go.sum
@@ -35,7 +38,8 @@ runs:
     - name: Install the selected npm version
       shell: bash
       run: |
-        npm install --prefix "$HOME/.local/fountain-ci" --no-audit --no-fund npm@11.11.0
+        package_manager=$(node -p "require('./package.json').packageManager")
+        npm install --prefix "$HOME/.local/fountain-ci" --no-audit --no-fund "$package_manager"
         echo "$HOME/.local/fountain-ci/node_modules/.bin" >> "$GITHUB_PATH"
     - name: Install locked dependencies
       if: inputs.dependencies == 'true'

@@ -26,6 +26,7 @@ func ValidRepositoryPullsRequest(q RepositoryPullsRequest) bool {
 	}
 	return true
 }
+
 func positivePullID(raw string) bool {
 	id, err := strconv.ParseInt(raw, 10, 64)
 	return err == nil && id > 0 && strconv.FormatInt(id, 10) == raw
@@ -82,6 +83,7 @@ func ValidRepositoryPullPage(p *RepositoryPullPage, repository string, q Reposit
 	}
 	return p.NextCursor == "" || last != "" && p.NextCursor == last
 }
+
 func (a Authority) RepositoryPulls(ctx context.Context, repository string, q RepositoryPullsRequest) (RepositoryPullPage, error) {
 	if !positivePullID(repository) || !ValidRepositoryPullsRequest(q) {
 		return RepositoryPullPage{}, errors.New("invalid pull request query")

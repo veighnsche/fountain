@@ -13,17 +13,23 @@ import (
 	"forgejo.org/extension-sdk/operationcontract"
 )
 
-const OperationKindHumanReviewRequest = "pull_request.human_review_request.apply"
-const HumanReviewRequestAuthorizationRevision = "native-human-request"
+const (
+	OperationKindHumanReviewRequest         = "pull_request.human_review_request.apply"
+	HumanReviewRequestAuthorizationRevision = "native-human-request"
+)
 
-const OperationHumanReviewRequestSubmit = "repository.human_review_request.submit"
-const OperationHumanReviewRequestGet = "repository.human_review_request.get"
-const OperationHumanReviewRequestCancel = "repository.human_review_request.cancel"
+const (
+	OperationHumanReviewRequestSubmit = "repository.human_review_request.submit"
+	OperationHumanReviewRequestGet    = "repository.human_review_request.get"
+	OperationHumanReviewRequestCancel = "repository.human_review_request.cancel"
+)
 
-var ErrHumanReviewRequestQuery = errors.New("invalid human reviewer request")
-var ErrHumanReviewRequestAdmission = errors.New("current human reviewer admission is required")
-var ErrHumanReviewRequestConflict = errors.New("human reviewer operation conflicts")
-var ErrHumanReviewRequestUnavailable = errors.New("native human reviewer service is unavailable")
+var (
+	ErrHumanReviewRequestQuery       = errors.New("invalid human reviewer request")
+	ErrHumanReviewRequestAdmission   = errors.New("current human reviewer admission is required")
+	ErrHumanReviewRequestConflict    = errors.New("human reviewer operation conflicts")
+	ErrHumanReviewRequestUnavailable = errors.New("native human reviewer service is unavailable")
+)
 
 // HumanReviewRequestChange is an exact captured selection and desired state,
 // never authority. Persist it before dispatch and reuse it unchanged on replay.

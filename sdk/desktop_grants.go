@@ -28,5 +28,7 @@ type DesktopGrant struct {
 
 const DesktopRepositoryRead = "repository.read"
 
-const DesktopIssuesRead = "issues.read"
-const DesktopIssuesCollaborate = "issue.collaborate"
+const (
+	DesktopIssuesRead        = "issues.read"
+	DesktopIssuesCollaborate = "issue.collaborate"
+)

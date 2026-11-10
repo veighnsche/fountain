@@ -6,8 +6,10 @@ import (
 	"regexp"
 )
 
-const OperationIssueIntakeAuthorize = "repository.issue_intake.authorize"
-const BackgroundIssueIntakePath = "/v1/background/issue-intake"
+const (
+	OperationIssueIntakeAuthorize = "repository.issue_intake.authorize"
+	BackgroundIssueIntakePath     = "/v1/background/issue-intake"
+)
 
 // IssueIntakeClaims authorizes only bounded issue intake for one submitted
 // request. It carries no implementation, Git, pull request or deployment grant.
@@ -56,12 +58,15 @@ type IssueIntakeAuthorization struct {
 	Step        int               `json:"step"`
 }
 
-var intakeSource = regexp.MustCompile(`^[a-f0-9]{32}$`)
-var intakeDigest = regexp.MustCompile(`^[a-f0-9]{64}$`)
+var (
+	intakeSource = regexp.MustCompile(`^[a-f0-9]{32}$`)
+	intakeDigest = regexp.MustCompile(`^[a-f0-9]{64}$`)
+)
 
 func ValidIssueIntakeRequest(request IssueIntakeAuthorizationRequest) bool {
 	return intakeSource.MatchString(request.Source) && request.Revision >= 0 && intakeDigest.MatchString(request.Digest)
 }
+
 func ValidIssueIntakeMutation(request IssueIntakeMutation) bool {
 	return (request.Action == "create" || request.Action == "refine") && request.Slot >= 0 && request.Slot < 16 && request.Step >= 0 && request.Step < 32 && len(request.Title) > 0 && len(request.Title) <= 255 && len(request.Body) > 0 && len(request.Body) <= 20*1024 && (request.Action != "refine" || len(request.ExpectedTitle) > 0 && intakeDigest.MatchString(request.ExpectedBodyDigest))
 }

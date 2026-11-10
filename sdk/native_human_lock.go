@@ -16,14 +16,18 @@ import (
 	"forgejo.org/extension-sdk/operationcontract"
 )
 
-const OperationKindHumanLock = "discussion.lock.apply"
-const HumanLockAuthorizationRevision = "native-human-request"
-const MaxHumanLockReasonBytes = 64 << 10
+const (
+	OperationKindHumanLock         = "discussion.lock.apply"
+	HumanLockAuthorizationRevision = "native-human-request"
+	MaxHumanLockReasonBytes        = 64 << 10
+)
 
-const MaxHumanLockCallbackBytes = 512 << 10
-const OperationHumanLockSubmit = "repository.lock.submit"
-const OperationHumanLockGet = "repository.lock.get"
-const OperationHumanLockCancel = "repository.lock.cancel"
+const (
+	MaxHumanLockCallbackBytes = 512 << 10
+	OperationHumanLockSubmit  = "repository.lock.submit"
+	OperationHumanLockGet     = "repository.lock.get"
+	OperationHumanLockCancel  = "repository.lock.cancel"
+)
 
 var (
 	ErrHumanLockQuery       = errors.New("invalid human lock request")

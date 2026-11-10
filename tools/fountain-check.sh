@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/fountain-toolchain.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/fountain-policy.sh"
 cd "$(dirname "$0")/.."
 if [[ $# != 1 || ${FOUNTAIN_CHECK_ISOLATED:-} != 1 ]]; then
   echo 'Usage: FOUNTAIN_CHECK_ISOLATED=1 bash tools/fountain-check.sh {source|unit|database|browser|packaging|release}' >&2
@@ -14,8 +16,10 @@ clean_source() {
 }
 clean_source
 [[ $(uname -sm) == 'Linux x86_64' ]]
-export GOTOOLCHAIN=go1.26.10 GOWORK=off
-[[ $(go version) == 'go version go1.26.10 linux/amd64' ]]
+export GOTOOLCHAIN
+GOTOOLCHAIN=$(fountain_go_toolchain "$PWD")
+export GOWORK=off
+[[ $(go version) == "go version $GOTOOLCHAIN linux/amd64" ]]
 [[ $(node --version) == "v$(<.node-version)" ]]
 [[ "npm@$(npm --version)" == $(node -p "require('./package.json').packageManager") ]]
 [[ ${TMPDIR:-} == /home/* && -d $TMPDIR ]]
@@ -23,6 +27,23 @@ export CI=true TZ=UTC
 case $1 in source|release|push-source) export GOFLAGS='' ;; *) export GOFLAGS=-mod=readonly ;; esac
 mkdir -p .artifacts/fountain-ci
 if [[ -d node_modules ]]; then touch node_modules; fi
+
+format_independent_sources() {
+  local -a files=()
+  local session_path
+  mapfile -d '' files < <(git ls-files -z 'sdk/*.go' 'sdk/**/*.go')
+  while IFS= read -r session_path; do
+    [[ -f $session_path ]]
+    if [[ $session_path == *.go ]]; then files+=("$session_path"); fi
+  done < tools/fountain-session-delta.txt
+  if [[ ${#files[@]} != 0 ]]; then
+    go run mvdan.cc/gofumpt@v0.9.2 -w "${files[@]}"
+  fi
+}
+
+lint_workflows() {
+  go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 "${fountain_workflows[@]}"
+}
 
 module_checks() {
   go mod verify
@@ -36,10 +57,7 @@ module_checks() {
   done
   # The upstream formatter omits independent modules. Format only our SDK and
   # the patched session files, preserving the unchanged vendored providers.
-  mapfile -d '' sdk_files < <(git ls-files -z 'sdk/*.go' 'sdk/**/*.go' 'third_party/go-chi-session/file.go' 'third_party/go-chi-session/file*_test.go')
-  if [[ ${#sdk_files[@]} != 0 ]]; then
-    go run mvdan.cc/gofumpt@v0.9.2 -w "${sdk_files[@]}"
-  fi
+  format_independent_sources
 }
 
 case $1 in
@@ -47,8 +65,7 @@ case $1 in
     make fmt-check
     (cd sdk && go mod verify && go vet ./...)
     (cd third_party/go-chi-session && go mod verify && go vet .)
-    mapfile -d '' sdk_files < <(git ls-files -z 'sdk/*.go' 'sdk/**/*.go' 'third_party/go-chi-session/file.go' 'third_party/go-chi-session/file*_test.go')
-    go run mvdan.cc/gofumpt@v0.9.2 -w "${sdk_files[@]}"
+    format_independent_sources
     ;;
   push-unit)
     go test -count=1 -tags 'sqlite sqlite_unlock_notify' \
@@ -93,7 +110,7 @@ case $1 in
   push-packaging)
     for script in tools/fountain-*.sh; do bash -n "$script"; done
     hadolint --failure-threshold warning Dockerfile
-    go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/fountain-ci.yml .github/workflows/fountain-full-ci.yml
+    lint_workflows
     ;;
   source)
     make --what-if=routers/api/v1/api.go checks lint-backend-analysis lint-swagger
@@ -131,7 +148,7 @@ case $1 in
   packaging)
     for script in tools/fountain-*.sh; do bash -n "$script"; done
     hadolint --failure-threshold warning Dockerfile
-    go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/fountain-ci.yml
+    lint_workflows
     ;;
   release)
     # The local release profile shares existing source commands. PostgreSQL and

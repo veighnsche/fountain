@@ -55,12 +55,14 @@ func CanonicalHumanCommentIntent(q HumanCommentRequest) (string, string, error) 
 	return string(raw), hex.EncodeToString(sum[:]), nil
 }
 
-const MaxHumanCommentBytes = 64 << 10
-const MaxHumanCommentCallbackBytes = 512 << 10 // Includes JSON escaping and the native envelope.
-const OperationKindHumanComment = "discussion.comment.create"
-const OperationHumanCommentSubmit = "repository.comment.submit"
-const OperationHumanCommentGet = "repository.comment.get"
-const OperationHumanCommentCancel = "repository.comment.cancel"
+const (
+	MaxHumanCommentBytes         = 64 << 10
+	MaxHumanCommentCallbackBytes = 512 << 10 // Includes JSON escaping and the native envelope.
+	OperationKindHumanComment    = "discussion.comment.create"
+	OperationHumanCommentSubmit  = "repository.comment.submit"
+	OperationHumanCommentGet     = "repository.comment.get"
+	OperationHumanCommentCancel  = "repository.comment.cancel"
+)
 
 var (
 	ErrHumanCommentQuery       = errors.New("invalid human comment request")

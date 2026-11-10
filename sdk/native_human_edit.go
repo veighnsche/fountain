@@ -16,15 +16,19 @@ import (
 	"forgejo.org/extension-sdk/operationcontract"
 )
 
-const OperationKindHumanEdit = "discussion.edit"
-const HumanEditAuthorizationRevision = "native-human-request"
-const MaxHumanEditBodyBytes = 64 << 10
-const MaxHumanEditTitleBytes = 255 // Native storage truncates titles at this byte boundary.
+const (
+	OperationKindHumanEdit         = "discussion.edit"
+	HumanEditAuthorizationRevision = "native-human-request"
+	MaxHumanEditBodyBytes          = 64 << 10
+	MaxHumanEditTitleBytes         = 255 // Native storage truncates titles at this byte boundary.
+)
 
-const MaxHumanEditCallbackBytes = 512 << 10
-const OperationHumanEditSubmit = "repository.edit.submit"
-const OperationHumanEditGet = "repository.edit.get"
-const OperationHumanEditCancel = "repository.edit.cancel"
+const (
+	MaxHumanEditCallbackBytes = 512 << 10
+	OperationHumanEditSubmit  = "repository.edit.submit"
+	OperationHumanEditGet     = "repository.edit.get"
+	OperationHumanEditCancel  = "repository.edit.cancel"
+)
 
 var (
 	ErrHumanEditQuery       = errors.New("invalid human edit request")

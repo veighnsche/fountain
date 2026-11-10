@@ -4,9 +4,21 @@ Source: `code.forgejo.org/go-chi/session` **v1.1.0**, copied without changing it
 module path. The upstream Apache-2.0 license and notices are retained. The root
 module selects this one implementation with a local `replace` directive.
 
-Local changes are limited to `file.go`, `file_lifecycle_test.go`, this note, and
-adding the already selected `github.com/gofrs/flock v0.12.1` dependency in the
-module manifests. All other upstream source and tests are unchanged.
+The complete eight-path local delta is recorded in
+[`tools/fountain-session-delta.txt`](../../tools/fountain-session-delta.txt).
+It covers the modified `file.go`, `file_test.go` and `memory.go`, the added
+`file_lifecycle_test.go` and `memory_lifecycle_test.go`, this note, and adding
+the already selected `github.com/gofrs/flock v0.12.1` dependency in the module
+manifests. All other upstream source and tests are unchanged. Qualification
+formats only the five Go files in that inventory, alongside the independent SDK.
+
+The memory provider serializes read/expiry, regeneration and garbage collection
+under the provider lock. Expiry detaches old stores; regeneration copies live
+values through the existing gob codec into a new store so earlier requests
+cannot mutate the replacement lifetime. Store emptiness and provider counts
+are read under their locks. The upstream file-provider test was adapted to
+stop its uncancellable GC timer from accessing its temporary directory after
+test cleanup. Both local lifecycle suites cover the provider changes.
 
 The file provider now persists a `forgejo-session-1` record containing a random
 generation, a revision and the upstream gob-encoded session data. Missing,

@@ -9,9 +9,11 @@ import (
 	"strconv"
 )
 
-const OperationRepositoryReviewRequestSnapshot = "repository.review.request.snapshot"
-const MaxReviewRequestSnapshotRecords = 1000
-const MaxReviewRequestSnapshotBodyBytes = 2 << 20
+const (
+	OperationRepositoryReviewRequestSnapshot = "repository.review.request.snapshot"
+	MaxReviewRequestSnapshotRecords          = 1000
+	MaxReviewRequestSnapshotBodyBytes        = 2 << 20
+)
 
 var (
 	ErrReviewRequestSnapshotQuery       = errors.New("invalid reviewer selection query")

@@ -26,6 +26,7 @@ func ValidRepositoryPullFilesRequest(q RepositoryPullFilesRequest) bool {
 	return positivePullID(q.Index) && q.Limit > 0 && q.Limit <= 10 && len(q.Cursor) <= 4096 &&
 		(q.Base == "" && q.Head == "" && q.Cursor == "" || ValidPullDiffCommit(q.Base) && ValidPullDiffCommit(q.Head))
 }
+
 func ValidPullDiffCommit(s string) bool {
 	if len(s) != 40 && len(s) != 64 {
 		return false

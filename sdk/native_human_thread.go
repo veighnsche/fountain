@@ -13,17 +13,23 @@ import (
 	"forgejo.org/extension-sdk/operationcontract"
 )
 
-const OperationKindHumanThread = "pull_request.human_thread.apply"
-const HumanThreadAuthorizationRevision = "native-human-request"
+const (
+	OperationKindHumanThread         = "pull_request.human_thread.apply"
+	HumanThreadAuthorizationRevision = "native-human-request"
+)
 
-const OperationHumanThreadSubmit = "repository.human_thread.submit"
-const OperationHumanThreadGet = "repository.human_thread.get"
-const OperationHumanThreadCancel = "repository.human_thread.cancel"
+const (
+	OperationHumanThreadSubmit = "repository.human_thread.submit"
+	OperationHumanThreadGet    = "repository.human_thread.get"
+	OperationHumanThreadCancel = "repository.human_thread.cancel"
+)
 
-var ErrHumanThreadQuery = errors.New("invalid human thread request")
-var ErrHumanThreadAdmission = errors.New("current human thread admission is required")
-var ErrHumanThreadConflict = errors.New("human thread operation conflicts")
-var ErrHumanThreadUnavailable = errors.New("native human thread service is unavailable")
+var (
+	ErrHumanThreadQuery       = errors.New("invalid human thread request")
+	ErrHumanThreadAdmission   = errors.New("current human thread admission is required")
+	ErrHumanThreadConflict    = errors.New("human thread operation conflicts")
+	ErrHumanThreadUnavailable = errors.New("native human thread service is unavailable")
+)
 
 // HumanThreadRequest retains one exact native thread preparation and desired
 // resolve/unresolve state. It is not authority; persist it before dispatch.

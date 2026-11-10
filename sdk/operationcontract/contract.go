@@ -36,9 +36,11 @@ const (
 // BackgroundKinds returns the stable journal vocabulary, in handshake order.
 // Enrollment-only execution.launch is deliberately absent.
 func BackgroundKinds() []string {
-	return []string{KindRefPublish, KindLifecycleNote, KindIssueGraph,
+	return []string{
+		KindRefPublish, KindLifecycleNote, KindIssueGraph,
 		KindLifecycleIssue, KindPRCreate, KindMerge, KindLifecycleReview,
-		KindReviewSubmit, KindThreadResolve}
+		KindReviewSubmit, KindThreadResolve,
+	}
 }
 
 func ValidBackgroundKind(kind string) bool {
@@ -68,10 +70,12 @@ func ValidID(id string) bool {
 }
 
 func IsHumanID(id string) bool {
-	for _, prefix := range []string{HumanCommentPrefix, HumanEditPrefix,
+	for _, prefix := range []string{
+		HumanCommentPrefix, HumanEditPrefix,
 		HumanIssueCreatePrefix, HumanLockPrefix, HumanStatePrefix, HumanReviewPrefix,
 		HumanInlinePrefix, HumanThreadPrefix, HumanReviewRequestPrefix,
-		HumanMergePrefix, HumanManualMergePrefix, HumanPullCreatePrefix} {
+		HumanMergePrefix, HumanManualMergePrefix, HumanPullCreatePrefix,
+	} {
 		if strings.HasPrefix(id, prefix) {
 			return true
 		}

@@ -14,18 +14,22 @@ import (
 	"forgejo.org/extension-sdk/operationcontract"
 )
 
-const OperationKindHumanInline = "pull_request.human_inline.create"
-const HumanInlineAuthorizationRevision = "native-human-request"
-const MaxHumanInlineBodyBytes = 64 << 10
-const MaxHumanInlineCallbackBytes = 512 << 10
-const OperationHumanInlineSubmit = "repository.human_inline.submit"
-const OperationHumanInlineGet = "repository.human_inline.get"
-const OperationHumanInlineCancel = "repository.human_inline.cancel"
+const (
+	OperationKindHumanInline         = "pull_request.human_inline.create"
+	HumanInlineAuthorizationRevision = "native-human-request"
+	MaxHumanInlineBodyBytes          = 64 << 10
+	MaxHumanInlineCallbackBytes      = 512 << 10
+	OperationHumanInlineSubmit       = "repository.human_inline.submit"
+	OperationHumanInlineGet          = "repository.human_inline.get"
+	OperationHumanInlineCancel       = "repository.human_inline.cancel"
+)
 
-var ErrHumanInlineQuery = errors.New("invalid human inline request")
-var ErrHumanInlineAdmission = errors.New("current human inline admission is required")
-var ErrHumanInlineConflict = errors.New("human inline operation conflicts")
-var ErrHumanInlineUnavailable = errors.New("native human inline service is unavailable")
+var (
+	ErrHumanInlineQuery       = errors.New("invalid human inline request")
+	ErrHumanInlineAdmission   = errors.New("current human inline admission is required")
+	ErrHumanInlineConflict    = errors.New("human inline operation conflicts")
+	ErrHumanInlineUnavailable = errors.New("native human inline service is unavailable")
+)
 
 // HumanInlineRequest records a fresh inline selection and its current human
 // preparation. Expected is evidence, never authority. Persist this command and

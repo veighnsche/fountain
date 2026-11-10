@@ -14,12 +14,16 @@ import (
 	"forgejo.org/extension-sdk/operationcontract"
 )
 
-const OperationKindHumanState = "discussion.state.apply"
-const HumanStateAuthorizationRevision = "native-human-request"
+const (
+	OperationKindHumanState         = "discussion.state.apply"
+	HumanStateAuthorizationRevision = "native-human-request"
+)
 
-const OperationHumanStateSubmit = "repository.state.submit"
-const OperationHumanStateGet = "repository.state.get"
-const OperationHumanStateCancel = "repository.state.cancel"
+const (
+	OperationHumanStateSubmit = "repository.state.submit"
+	OperationHumanStateGet    = "repository.state.get"
+	OperationHumanStateCancel = "repository.state.cancel"
+)
 
 var (
 	ErrHumanStateQuery       = errors.New("invalid human state request")

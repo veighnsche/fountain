@@ -73,6 +73,7 @@ func ValidRepositoryThreadAnchor(a *RepositoryThreadAnchor) bool {
 	}
 	return a.Scope == "file" && a.StartLine == 0 && a.EndLine == 0 || a.Scope == "lines" && a.StartLine > 0 && a.EndLine >= a.StartLine && a.EndLine <= 9007199254740991
 }
+
 func ValidRepositoryThreadPage(p *RepositoryThreadPage, repo string, q RepositoryThreadsRequest) bool {
 	if p == nil || p.RepositoryID != repo || !positivePullID(p.PullID) || p.Index != q.Index || p.Items == nil || q.ThreadID == "" && len(p.Items) > q.Limit || q.ThreadID != "" && (len(p.Items) != 1 || p.Items[0].ID != q.ThreadID || p.NextCursor != "") {
 		return false

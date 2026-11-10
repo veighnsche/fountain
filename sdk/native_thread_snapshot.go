@@ -8,8 +8,10 @@ import (
 	"errors"
 )
 
-const OperationRepositoryThreadSnapshot = "repository.thread.snapshot"
-const MaxThreadSnapshotMembers = 1000
+const (
+	OperationRepositoryThreadSnapshot = "repository.thread.snapshot"
+	MaxThreadSnapshotMembers          = 1000
+)
 
 // MaxThreadSnapshotBodyBytes bounds selected comment prose and retained patches.
 const MaxThreadSnapshotBodyBytes = 2 << 20

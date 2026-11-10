@@ -17,19 +17,23 @@ import (
 	"forgejo.org/extension-sdk/operationcontract"
 )
 
-const OperationKindHumanPullCreate = "pull_request.human_create.apply"
-const HumanPullCreateAuthorizationRevision = "native-human-request"
-const MaxHumanPullCreateTitleBytes = 255
-const MaxHumanPullCreateBodyBytes = 64 << 10
-const MaxHumanPullCreateCallbackBytes = 512 << 10
-const OperationHumanPullCreateSubmit = "repository.pull.create.submit"
-const OperationHumanPullCreateGet = "repository.pull.create.get"
-const OperationHumanPullCreateCancel = "repository.pull.create.cancel"
+const (
+	OperationKindHumanPullCreate         = "pull_request.human_create.apply"
+	HumanPullCreateAuthorizationRevision = "native-human-request"
+	MaxHumanPullCreateTitleBytes         = 255
+	MaxHumanPullCreateBodyBytes          = 64 << 10
+	MaxHumanPullCreateCallbackBytes      = 512 << 10
+	OperationHumanPullCreateSubmit       = "repository.pull.create.submit"
+	OperationHumanPullCreateGet          = "repository.pull.create.get"
+	OperationHumanPullCreateCancel       = "repository.pull.create.cancel"
+)
 
-var ErrHumanPullCreateQuery = errors.New("invalid human pull creation request")
-var ErrHumanPullCreateAdmission = errors.New("current human pull creation admission is required")
-var ErrHumanPullCreateConflict = errors.New("human pull creation operation conflicts")
-var ErrHumanPullCreateUnavailable = errors.New("native human pull creation service is unavailable")
+var (
+	ErrHumanPullCreateQuery       = errors.New("invalid human pull creation request")
+	ErrHumanPullCreateAdmission   = errors.New("current human pull creation admission is required")
+	ErrHumanPullCreateConflict    = errors.New("human pull creation operation conflicts")
+	ErrHumanPullCreateUnavailable = errors.New("native human pull creation service is unavailable")
+)
 
 // This is immutable human intent, not a credential or creation grant. Native
 // comparison is computed under the claim; the request cannot select its result.

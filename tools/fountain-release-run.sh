@@ -7,6 +7,7 @@
 # nothing; it needs no tag. --yes skips the confirmation prompt.
 # Published versions are immutable; --move-tag is refused.
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/fountain-policy.sh"
 
 version=${1:-}
 dry_run=0
@@ -24,7 +25,7 @@ done
 }
 
 cd "$(git rev-parse --show-toplevel)"
-branch=codex/fountain-extensions
+branch=$fountain_maintained_branch
 [[ $(git branch --show-current) == "$branch" ]] || {
   echo "release: run from the maintained branch '$branch'" >&2; exit 2;
 }
@@ -83,9 +84,9 @@ if (( dry_run == 0 )); then
 fi
 
 if (( dry_run == 1 )); then
-  url=$(gh workflow run fountain-release.yml --ref "$branch" -f tag="$tag" -F dry_run=true --repo "$repository")
+  url=$(gh workflow run "$fountain_release_workflow" --ref "$branch" -f tag="$tag" -F dry_run=true --repo "$repository")
 else
-  url=$(gh workflow run fountain-release.yml --ref "$branch" -f tag="$tag" --repo "$repository")
+  url=$(gh workflow run "$fountain_release_workflow" --ref "$branch" -f tag="$tag" --repo "$repository")
 fi
 # Captured gh workflow output returns the created run URL. Never substitute
 # another same-commit run: it may belong to a concurrent dispatch or old attempt.

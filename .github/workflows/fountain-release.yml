@@ -126,6 +126,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          source tools/fountain-release-names.sh
+          fountain_release_names "$VERSION"
           config=$(cat "$OUT/image-id")
           docker tag "$config" "$IMAGE:$VERSION"
           docker push "$IMAGE:$VERSION"
@@ -138,7 +140,7 @@ jobs:
           printf 'Fountain %s\n\nSource: %s\nImage: `%s`\n\nSee docs/fountain-release.md in the source archive for the runtime and extension contract.\n' \
             "$VERSION" "$COMMIT" "$reference" > "$OUT/release-notes.txt"
           gh release create "$TAG" --verify-tag --draft --title "Fountain $VERSION" --notes-file "$OUT/release-notes.txt" \
-            "$OUT/fountain-$VERSION-source.tar.gz" "$OUT/fountain-$VERSION-linux-amd64.gz" \
-            "$OUT/forgejo-src-$VERSION+gitea-1.22.0.tar.gz" \
+            "$OUT/$fountain_source_archive" "$OUT/$fountain_binary_archive" \
+            "$OUT/$fountain_prepared_archive" \
             "$OUT/LICENSE" "$OUT/SHA256SUMS" "$OUT/release.json"
           gh release edit "$TAG" --draft=false --latest=false

@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Qualify and fast-forward the maintained branch within one bounded operation.
 set -euo pipefail
-budget=${FOUNTAIN_PUSH_TIMEOUT_SECONDS:-300}
-[[ $budget =~ ^[0-9]+$ ]] && (( budget >= 2 && budget <= 300 )) || {
-  echo 'Push budget must be between 2 and 300 seconds.' >&2; exit 2;
+source "$(dirname "${BASH_SOURCE[0]}")/fountain-policy.sh"
+budget=${FOUNTAIN_PUSH_TIMEOUT_SECONDS:-$fountain_push_budget_seconds}
+[[ $budget =~ ^[0-9]+$ ]] && (( budget >= 2 && budget <= fountain_push_budget_seconds )) || {
+  printf 'Push budget must be between 2 and %s seconds.\n' "$fountain_push_budget_seconds" >&2; exit 2;
 }
 if [[ ${FOUNTAIN_PUSH_BOUNDED:-} != 1 ]]; then
   if timeout --signal=TERM --kill-after=1s "$((budget - 1))s" env FOUNTAIN_PUSH_BOUNDED=1 bash "$0" "$@"; then
@@ -21,9 +22,9 @@ fi
 cd "$(git rev-parse --show-toplevel)"
 bash tools/fountain-check-clean.sh
 candidate=$(git rev-parse HEAD)
-branch=codex/fountain-extensions
+branch=$fountain_maintained_branch
 repository=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
-tag="ci/fountain-$candidate"
+tag="$fountain_ci_tag_prefix$candidate"
 mkdir -p .artifacts/fountain-ci
 receipt=$(mktemp .artifacts/fountain-ci/push.XXXXXXXX)
 trap 'rm -f "$receipt"' EXIT
@@ -35,10 +36,10 @@ fi
 git push origin "refs/tags/$tag"
 printf 'Qualifying %s; total push budget %ss.\n' "$candidate" "$budget"
 while (( SECONDS < budget - 15 )); do
-  gh api "repos/$repository/actions/workflows/fountain-ci.yml/runs?head_sha=$candidate&branch=$tag&event=push&per_page=1" > "$receipt"
-  if jq -e --arg sha "$candidate" --arg tag "$tag" '
+  gh api "repos/$repository/actions/workflows/$fountain_ci_workflow/runs?head_sha=$candidate&branch=$tag&event=$fountain_ci_event&per_page=1" > "$receipt"
+  if jq -e --arg sha "$candidate" --arg tag "$tag" --arg event "$fountain_ci_event" --arg workflow "$fountain_ci_workflow_path" '
     .workflow_runs | length == 1 and
-    (.[0] | .head_sha == $sha and .head_branch == $tag and .event == "push" and .path == ".github/workflows/fountain-ci.yml")
+    (.[0] | .head_sha == $sha and .head_branch == $tag and .event == $event and .path == $workflow)
   ' "$receipt" >/dev/null; then
     run=$(jq -r '.workflow_runs[0].id' "$receipt")
     url=$(jq -r '.workflow_runs[0].html_url' "$receipt")
@@ -47,8 +48,8 @@ while (( SECONDS < budget - 15 )); do
         printf 'Qualification failed: %s\n' "$url" >&2; exit 1;
       }
       gh api "repos/$repository/commits/$candidate/check-runs?filter=all&per_page=100" > "$receipt"
-      jq -e --arg sha "$candidate" --arg run "/actions/runs/$run/" '
-        any(.check_runs[]; .name == "Fountain CI" and .head_sha == $sha and .app.id == 15368 and
+      jq -e --arg sha "$candidate" --arg run "/actions/runs/$run/" --arg gate "$fountain_ci_gate" --argjson app "$fountain_actions_app_id" '
+        any(.check_runs[]; .name == $gate and .head_sha == $sha and .app.id == $app and
           .status == "completed" and .conclusion == "success" and (.details_url | contains($run)))
       ' "$receipt" >/dev/null
       remote=$(git ls-remote origin "refs/heads/$branch" | cut -f1)

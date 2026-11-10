@@ -15,9 +15,11 @@ import (
 	"forgejo.org/extension-sdk/operationcontract"
 )
 
-const OperationKindHumanMerge = "pull_request.human_merge.apply"
-const HumanMergeAuthorizationRevision = "native-human-request"
-const MaxHumanMergeMessageBytes = 64 << 10
+const (
+	OperationKindHumanMerge         = "pull_request.human_merge.apply"
+	HumanMergeAuthorizationRevision = "native-human-request"
+	MaxHumanMergeMessageBytes       = 64 << 10
+)
 
 // Allow JSON escaping of the exact message and its native preparation. Other
 // callback operations retain their own small envelope, including lookup/cancel.
