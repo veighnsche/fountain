@@ -34,5 +34,5 @@ func withCollabOwnership(ctx context.Context, resource string, repositoryID int6
 	if err != nil {
 		return err
 	}
-	return nativeownership.WithOrdinary(ctx, filepath.Join(setting.AppDataPath, "nativeop-exec"), familyCollaboration, resource, string(encoded), fn)
+	return nativeownership.WithOrdinary(ctx, filepath.Join(setting.AppDataPath, "nativeop-exec"), familyCollaboration, resource, encoded, fn)
 }

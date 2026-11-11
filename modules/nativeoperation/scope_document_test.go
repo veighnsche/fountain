@@ -4,7 +4,7 @@
 package nativeoperation
 
 import (
-	"encoding/json"
+	"encoding/json" //nolint:depguard // Persisted scope tests preserve standard-library raw JSON semantics.
 	"errors"
 	"strings"
 	"testing"

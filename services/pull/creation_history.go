@@ -9,10 +9,10 @@ import (
 	"forgejo.org/modules/json"
 )
 
-// PullRequestCreationHistory is the native initial push-history encoding.
+// CreationHistory is the native initial push-history encoding.
 // An empty comparison creates no history comment; comparison commits are
 // recorded oldest first, preserving the existing content bytes.
-func PullRequestCreationHistory(commits []*git.Commit) (string, error) {
+func CreationHistory(commits []*git.Commit) (string, error) {
 	if len(commits) == 0 {
 		return "", nil
 	}

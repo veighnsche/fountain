@@ -50,39 +50,37 @@ const (
 // cleanup call permits one controller check followed by one service check;
 // failed tuple/state checks consume neither hop.
 func (m *Manager) completeLifecycleVerification(token string, admission BackgroundAdmission, verification sdk.LifecycleVerification, hop lifecycleVerificationHop) (sdk.LifecycleVerification, *AuthError) {
-	refuse := func() (sdk.LifecycleVerification, *AuthError) {
-		return sdk.LifecycleVerification{}, &AuthError{Code: "unauthorized", Message: "lifecycle admission is unknown or revoked", HTTP: 403}
-	}
+	refuse := &AuthError{Code: "unauthorized", Message: "lifecycle admission is unknown or revoked", HTTP: 403}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	state, known := m.controllers[admission.Call.ControllerID]
 	if !known || !state.ready || state.instanceID != admission.Call.ControllerInstanceID || admission.Call.DeadlineUnix <= time.Now().Unix() {
-		return refuse()
+		return sdk.LifecycleVerification{}, refuse
 	}
 	if admission.lifecyclePurpose == purposeFailedEnableCleanup &&
 		(m.mutation != admission.Call.PackageID || m.mutationPhase != transitionFailedEnableCleanup) {
-		return refuse()
+		return sdk.LifecycleVerification{}, refuse
 	}
 	m.background.mu.Lock()
 	defer m.background.mu.Unlock()
 	current := m.background.entries[token]
 	if current == nil || !current.Lifecycle || current.Call != admission.Call || current.lifecyclePurpose != admission.lifecyclePurpose || current.DesiredEnabled != admission.DesiredEnabled {
-		return refuse()
+		return sdk.LifecycleVerification{}, refuse
 	}
 	if admission.lifecyclePurpose == purposeFailedEnableCleanup {
 		switch hop {
 		case controllerVerification:
 			if current.cleanupControllerVerified {
-				return refuse()
+				return sdk.LifecycleVerification{}, refuse
 			}
 			current.cleanupControllerVerified = true
 		case serviceVerification:
 			if !current.cleanupControllerVerified {
-				return refuse()
+				return sdk.LifecycleVerification{}, refuse
 			}
 			m.background.revokeLocked(token)
 		default:
-			return refuse()
+			return sdk.LifecycleVerification{}, refuse
 		}
 	}
 	return verification, nil

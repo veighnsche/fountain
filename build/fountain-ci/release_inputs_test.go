@@ -8,14 +8,16 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"forgejo.org/modules/json"
 )
 
 func releaseInputSourceRoot(t *testing.T) string {
@@ -150,9 +152,7 @@ func TestReleaseMetadataUsesCompiledPreparedSDKAndPreservesProvenance(t *testing
 			compressed = gzip.NewWriter(&archive)
 			prepared := tar.NewWriter(compressed)
 			preparedFiles := map[string]string{"VERSION": version + "+gitea-1.22.0\n", "vendor/modules.txt": "# fixture vendor\n"}
-			for name, body := range files {
-				preparedFiles[name] = body
-			}
+			maps.Copy(preparedFiles, files)
 			for name, body := range preparedFiles {
 				if err := prepared.WriteHeader(&tar.Header{Name: preparedRoot + "/" + name, Mode: 0o600, Size: int64(len(body))}); err != nil {
 					t.Fatal(err)

@@ -124,8 +124,8 @@ func installRenameTestHook(t *testing.T, repoPath string) *renameHookEvidence {
 		}
 		if err == nil {
 			otherTarget := request
-			if strings.HasSuffix(otherTarget.RepoName, ".wiki") {
-				otherTarget.RepoName = strings.TrimSuffix(otherTarget.RepoName, ".wiki")
+			if withoutWiki, ok := strings.CutSuffix(otherTarget.RepoName, ".wiki"); ok {
+				otherTarget.RepoName = withoutWiki
 			} else {
 				otherTarget.RepoName += ".wiki"
 			}
@@ -170,7 +170,7 @@ func (e *renameHookEvidence) assertAdmitted(t *testing.T, target execcontext.Rep
 	require.True(t, prepared, "a prepared ref transaction must be admitted")
 }
 
-func renameGit(t *testing.T, ctx context.Context, dir, input string, args ...string) string {
+func renameGit(ctx context.Context, t *testing.T, dir, input string, args ...string) string {
 	t.Helper()
 	command := exec.CommandContext(ctx, git.GitExecutable, args...)
 	command.Dir = dir
@@ -193,24 +193,24 @@ func prepareRenameFixture(t *testing.T) (context.Context, *repo_model.Repository
 	return ctx, repository
 }
 
-func createRenameGitRepository(t *testing.T, ctx context.Context, path, branch string) string {
+func createRenameGitRepository(ctx context.Context, t *testing.T, path, branch string) string {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-	renameGit(t, ctx, filepath.Dir(path), "", "init", "--bare", "--initial-branch="+branch, path)
-	renameGit(t, ctx, path, "", "config", "core.logAllRefUpdates", "true")
-	tree := renameGit(t, ctx, path, "", "mktree")
-	tip := renameGit(t, ctx, path, "fixture\n", "commit-tree", tree)
-	renameGit(t, ctx, path, "", "update-ref", "refs/heads/"+branch, tip)
-	renameGit(t, ctx, path, "", "config", "branch."+branch+".description", "native-rename-config")
+	renameGit(ctx, t, filepath.Dir(path), "", "init", "--bare", "--initial-branch="+branch, path)
+	renameGit(ctx, t, path, "", "config", "core.logAllRefUpdates", "true")
+	tree := renameGit(ctx, t, path, "", "mktree")
+	tip := renameGit(ctx, t, path, "fixture\n", "commit-tree", tree)
+	renameGit(ctx, t, path, "", "update-ref", "refs/heads/"+branch, tip)
+	renameGit(ctx, t, path, "", "config", "branch."+branch+".description", "native-rename-config")
 	return tip
 }
 
 func TestRefRenamePreservesNativeGitAndSQLSemantics(t *testing.T) {
 	ctx, repository := prepareRenameFixture(t)
 	const from, to = "branch2", "native-renamed"
-	tip := createRenameGitRepository(t, ctx, repository.RepoPath(), from)
+	tip := createRenameGitRepository(ctx, t, repository.RepoPath(), from)
 	worktree := filepath.Join(t.TempDir(), "linked")
-	renameGit(t, ctx, repository.RepoPath(), "", "worktree", "add", worktree, from)
+	renameGit(ctx, t, repository.RepoPath(), "", "worktree", "add", worktree, from)
 	evidence := installRenameTestHook(t, repository.RepoPath())
 	gitRepo, err := git.OpenRepository(ctx, repository.RepoPath())
 	require.NoError(t, err)
@@ -221,11 +221,11 @@ func TestRefRenamePreservesNativeGitAndSQLSemantics(t *testing.T) {
 	require.Empty(t, result)
 	evidence.assertAdmitted(t, execcontext.TargetCode)
 	require.False(t, gitRepo.IsBranchExist(from))
-	require.Equal(t, tip, renameGit(t, ctx, repository.RepoPath(), "", "rev-parse", "refs/heads/"+to))
-	require.Equal(t, "refs/heads/"+to, renameGit(t, ctx, repository.RepoPath(), "", "symbolic-ref", "HEAD"))
-	require.Equal(t, "refs/heads/"+to, renameGit(t, ctx, worktree, "", "symbolic-ref", "HEAD"))
-	require.Equal(t, "native-rename-config", renameGit(t, ctx, repository.RepoPath(), "", "config", "--get", "branch."+to+".description"))
-	require.Contains(t, renameGit(t, ctx, repository.RepoPath(), "", "reflog", "show", "--format=%gs", "refs/heads/"+to), "renamed refs/heads/"+from+" to refs/heads/"+to)
+	require.Equal(t, tip, renameGit(ctx, t, repository.RepoPath(), "", "rev-parse", "refs/heads/"+to))
+	require.Equal(t, "refs/heads/"+to, renameGit(ctx, t, repository.RepoPath(), "", "symbolic-ref", "HEAD"))
+	require.Equal(t, "refs/heads/"+to, renameGit(ctx, t, worktree, "", "symbolic-ref", "HEAD"))
+	require.Equal(t, "native-rename-config", renameGit(ctx, t, repository.RepoPath(), "", "config", "--get", "branch."+to+".description"))
+	require.Contains(t, renameGit(ctx, t, repository.RepoPath(), "", "reflog", "show", "--format=%gs", "refs/heads/"+to), "renamed refs/heads/"+from+" to refs/heads/"+to)
 	branch, err := git_model.GetBranch(ctx, repository.ID, to)
 	require.NoError(t, err)
 	require.Equal(t, to, branch.Name)
@@ -236,16 +236,16 @@ func TestRefRenamePreservesNativeGitAndSQLSemantics(t *testing.T) {
 
 func TestWikiRefRenamePreservesCodeHEADAndTargetBoundary(t *testing.T) {
 	ctx, repository := prepareRenameFixture(t)
-	createRenameGitRepository(t, ctx, repository.RepoPath(), repository.DefaultBranch)
+	createRenameGitRepository(ctx, t, repository.RepoPath(), repository.DefaultBranch)
 	from := repository.GetWikiBranchName()
 	const to = "wiki-renamed"
-	tip := createRenameGitRepository(t, ctx, repository.WikiPath(), from)
+	tip := createRenameGitRepository(ctx, t, repository.WikiPath(), from)
 	evidence := installRenameTestHook(t, repository.WikiPath())
 	require.NoError(t, wiki_service.NormalizeWikiBranch(ctx, repository, to))
 	evidence.assertAdmitted(t, execcontext.TargetWiki)
-	require.Equal(t, "refs/heads/"+repository.DefaultBranch, renameGit(t, ctx, repository.RepoPath(), "", "symbolic-ref", "HEAD"))
-	require.Equal(t, "refs/heads/"+to, renameGit(t, ctx, repository.WikiPath(), "", "symbolic-ref", "HEAD"))
-	require.Equal(t, tip, renameGit(t, ctx, repository.WikiPath(), "", "rev-parse", "refs/heads/"+to))
+	require.Equal(t, "refs/heads/"+repository.DefaultBranch, renameGit(ctx, t, repository.RepoPath(), "", "symbolic-ref", "HEAD"))
+	require.Equal(t, "refs/heads/"+to, renameGit(ctx, t, repository.WikiPath(), "", "symbolic-ref", "HEAD"))
+	require.Equal(t, tip, renameGit(ctx, t, repository.WikiPath(), "", "rev-parse", "refs/heads/"+to))
 	stored := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: repository.ID})
 	require.Equal(t, to, stored.WikiBranch)
 	held, err := nativeoperation_model.ReadReservation(ctx)
@@ -256,7 +256,7 @@ func TestWikiRefRenamePreservesCodeHEADAndTargetBoundary(t *testing.T) {
 func TestRefRenameEnteredMetadataFailureKeepsWitnessAndFence(t *testing.T) {
 	ctx, repository := prepareRenameFixture(t)
 	const from, to = "branch2", "failed-metadata"
-	tip := createRenameGitRepository(t, ctx, repository.RepoPath(), from)
+	tip := createRenameGitRepository(ctx, t, repository.RepoPath(), from)
 	evidence := installRenameTestHook(t, repository.RepoPath())
 	gitRepo, err := git.OpenRepository(ctx, repository.RepoPath())
 	require.NoError(t, err)
@@ -284,7 +284,7 @@ func TestRefRenameEnteredMetadataFailureKeepsWitnessAndFence(t *testing.T) {
 	require.ErrorIs(t, err, execcontext.ErrIndeterminateEffect)
 	evidence.assertAdmitted(t, execcontext.TargetCode)
 	require.False(t, gitRepo.IsBranchExist(from))
-	require.Equal(t, tip, renameGit(t, ctx, repository.RepoPath(), "", "rev-parse", "refs/heads/"+to))
+	require.Equal(t, tip, renameGit(ctx, t, repository.RepoPath(), "", "rev-parse", "refs/heads/"+to))
 	_, err = git_model.GetBranch(ctx, repository.ID, from)
 	require.NoError(t, err, "the metadata transaction must roll back while Git's landed result remains fenced")
 	held, err := nativeoperation_model.ReadReservation(ctx)
@@ -305,7 +305,7 @@ func TestRefRenameEnteredMetadataFailureKeepsWitnessAndFence(t *testing.T) {
 func TestRefRenameSwallowedLateGitFailureKeepsWitnessAndFence(t *testing.T) {
 	ctx, repository := prepareRenameFixture(t)
 	const from, to = "branch2", "failed-config"
-	tip := createRenameGitRepository(t, ctx, repository.RepoPath(), from)
+	tip := createRenameGitRepository(ctx, t, repository.RepoPath(), from)
 	evidence := installRenameTestHook(t, repository.RepoPath())
 	gitRepo, err := git.OpenRepository(ctx, repository.RepoPath())
 	require.NoError(t, err)
@@ -330,9 +330,9 @@ func TestRefRenameSwallowedLateGitFailureKeepsWitnessAndFence(t *testing.T) {
 	require.ErrorIs(t, err, execcontext.ErrIndeterminateEffect)
 	evidence.assertAdmitted(t, execcontext.TargetCode)
 	require.False(t, gitRepo.IsBranchExist(from))
-	require.Equal(t, tip, renameGit(t, ctx, repository.RepoPath(), "", "rev-parse", "refs/heads/"+to))
-	require.Equal(t, "refs/heads/"+to, renameGit(t, ctx, repository.RepoPath(), "", "symbolic-ref", "HEAD"))
-	require.Equal(t, "native-rename-config", renameGit(t, ctx, repository.RepoPath(), "", "config", "--get", "branch."+from+".description"))
+	require.Equal(t, tip, renameGit(ctx, t, repository.RepoPath(), "", "rev-parse", "refs/heads/"+to))
+	require.Equal(t, "refs/heads/"+to, renameGit(ctx, t, repository.RepoPath(), "", "symbolic-ref", "HEAD"))
+	require.Equal(t, "native-rename-config", renameGit(ctx, t, repository.RepoPath(), "", "config", "--get", "branch."+from+".description"))
 	held, err := nativeoperation_model.ReadReservation(ctx)
 	require.NoError(t, err)
 	require.NotEmpty(t, held.Owner, "successful ref/HEAD checks cannot erase a failed native configuration update")

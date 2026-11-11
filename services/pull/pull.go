@@ -188,7 +188,7 @@ func FinishPullRequestCreation(ctx context.Context, repo *repo_model.Repository,
 		return nil, nil
 	}
 
-	history, err := PullRequestCreationHistory(compareInfo.Commits)
+	history, err := CreationHistory(compareInfo.Commits)
 	if err != nil {
 		return nil, err
 	}

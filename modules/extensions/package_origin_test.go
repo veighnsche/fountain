@@ -82,7 +82,7 @@ func TestPrebuiltRecoveryUsesDurableReplacementWitness(t *testing.T) {
 			require.NoError(t, err)
 			state, err := loadPackageState(root, "sample")
 			require.NoError(t, err)
-			stage, err := os.MkdirTemp(root, ".install-")
+			stage, err := os.MkdirTemp(root, ".install-") //nolint:usetesting // Reproduce the store-owned staging path under this package root.
 			require.NoError(t, err)
 			require.NoError(t, copyPackage(originPrebuilt(t, "sample", "2.0"), stage))
 			next, err := inspectPackageOrigin(stage, prebuiltOrigin)

@@ -151,5 +151,5 @@ func humanPullCreateRecoveryHistory(ctx context.Context, pr *issues_model.PullRe
 	if err != nil || len(comparison.Commits) == 0 {
 		return "", err
 	}
-	return pull_service.PullRequestCreationHistory(comparison.Commits)
+	return pull_service.CreationHistory(comparison.Commits)
 }

@@ -205,7 +205,7 @@ func transactionTargetMatches(owner, kind string, scope Scope, wiki bool) bool {
 	if !ok {
 		return !wiki
 	}
-	target := execcontext.TargetCode
+	var target execcontext.RepositoryTarget
 	var err error
 	switch family {
 	case FamilyRefWrite:

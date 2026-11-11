@@ -40,7 +40,7 @@ for lane in "${fountain_required_lanes[@]}"; do printf 'lane\t%s\n' "$lane"; don
 		t.Fatalf("read policy from another working directory: %v: %s", err, output)
 	}
 	policy := qualificationPolicy{values: make(map[string]string)}
-	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
 		key, value, found := strings.Cut(line, "\t")
 		if !found {
 			t.Fatalf("invalid policy value: %q", line)

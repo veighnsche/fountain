@@ -38,7 +38,7 @@ func withCollabOwnershipScope(ctx context.Context, resource string, scope collab
 	if err != nil {
 		return err
 	}
-	return nativeownership.WithOrdinary(ctx, filepath.Join(setting.AppDataPath, "nativeop-exec"), familyCollaboration, resource, string(encoded), fn)
+	return nativeownership.WithOrdinary(ctx, filepath.Join(setting.AppDataPath, "nativeop-exec"), familyCollaboration, resource, encoded, fn)
 }
 
 // Deferred workers may briefly wait for their parent to release ownership.

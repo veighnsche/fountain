@@ -211,7 +211,7 @@ func PrepareDesktopIssueCommand(ctx *context.APIContext) {
 		}
 	}
 	first, _, err := native_service.ObserveStable(ctx, service.ReadNativeRevision, read,
-		func(first, second any) bool { return reflect.DeepEqual(first, second) }, nil)
+		reflect.DeepEqual, nil)
 	if err != nil {
 		var observation *native_service.ObservationError
 		if errors.As(err, &observation) && observation.Stage == native_service.ObservationFirstRead {

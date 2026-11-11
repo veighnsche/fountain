@@ -357,7 +357,7 @@ func TestControlledEnableChecksKnownOriginBeforeControllerEffects(t *testing.T) 
 	for _, origin := range []string{"catalog", "prebuilt"} {
 		t.Run(origin, func(t *testing.T) {
 			h := startControllerHarness(t, "", testFixtureKnobs{}, testFixtureKnobs{Role: "controller"}, true)
-			stage, err := os.MkdirTemp(h.root, ".proof-")
+			stage, err := os.MkdirTemp(h.root, ".proof-") //nolint:usetesting // Installation consumes a hidden stage under the package root.
 			require.NoError(t, err)
 			for _, name := range []string{"extension", "extension.json"} {
 				from := filepath.Join(h.root, "sample", name)

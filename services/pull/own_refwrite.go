@@ -58,7 +58,7 @@ func withRefWriteOwnership(ctx context.Context, resource string, scope refWriteS
 	if err != nil {
 		return err
 	}
-	return nativeownership.WithOrdinary(ctx, filepath.Join(setting.AppDataPath, "nativeop-exec"), familyRefWrite, resource, string(encoded), fn)
+	return nativeownership.WithOrdinary(ctx, filepath.Join(setting.AppDataPath, "nativeop-exec"), familyRefWrite, resource, encoded, fn)
 }
 
 // recordRefWriteResult records the realized new OID of the calling ref

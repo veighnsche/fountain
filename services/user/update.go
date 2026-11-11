@@ -125,7 +125,7 @@ func UpdateUser(ctx context.Context, u *user_model.User, opts *UpdateOptions) er
 		}
 		return user_model.UpdateUserCols(ctx, u, plan.columns...)
 	}
-	if !user_model.UserColumnsRequireAuthority(plan.columns...) {
+	if !user_model.ColumnsRequireAuthority(plan.columns...) {
 		return apply(ctx)
 	}
 	return nativeoperation_service.WithAuthorityOwnershipFor(ctx, fmt.Sprintf("user/%d/update", u.ID), 0, nativeoperation_service.AuthorityTarget{Operation: "user/update", ID: u.ID}, apply)

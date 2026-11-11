@@ -166,7 +166,7 @@ func renameHeads(ctx context.Context, path string) (map[string]string, error) {
 		return nil, err
 	}
 	heads := make(map[string]string)
-	for _, field := range strings.Split(out, delimiter) {
+	for field := range strings.SplitSeq(out, delimiter) {
 		worktree, ok := strings.CutPrefix(field, "worktree ")
 		if !ok {
 			if delimiter == "\n" && field != "" && field != "bare" && field != "detached" &&

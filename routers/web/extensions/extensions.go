@@ -274,9 +274,6 @@ func findRoute(ctx *context.Context, scope, route string) (extensions_service.De
 	return extensions_service.Descriptor{}, nil, extension.Page{}, false
 }
 
-// repositoryFeed serves the repository-scoped feed.
-func repositoryFeed(ctx *context.Context) { pageRoute("repository", "feed")(ctx) }
-
 func pageAPIBase(ctx *context.Context, d extensions_service.Descriptor, p extension.Page) string {
 	prefix := setting.AppSubURL
 	switch p.Scope {

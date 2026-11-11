@@ -82,8 +82,6 @@ type mergeResult struct {
 // All native work runs on the owned context so nested participating writers
 // attribute to this execution; terminal records and the owner release run
 // detached so a caller disconnect cannot stick the reservation.
-//
-//nolint:unparam // Keep the common operation helper and callback signature.
 func (s *Service) executeMerge(ctx context.Context, op *nativeoperation_model.Operation, intent *ValidIntent, scope Scope, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
 	merge := intent.Merge
 	// Terminal records and the owner release must complete even when the

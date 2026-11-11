@@ -214,6 +214,8 @@ func IsPublicMember(ctx *context.APIContext) {
 }
 
 // PublicizeMember make a member's membership public
+//
+//nolint:dupl // Preserve the paired upstream handlers; Fountain adds only explicit authority binding.
 func PublicizeMember(ctx *context.APIContext) {
 	// swagger:operation PUT /orgs/{org}/public_members/{username} organization orgPublicizeMember
 	// ---
@@ -265,6 +267,8 @@ func PublicizeMember(ctx *context.APIContext) {
 }
 
 // ConcealMember make a member's membership not public
+//
+//nolint:dupl // Preserve the paired upstream handlers; Fountain adds only explicit authority binding.
 func ConcealMember(ctx *context.APIContext) {
 	// swagger:operation DELETE /orgs/{org}/public_members/{username} organization orgConcealMember
 	// ---
