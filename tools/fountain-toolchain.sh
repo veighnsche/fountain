@@ -1,8 +1,8 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 fountain_go_toolchain() {
-  [[ $# == 1 ]] || return 1
+  [ "$#" -eq 1 ] || return 1
   awk '
     { sub(/\/\/.*/, "") }
     $1 == "toolchain" {

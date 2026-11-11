@@ -50,6 +50,12 @@ ARG GOPROXY
 ENV GOPROXY=${GOPROXY:-https://proxy.golang.org,direct}
 COPY go.mod go.sum ./
 COPY sdk ./sdk
+COPY tools/fountain-toolchain.sh ./tools/fountain-toolchain.sh
+# The base image can advance within its minor release; use the shared exact pin.
+ENV GOTOOLCHAIN=""
+RUN . ./tools/fountain-toolchain.sh \
+    && selected=$(fountain_go_toolchain "$PWD") \
+    && go env -w GOTOOLCHAIN="$selected"
 COPY third_party ./third_party
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
