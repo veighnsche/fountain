@@ -82,7 +82,7 @@ func TestUpdateScopeExactRejectsSupersededScopeAndGeneration(t *testing.T) {
 	held, err := nativeoperation_model.ReadReservation(ctx)
 	require.NoError(t, err)
 	require.Equal(t, replacement.Generation, held.Generation)
-	require.Equal(t, []byte(refined), []byte(held.Scope))
+	require.Equal(t, []byte(refined), []byte(held.Scope)) //nolint:testifylint // Scope compare-and-swap preserves exact persisted bytes, including JSON spelling.
 }
 
 func TestOrdinaryStoreReleaseKeepsActiveRenameAfterSwallowedFailure(t *testing.T) {
