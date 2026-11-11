@@ -135,8 +135,10 @@ func TestSourceSnapshotExcludesMalformedKnownOtherControllerState(t *testing.T) 
 	trust.RequiredIDs = append(trust.RequiredIDs, controller.ID)
 	installation, err := LoadInstallation(root, controller.ID)
 	require.NoError(t, err)
-	snapshot.Entries = append(snapshot.Entries, SnapshotEntry{PackageID: controller.ID, InstallationID: &installation,
-		Generation: "0", DesiredEnabled: true, Required: true, InstalledVersion: &controller.Version, PackageSHA256: &controller.SHA256})
+	snapshot.Entries = append(snapshot.Entries, SnapshotEntry{
+		PackageID: controller.ID, InstallationID: &installation,
+		Generation: "0", DesiredEnabled: true, Required: true, InstalledVersion: &controller.Version, PackageSHA256: &controller.SHA256,
+	})
 	trust.Catalog.Packages = append(trust.Catalog.Packages, sdk.CatalogPackage{
 		ID: "foreign", Version: "1.0", URL: "https://example.invalid/foreign.tar.gz", SHA256: strings.Repeat("f", 64), Size: 10,
 		FountainProto: sdk.Protocol, BrowserContract: sdk.BrowserContractVersion, LifecycleController: controller.ID,

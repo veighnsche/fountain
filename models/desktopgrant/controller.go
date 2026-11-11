@@ -45,8 +45,10 @@ func (*Placement) TableName() string { return "native_runtime_placement" }
 func init()                          { db.RegisterModel(new(Placement)) }
 
 func (p *Placement) Projection() sdk.RuntimePlacement {
-	return sdk.RuntimePlacement{RepositoryID: fmt.Sprint(p.RepositoryID), RuntimeID: p.RuntimeID, OwnerKind: p.OwnerKind,
-		OwnerID: p.OwnerID, Generation: p.Generation, Revision: p.Revision, State: p.State}
+	return sdk.RuntimePlacement{
+		RepositoryID: fmt.Sprint(p.RepositoryID), RuntimeID: p.RuntimeID, OwnerKind: p.OwnerKind,
+		OwnerID: p.OwnerID, Generation: p.Generation, Revision: p.Revision, State: p.State,
+	}
 }
 
 func ReadPlacement(ctx context.Context, repository int64) (*Placement, error) {

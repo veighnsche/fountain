@@ -24,8 +24,10 @@ import (
 	pull_service "forgejo.org/services/pull"
 )
 
-var errHumanPullCreateChanged = errors.New("human pull creation preparation changed")
-var errHumanPullCreateComparison = errors.New("native human pull comparison refused")
+var (
+	errHumanPullCreateChanged    = errors.New("human pull creation preparation changed")
+	errHumanPullCreateComparison = errors.New("native human pull comparison refused")
+)
 
 func humanPullCreateIntent(q sdk.HumanPullCreateRequest) (*ValidIntent, error) {
 	if !sdk.ValidHumanPullCreateRequest(q) {

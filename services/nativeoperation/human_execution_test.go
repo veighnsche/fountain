@@ -30,9 +30,13 @@ func humanExecutionComment(t *testing.T, command string) (*Service, sdk.HumanCom
 	require.NoError(t, err)
 	id, err := sdk.HumanCommentOperationID("2", "1", command)
 	require.NoError(t, err)
-	q := sdk.HumanCommentRequest{OperationID: id, NotAfter: time.Now().Add(time.Minute).Unix(), Body: "live human body " + command,
-		Expected: sdk.RepositoryCommentSnapshot{RepositoryID: "1", ActorID: "2", Subject: "issue", SubjectID: "1", IssueID: "1", Index: "1", NativeRevision: revision.Revision,
-			Action: sdk.RepositoryActionCapability{State: "allowed", Reason: "issue_comment"}}}
+	q := sdk.HumanCommentRequest{
+		OperationID: id, NotAfter: time.Now().Add(time.Minute).Unix(), Body: "live human body " + command,
+		Expected: sdk.RepositoryCommentSnapshot{
+			RepositoryID: "1", ActorID: "2", Subject: "issue", SubjectID: "1", IssueID: "1", Index: "1", NativeRevision: revision.Revision,
+			Action: sdk.RepositoryActionCapability{State: "allowed", Reason: "issue_comment"},
+		},
+	}
 	require.True(t, sdk.ValidHumanCommentRequest(q))
 	return svc, q
 }

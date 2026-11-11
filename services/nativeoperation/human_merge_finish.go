@@ -17,8 +17,10 @@ import (
 	pull_service "forgejo.org/services/pull"
 )
 
-const HumanMergeFinishStarted = "human-merge-finish-started"
-const HumanMergeFinishDone = "human-merge-finish-done"
+const (
+	HumanMergeFinishStarted = "human-merge-finish-started"
+	HumanMergeFinishDone    = "human-merge-finish-done"
+)
 
 var ErrHumanMergeFinishClaimed = errors.New("native human merge finishing was already claimed")
 

@@ -48,6 +48,7 @@ func readInlineSnapshot(ctx context.Context, admission *callbackAdmission, repos
 	}
 	return &inlineSnapshotFacts{Review: *review, Proof: proof}, http.StatusOK
 }
+
 func resolveInlineSnapshot(ctx context.Context, admission *callbackAdmission, request extension.CallbackRequest) (*extension.RepositoryInlineSnapshot, int) {
 	first, revision, status := observeCallbackSnapshot(ctx, func(ctx context.Context) (*inlineSnapshotFacts, int) {
 		return readInlineSnapshot(ctx, admission, request.RepositoryID, *request.InlineSnapshot)

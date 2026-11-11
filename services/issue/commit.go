@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	repo_model "forgejo.org/models/repo"
@@ -22,6 +20,7 @@ import (
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/log"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/references"
 	"forgejo.org/modules/repository"
 )

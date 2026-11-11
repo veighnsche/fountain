@@ -8,13 +8,12 @@ import (
 	"errors"
 	"fmt"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	issues_model "forgejo.org/models/issues"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	org_model "forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	execcontext "forgejo.org/modules/nativeoperation"
 )
 
 // EffectCollaborationConsistent releases an interrupted collaboration

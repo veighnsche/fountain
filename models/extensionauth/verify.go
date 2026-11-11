@@ -124,8 +124,10 @@ func VerifySubmission(ctx context.Context, request SubmissionRequest) (Submissio
 	decision := credential.decision()
 	decision.PackageID, decision.ControllerGrantID = request.PackageID, request.ControllerGrantID
 	if request.ControllerGrantID != "" {
-		if _, err = CheckControllerUse(ctx, ControllerUse{GrantID: request.ControllerGrantID, InstallationID: request.InstallationID, PackageID: request.PackageID,
-			ActorID: request.ActorID, RepositoryID: request.RepositoryID, TokenID: decision.TokenID, CredentialFingerprint: decision.CredentialFingerprint, Kind: request.Kind}); err != nil {
+		if _, err = CheckControllerUse(ctx, ControllerUse{
+			GrantID: request.ControllerGrantID, InstallationID: request.InstallationID, PackageID: request.PackageID,
+			ActorID: request.ActorID, RepositoryID: request.RepositoryID, TokenID: decision.TokenID, CredentialFingerprint: decision.CredentialFingerprint, Kind: request.Kind,
+		}); err != nil {
 			return SubmissionDecision{}, refuse(RefusalBindingMissing, http.StatusForbidden)
 		}
 	}

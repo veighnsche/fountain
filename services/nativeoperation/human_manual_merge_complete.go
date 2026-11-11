@@ -22,8 +22,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const HumanManualMergeFinishStarted = "human-manual-merge-finish-started"
-const HumanManualMergeFinishDone = "human-manual-merge-finish-done"
+const (
+	HumanManualMergeFinishStarted = "human-manual-merge-finish-started"
+	HumanManualMergeFinishDone    = "human-manual-merge-finish-done"
+)
 
 var (
 	ErrHumanManualMergeEvidence           = errors.New("native manual merge evidence differs")

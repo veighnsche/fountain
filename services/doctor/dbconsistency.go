@@ -6,8 +6,6 @@ package doctor
 import (
 	"context"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	actions_model "forgejo.org/models/actions"
 	activities_model "forgejo.org/models/activities"
 	auth_model "forgejo.org/models/auth"
@@ -17,6 +15,7 @@ import (
 	org_model "forgejo.org/models/organization"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/log"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/setting"
 	nativeoperation_service "forgejo.org/services/nativeoperation"
 )

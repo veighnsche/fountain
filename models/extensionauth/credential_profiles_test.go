@@ -193,8 +193,10 @@ func TestControllerPolicyPreservesExactConfiguredPackageFence(t *testing.T) {
 		packageID  string
 		fenced     bool
 	}{
-		{"", "", false}, {"", "appliance", false},
-		{"appliance", "", false}, {"appliance", "unrelated", false},
+		{"", "", false},
+		{"", "appliance", false},
+		{"appliance", "", false},
+		{"appliance", "unrelated", false},
 		{"appliance", "appliance", true},
 	} {
 		setting.OAuth2.FactoryAppliancePackageID = tc.configured

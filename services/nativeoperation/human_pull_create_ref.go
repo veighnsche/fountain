@@ -22,11 +22,15 @@ import (
 	"github.com/google/uuid"
 )
 
-const HumanPullCreateRefPrepared = "human-pull-create-ref-prepared"
-const HumanPullCreateRefDone = "human-pull-create-ref-done"
+const (
+	HumanPullCreateRefPrepared = "human-pull-create-ref-prepared"
+	HumanPullCreateRefDone     = "human-pull-create-ref-done"
+)
 
-var ErrHumanPullCreateEvidence = errors.New("native human pull creation evidence differs")
-var ErrHumanPullCreateRefClaimed = errors.New("native human pull creation ref was already claimed")
+var (
+	ErrHumanPullCreateEvidence   = errors.New("native human pull creation evidence differs")
+	ErrHumanPullCreateRefClaimed = errors.New("native human pull creation ref was already claimed")
+)
 
 // SQL-only evidence, shared by the phase transaction and native Git admission.
 // This consumes committed truth rather than reauthorizing creation as its author.

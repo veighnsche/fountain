@@ -139,9 +139,11 @@ func (s *Service) selectRuntime(ctx context.Context, principal controllerSelecti
 			if err != nil {
 				return err
 			}
-			return db.Insert(ctx, &native_model.Operation{InstallationID: installation, OperationID: request.CommandID, Kind: kindRuntimeSelection,
+			return db.Insert(ctx, &native_model.Operation{
+				InstallationID: installation, OperationID: request.CommandID, Kind: kindRuntimeSelection,
 				ActorID: principal.ActorID, RepositoryID: principal.RepositoryID, NotAfter: request.NotAfter, IntentDigest: hex.EncodeToString(digest[:]), Intent: string(raw),
-				Submitted: true, Admitted: applied, EffectState: effect, Reason: reason, Completion: native_model.CompletionComplete, Cancellation: native_model.CancellationNone, Receipt: string(body)})
+				Submitted: true, Admitted: applied, EffectState: effect, Reason: reason, Completion: native_model.CompletionComplete, Cancellation: native_model.CancellationNone, Receipt: string(body),
+			})
 		}
 		if request.NotAfter <= s.clock() || request.NotAfter > s.clock()+300 || request.ExpectedRevision != p.Revision {
 			return record(false, "expired_or_stale_controller")
@@ -251,10 +253,12 @@ func (s *Service) AuthorizeDesktopOperations(ctx context.Context, enrollment str
 	if err != nil {
 		return nil, err
 	}
-	requested := &desktopgrant.OperationGrant{ID: request.CommandID, CredentialKind: desktopgrant.CredentialOAuth, EnrollmentID: enrollment,
+	requested := &desktopgrant.OperationGrant{
+		ID: request.CommandID, CredentialKind: desktopgrant.CredentialOAuth, EnrollmentID: enrollment,
 		OAuthGrantID: g.OAuthGrantID, ApplicationID: authorization.ApplicationID, InstallationID: desktopgrant.DesktopInstallation(enrollment),
 		ActorID: g.ActorID, RepositoryID: g.RepositoryID, RuntimeID: g.RuntimeID, Generation: request.Generation, SelectionRevision: request.ExpectedPlacement,
-		ProofSHA256: g.ProofSHA256, Operations: strings.Join(operations, ","), NotAfter: request.NotAfter}
+		ProofSHA256: g.ProofSHA256, Operations: strings.Join(operations, ","), NotAfter: request.NotAfter,
+	}
 	var result *desktopgrant.OperationGrant
 	err = desktopgrant.WithPlacement(ctx, g.RepositoryID, func(ctx context.Context, p *desktopgrant.Placement) error {
 		old, err := desktopgrant.GetOperationGrant(ctx, request.CommandID)
@@ -393,8 +397,10 @@ func (s *Service) claimExecution(ctx context.Context, grant *desktopgrant.Operat
 		if _, err := extensionauth.CheckControllerUse(ctx, use); err != nil {
 			return ErrAuthorityLost
 		}
-		claim, acquired, err := desktopgrant.RecordExecutionClaim(ctx, &desktopgrant.ExecutionClaim{ID: request.CommandID, GrantID: grant.ID, InstallationID: grant.InstallationID,
-			RepositoryID: grant.RepositoryID, ActorID: grant.ActorID, RuntimeID: grant.RuntimeID, Generation: grant.Generation, ManifestDigest: request.ManifestDigest, NotAfter: request.NotAfter, State: desktopgrant.ClaimHeld})
+		claim, acquired, err := desktopgrant.RecordExecutionClaim(ctx, &desktopgrant.ExecutionClaim{
+			ID: request.CommandID, GrantID: grant.ID, InstallationID: grant.InstallationID,
+			RepositoryID: grant.RepositoryID, ActorID: grant.ActorID, RuntimeID: grant.RuntimeID, Generation: grant.Generation, ManifestDigest: request.ManifestDigest, NotAfter: request.NotAfter, State: desktopgrant.ClaimHeld,
+		})
 		if err == nil {
 			receipt = ClaimProjection(claim, acquired)
 		}

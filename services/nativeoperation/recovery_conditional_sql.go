@@ -37,8 +37,10 @@ func conditionalRecoveryPayload(op *nativeoperation_model.Operation, kind string
 	if json.Unmarshal([]byte(op.Intent), &saved) != nil || len(saved.Payload) == 0 {
 		return nil, errConditionalRecoveryEvidence
 	}
-	intent := &ValidIntent{OperationID: op.OperationID, ActorID: op.ActorID, RepositoryID: op.RepositoryID, Kind: op.Kind,
-		AuthRevision: op.AuthRevision, ExpectedNativeRevision: op.ExpectedNativeRevision, NotAfter: op.NotAfter}
+	intent := &ValidIntent{
+		OperationID: op.OperationID, ActorID: op.ActorID, RepositoryID: op.RepositoryID, Kind: op.Kind,
+		AuthRevision: op.AuthRevision, ExpectedNativeRevision: op.ExpectedNativeRevision, NotAfter: op.NotAfter,
+	}
 	canonical, digest, err := canonicalDigest(intent, saved.Payload)
 	if err != nil || canonical != op.Intent || digest != op.IntentDigest {
 		return nil, errConditionalRecoveryEvidence

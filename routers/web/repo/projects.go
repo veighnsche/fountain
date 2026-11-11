@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"strings"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/perm"
@@ -22,6 +20,7 @@ import (
 	"forgejo.org/modules/json"
 	"forgejo.org/modules/markup"
 	"forgejo.org/modules/markup/markdown"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/util"

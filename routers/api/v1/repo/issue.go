@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/organization"
@@ -23,6 +21,7 @@ import (
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	issue_indexer "forgejo.org/modules/indexer/issues"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
 	api "forgejo.org/modules/structs"

@@ -22,8 +22,10 @@ import (
 	"forgejo.org/services/context"
 )
 
-var desktopID = regexp.MustCompile(`^[a-f0-9]{32}$`)
-var desktopProof = regexp.MustCompile(`^[a-f0-9]{64}$`)
+var (
+	desktopID    = regexp.MustCompile(`^[a-f0-9]{32}$`)
+	desktopProof = regexp.MustCompile(`^[a-f0-9]{64}$`)
+)
 
 // DesktopOAuthConfig exposes only the operator-selected public application's
 // identifier. It creates no application, authorization or repository grant.
@@ -137,10 +139,12 @@ func desktopAuthorization(ctx *context.APIContext) (*auth_model.OAuth2Grant, *au
 
 func desktopProjection(ctx *context.APIContext, grant *desktopgrant.Grant, app *auth_model.OAuth2Application) extension.DesktopGrant {
 	repository := ctx.Repo().Repository
-	value := extension.DesktopGrant{ID: grant.ID, RuntimeID: grant.RuntimeID, ApplicationID: app.ClientID,
+	value := extension.DesktopGrant{
+		ID: grant.ID, RuntimeID: grant.RuntimeID, ApplicationID: app.ClientID,
 		Actor:      extension.Actor{ID: strconv.FormatInt(ctx.Doer().ID, 10), Username: ctx.Doer().Name, SiteAdmin: ctx.Doer().IsAdmin},
 		Repository: extension.Repository{ID: strconv.FormatInt(repository.ID, 10), Owner: ctx.Repo().Owner.Name, Name: repository.Name, DefaultBranch: repository.DefaultBranch, Permission: "read"},
-		Active:     !grant.Revoked, Operations: []string{extension.DesktopRepositoryRead}, RuntimeBound: grant.ProofSHA256 != ""}
+		Active:     !grant.Revoked, Operations: []string{extension.DesktopRepositoryRead}, RuntimeBound: grant.ProofSHA256 != "",
+	}
 	if grant.Kind == "issues" {
 		value.Repository.Permission, value.Repository.DefaultBranch = "issues", ""
 		value.Operations = []string{extension.DesktopIssuesRead, extension.DesktopIssuesCollaborate}

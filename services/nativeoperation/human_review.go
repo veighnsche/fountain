@@ -18,8 +18,10 @@ import (
 	pull_service "forgejo.org/services/pull"
 )
 
-const CrashPointHumanReviewBeforePrimary = "human-review-before-primary"
-const CrashPointHumanReviewAfterPrimary = "human-review-after-primary"
+const (
+	CrashPointHumanReviewBeforePrimary = "human-review-before-primary"
+	CrashPointHumanReviewAfterPrimary  = "human-review-after-primary"
+)
 
 // HumanReviewAdmission rechecks this exact review/inline/thread/reviewer request's current human/session,
 // installation and lifetime before claim/replay and inside atomic primary SQL.

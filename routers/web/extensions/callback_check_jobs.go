@@ -17,6 +17,7 @@ import (
 	"forgejo.org/models/unit"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/timeutil"
+
 	"xorm.io/builder"
 )
 
@@ -48,6 +49,7 @@ func checkJobState(s actions_model.Status) string {
 	}
 	return strconv.Itoa(int(s))
 }
+
 func checkJobTime(t timeutil.TimeStamp) *string {
 	if t <= 0 {
 		return nil

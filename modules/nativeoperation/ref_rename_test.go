@@ -11,8 +11,10 @@ import (
 func TestRefRenameTranscriptRemainsBounded(t *testing.T) {
 	for _, width := range []int{40, 64} {
 		for _, target := range []RepositoryTarget{TargetCode, TargetWiki} {
-			plan := RefRenamePlan{RepositoryID: 7, OwnerName: "owner", RepositoryName: "repo", Target: target,
-				FromRef: "refs/heads/from", ToRef: "refs/heads/to", TipOID: strings.Repeat("a", width)}
+			plan := RefRenamePlan{
+				RepositoryID: 7, OwnerName: "owner", RepositoryName: "repo", Target: target,
+				FromRef: "refs/heads/from", ToRef: "refs/heads/to", TipOID: strings.Repeat("a", width),
+			}
 			zero := strings.Repeat("0", width)
 			deletion := RefTransactionLine{Old: plan.TipOID, New: zero, Ref: plan.FromRef}
 			creation := RefTransactionLine{Old: zero, New: plan.TipOID, Ref: plan.ToRef}

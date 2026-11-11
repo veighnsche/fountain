@@ -10,10 +10,9 @@ import (
 	"reflect"
 	"testing"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	"forgejo.org/models/unittest"
+	execcontext "forgejo.org/modules/nativeoperation"
 
 	"github.com/stretchr/testify/require"
 )

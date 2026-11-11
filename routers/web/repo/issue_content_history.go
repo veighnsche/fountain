@@ -11,11 +11,10 @@ import (
 	"net/http"
 	"strings"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	"forgejo.org/models/avatars"
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/modules/log"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/templates"
 	"forgejo.org/services/context"

@@ -14,8 +14,10 @@ import (
 	execcontext "forgejo.org/modules/nativeoperation"
 )
 
-const CrashPointHumanThreadBeforePrimary = "human-thread-before-primary"
-const CrashPointHumanThreadAfterPrimary = "human-thread-after-primary"
+const (
+	CrashPointHumanThreadBeforePrimary = "human-thread-before-primary"
+	CrashPointHumanThreadAfterPrimary  = "human-thread-after-primary"
+)
 
 func humanThreadIntent(q sdk.HumanThreadRequest) (*ValidIntent, error) {
 	if !sdk.ValidHumanThreadRequest(q) {

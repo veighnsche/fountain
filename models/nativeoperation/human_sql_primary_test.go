@@ -28,15 +28,19 @@ type humanSQLProfile struct {
 
 func humanSQLProfiles() []humanSQLProfile {
 	return []humanSQLProfile{
-		{nativeoperation_model.KindHumanManualMerge, nativeoperation_model.CommitHumanManualMergePrimary,
+		{
+			nativeoperation_model.KindHumanManualMerge, nativeoperation_model.CommitHumanManualMergePrimary,
 			nativeoperation_model.RefuseHumanManualMerge, nativeoperation_model.WithHumanManualMergeReceipt, nativeoperation_model.ClaimHumanManualMergeFinish,
-			nativeoperation_model.RecordHumanManualMergeFinish, nativeoperation_model.CompleteHumanManualMerge, nativeoperation_model.RecoverHumanManualMerge},
-		{nativeoperation_model.KindHumanPullCreate, nativeoperation_model.CommitHumanPullCreatePrimary,
+			nativeoperation_model.RecordHumanManualMergeFinish, nativeoperation_model.CompleteHumanManualMerge, nativeoperation_model.RecoverHumanManualMerge,
+		},
+		{
+			nativeoperation_model.KindHumanPullCreate, nativeoperation_model.CommitHumanPullCreatePrimary,
 			nativeoperation_model.RefuseHumanPullCreate, nativeoperation_model.WithHumanPullCreateReceipt,
 			func(ctx context.Context, op *nativeoperation_model.Operation, owner string, generation int64, before, after, receipt string) error {
 				_, err := nativeoperation_model.ChangeHumanPullCreatePhase(ctx, op, owner, generation, before, after, receipt)
 				return err
-			}, nativeoperation_model.RecordHumanPullCreateFinish, nativeoperation_model.CompleteHumanPullCreate, nativeoperation_model.RecoverHumanPullCreate},
+			}, nativeoperation_model.RecordHumanPullCreateFinish, nativeoperation_model.CompleteHumanPullCreate, nativeoperation_model.RecoverHumanPullCreate,
+		},
 	}
 }
 

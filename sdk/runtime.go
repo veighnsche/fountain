@@ -202,6 +202,7 @@ func (c *controlRPC) Ready(_ struct{}, ready *bool) error {
 	*ready = c.liveness != nil && !c.liveness.failed.Load()
 	return nil
 }
+
 func (c *controlRPC) Registration(_ struct{}, registration *Registration) error {
 	*registration = c.registration
 	return nil

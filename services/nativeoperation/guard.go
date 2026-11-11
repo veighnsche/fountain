@@ -21,8 +21,10 @@ const (
 	PRCreateCompletionPhase = execcontext.PRCreateCompletionPhase
 )
 
-type ScopedRef = execcontext.ScopedRef
-type Scope = execcontext.Scope
+type (
+	ScopedRef = execcontext.ScopedRef
+	Scope     = execcontext.Scope
+)
 
 func conditionalOwner(installationID, operationID string) string {
 	return execcontext.ConditionalOwner(installationID, operationID)

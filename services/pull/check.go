@@ -11,8 +11,6 @@ import (
 	"strconv"
 	"strings"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	"forgejo.org/models"
 	"forgejo.org/models/db"
 	git_model "forgejo.org/models/git"
@@ -25,6 +23,7 @@ import (
 	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/graceful"
 	"forgejo.org/modules/log"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/process"
 	"forgejo.org/modules/queue"
 	asymkey_service "forgejo.org/services/asymkey"

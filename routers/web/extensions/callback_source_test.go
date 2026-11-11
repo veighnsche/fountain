@@ -386,8 +386,10 @@ func runRuntimeControllerSDK(t *testing.T, backend string) {
 		fixture.session.uid = actorID
 		requestCtx, cancel := context.WithCancel(ctx)
 		t.Cleanup(cancel)
-		entry := &callbackAdmission{method: http.MethodPost, instanceID: descriptor.InstanceID, actorID: actorID, sessionID: "source-test-session", session: fixture.session, authority: a,
-			capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityRuntimeControl: {}}, requestCtx: requestCtx, cancel: cancel}
+		entry := &callbackAdmission{
+			method: http.MethodPost, instanceID: descriptor.InstanceID, actorID: actorID, sessionID: "source-test-session", session: fixture.session, authority: a,
+			capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityRuntimeControl: {}}, requestCtx: requestCtx, cancel: cancel,
+		}
 		token, err := nativeAdmissions.issue(entry)
 		require.NoError(t, err)
 		t.Cleanup(func() { nativeAdmissions.revoke(token) })
@@ -2424,8 +2426,10 @@ func runHumanReviewSDK(t *testing.T, fixture sourceTestFixture, repo *repo_model
 		authority.InstanceID = d.InstanceID
 		requestCtx, cancel := context.WithCancel(ctx)
 		t.Cleanup(cancel)
-		entry := &callbackAdmission{method: http.MethodPost, instanceID: d.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: authority,
-			capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanReviews: {}}, requestCtx: requestCtx, cancel: cancel}
+		entry := &callbackAdmission{
+			method: http.MethodPost, instanceID: d.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: authority,
+			capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanReviews: {}}, requestCtx: requestCtx, cancel: cancel,
+		}
 		token, err := nativeAdmissions.issue(entry)
 		require.NoError(t, err)
 		t.Cleanup(func() { nativeAdmissions.revoke(token) })
@@ -2455,8 +2459,10 @@ func runHumanReviewSDK(t *testing.T, fixture sourceTestFixture, repo *repo_model
 			readAuthority.Contribution.Action = "get"
 			readCtx, readCancel := context.WithCancel(ctx)
 			t.Cleanup(readCancel)
-			readEntry := &callbackAdmission{method: http.MethodGet, instanceID: d.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: readAuthority,
-				capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanReviews: {}}, requestCtx: readCtx, cancel: readCancel}
+			readEntry := &callbackAdmission{
+				method: http.MethodGet, instanceID: d.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: readAuthority,
+				capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanReviews: {}}, requestCtx: readCtx, cancel: readCancel,
+			}
 			readToken, err := nativeAdmissions.issue(readEntry)
 			require.NoError(t, err)
 			t.Cleanup(func() { nativeAdmissions.revoke(readToken) })
@@ -10466,9 +10472,11 @@ func checkHumanManualMergeProcess(t *testing.T, fixture sourceTestFixture, repo 
 	t.Logf("manual process %s: verdict=%s effect=%s completion=%s; same database/Git reopened, receipt retained and no native/dispatch replay", mode, assessment.Verdict, after.Record.EffectState, after.Record.CompletionState)
 }
 
-const humanPullCreateHookBeforeAdmission = "human-pull-create-ref-before-admission"
-const humanPullCreateHookAfterAdmission = "human-pull-create-ref-after-admission"
-const humanPullCreateHookAfterCommit = "human-pull-create-ref-after-commit"
+const (
+	humanPullCreateHookBeforeAdmission = "human-pull-create-ref-before-admission"
+	humanPullCreateHookAfterAdmission  = "human-pull-create-ref-after-admission"
+	humanPullCreateHookAfterCommit     = "human-pull-create-ref-after-commit"
+)
 
 func setupHumanPullCreateHooks(t *testing.T, base, head *repo_model.Repository, root string, onPrepared func()) (*atomic.Int64, *atomic.Int64) {
 	t.Helper()
@@ -14835,8 +14843,10 @@ func TestRepositoryIssuesCallbackUsesHumanAccessWithoutFactoryBinding(t *testing
 			}
 			requestCtx, cancel := context.WithCancel(ctx)
 			t.Cleanup(cancel)
-			entry := &callbackAdmission{method: http.MethodPost, instanceID: descriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: authority,
-				capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanComments: {}}, requestCtx: requestCtx, cancel: cancel}
+			entry := &callbackAdmission{
+				method: http.MethodPost, instanceID: descriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: authority,
+				capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanComments: {}}, requestCtx: requestCtx, cancel: cancel,
+			}
 			if editSDKProbe != "" {
 				entry.capabilities[extension.CapabilityHumanEdits] = struct{}{}
 			}
@@ -14954,8 +14964,10 @@ func TestRepositoryIssuesCallbackUsesHumanAccessWithoutFactoryBinding(t *testing
 					readAuthority.Contribution.Action = "get"
 					readCtx, readCancel := context.WithCancel(ctx)
 					t.Cleanup(readCancel)
-					readEntry := &callbackAdmission{method: http.MethodGet, instanceID: descriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: readAuthority,
-						capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanStates: {}}, requestCtx: readCtx, cancel: readCancel}
+					readEntry := &callbackAdmission{
+						method: http.MethodGet, instanceID: descriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: readAuthority,
+						capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanStates: {}}, requestCtx: readCtx, cancel: readCancel,
+					}
 					readToken, err := nativeAdmissions.issue(readEntry)
 					require.NoError(t, err)
 					t.Cleanup(func() { nativeAdmissions.revoke(readToken) })
@@ -15217,8 +15229,10 @@ func TestRepositoryIssuesCallbackUsesHumanAccessWithoutFactoryBinding(t *testing
 				freshAuthority.InstanceID = freshDescriptor.InstanceID
 				freshCtx, freshCancel := context.WithCancel(ctx)
 				t.Cleanup(freshCancel)
-				freshEntry := &callbackAdmission{method: http.MethodPost, instanceID: freshDescriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: freshAuthority,
-					capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanStates: {}}, requestCtx: freshCtx, cancel: freshCancel}
+				freshEntry := &callbackAdmission{
+					method: http.MethodPost, instanceID: freshDescriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: freshAuthority,
+					capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanStates: {}}, requestCtx: freshCtx, cancel: freshCancel,
+				}
 				freshToken, err := nativeAdmissions.issue(freshEntry)
 				require.NoError(t, err)
 				t.Cleanup(func() { nativeAdmissions.revoke(freshToken) })
@@ -15265,8 +15279,10 @@ func TestRepositoryIssuesCallbackUsesHumanAccessWithoutFactoryBinding(t *testing
 					readAuthority.Contribution.Action = "get"
 					readCtx, readCancel := context.WithCancel(ctx)
 					t.Cleanup(readCancel)
-					readEntry := &callbackAdmission{method: http.MethodGet, instanceID: descriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: readAuthority,
-						capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanLocks: {}}, requestCtx: readCtx, cancel: readCancel}
+					readEntry := &callbackAdmission{
+						method: http.MethodGet, instanceID: descriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: readAuthority,
+						capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanLocks: {}}, requestCtx: readCtx, cancel: readCancel,
+					}
 					readToken, err := nativeAdmissions.issue(readEntry)
 					require.NoError(t, err)
 					t.Cleanup(func() { nativeAdmissions.revoke(readToken) })
@@ -15489,8 +15505,10 @@ func TestRepositoryIssuesCallbackUsesHumanAccessWithoutFactoryBinding(t *testing
 				freshAuthority.InstanceID = freshDescriptor.InstanceID
 				freshCtx, freshCancel := context.WithCancel(ctx)
 				t.Cleanup(freshCancel)
-				freshEntry := &callbackAdmission{method: http.MethodPost, instanceID: freshDescriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: freshAuthority,
-					capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanLocks: {}}, requestCtx: freshCtx, cancel: freshCancel}
+				freshEntry := &callbackAdmission{
+					method: http.MethodPost, instanceID: freshDescriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: freshAuthority,
+					capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanLocks: {}}, requestCtx: freshCtx, cancel: freshCancel,
+				}
 				freshToken, err := nativeAdmissions.issue(freshEntry)
 				require.NoError(t, err)
 				t.Cleanup(func() { nativeAdmissions.revoke(freshToken) })
@@ -15537,8 +15555,10 @@ func TestRepositoryIssuesCallbackUsesHumanAccessWithoutFactoryBinding(t *testing
 					readAuthority.Contribution.Action = "get"
 					readCtx, readCancel := context.WithCancel(ctx)
 					t.Cleanup(readCancel)
-					readEntry := &callbackAdmission{method: http.MethodGet, instanceID: descriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: readAuthority,
-						capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanIssueCreate: {}}, requestCtx: readCtx, cancel: readCancel}
+					readEntry := &callbackAdmission{
+						method: http.MethodGet, instanceID: descriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: readAuthority,
+						capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanIssueCreate: {}}, requestCtx: readCtx, cancel: readCancel,
+					}
 					readToken, err := nativeAdmissions.issue(readEntry)
 					require.NoError(t, err)
 					t.Cleanup(func() { nativeAdmissions.revoke(readToken) })
@@ -15573,8 +15593,10 @@ func TestRepositoryIssuesCallbackUsesHumanAccessWithoutFactoryBinding(t *testing
 					readAuthority.Contribution.Action = "get"
 					readCtx, readCancel := context.WithCancel(ctx)
 					t.Cleanup(readCancel)
-					readEntry := &callbackAdmission{method: http.MethodGet, instanceID: descriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: readAuthority,
-						capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanIssueCreate: {}}, requestCtx: readCtx, cancel: readCancel}
+					readEntry := &callbackAdmission{
+						method: http.MethodGet, instanceID: descriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: readAuthority,
+						capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanIssueCreate: {}}, requestCtx: readCtx, cancel: readCancel,
+					}
 					readToken, err := nativeAdmissions.issue(readEntry)
 					require.NoError(t, err)
 					t.Cleanup(func() { nativeAdmissions.revoke(readToken) })
@@ -15837,8 +15859,10 @@ func TestRepositoryIssuesCallbackUsesHumanAccessWithoutFactoryBinding(t *testing
 				freshAuthority.InstanceID = freshDescriptor.InstanceID
 				freshCtx, freshCancel := context.WithCancel(ctx)
 				t.Cleanup(freshCancel)
-				freshEntry := &callbackAdmission{method: http.MethodPost, instanceID: freshDescriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: freshAuthority,
-					capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanIssueCreate: {}}, requestCtx: freshCtx, cancel: freshCancel}
+				freshEntry := &callbackAdmission{
+					method: http.MethodPost, instanceID: freshDescriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: freshAuthority,
+					capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanIssueCreate: {}}, requestCtx: freshCtx, cancel: freshCancel,
+				}
 				freshToken, err := nativeAdmissions.issue(freshEntry)
 				require.NoError(t, err)
 				t.Cleanup(func() { nativeAdmissions.revoke(freshToken) })
@@ -15886,8 +15910,10 @@ func TestRepositoryIssuesCallbackUsesHumanAccessWithoutFactoryBinding(t *testing
 				readAuthority.Contribution.Action = "get"
 				readCtx, readCancel := context.WithCancel(ctx)
 				t.Cleanup(readCancel)
-				readEntry := &callbackAdmission{method: http.MethodGet, instanceID: descriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: readAuthority,
-					capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanEdits: {}}, requestCtx: readCtx, cancel: readCancel}
+				readEntry := &callbackAdmission{
+					method: http.MethodGet, instanceID: descriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: readAuthority,
+					capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanEdits: {}}, requestCtx: readCtx, cancel: readCancel,
+				}
 				readToken, err := nativeAdmissions.issue(readEntry)
 				require.NoError(t, err)
 				t.Cleanup(func() { nativeAdmissions.revoke(readToken) })
@@ -16082,8 +16108,10 @@ func TestRepositoryIssuesCallbackUsesHumanAccessWithoutFactoryBinding(t *testing
 				readAuthority.Contribution.Action = "get"
 				readCtx, readCancel := context.WithCancel(ctx)
 				t.Cleanup(readCancel)
-				readEntry := &callbackAdmission{method: http.MethodGet, instanceID: descriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: readAuthority,
-					capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanComments: {}}, requestCtx: readCtx, cancel: readCancel}
+				readEntry := &callbackAdmission{
+					method: http.MethodGet, instanceID: descriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: readAuthority,
+					capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanComments: {}}, requestCtx: readCtx, cancel: readCancel,
+				}
 				readToken, err := nativeAdmissions.issue(readEntry)
 				require.NoError(t, err)
 				t.Cleanup(func() { nativeAdmissions.revoke(readToken) })
@@ -16208,8 +16236,10 @@ func TestRepositoryIssuesCallbackUsesHumanAccessWithoutFactoryBinding(t *testing
 				freshAuthority.InstanceID = replacementDescriptor.InstanceID
 				freshCtx, freshCancel := context.WithCancel(ctx)
 				t.Cleanup(freshCancel)
-				freshEntry := &callbackAdmission{method: http.MethodPost, instanceID: replacementDescriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: freshAuthority,
-					capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanComments: {}}, requestCtx: freshCtx, cancel: freshCancel}
+				freshEntry := &callbackAdmission{
+					method: http.MethodPost, instanceID: replacementDescriptor.InstanceID, actorID: 2, sessionID: "source-test-session", session: fixture.session, authority: freshAuthority,
+					capabilities: map[string]struct{}{extension.CapabilityActorRead: {}, extension.CapabilityRepositoryRead: {}, extension.CapabilityHumanComments: {}}, requestCtx: freshCtx, cancel: freshCancel,
+				}
 				if editSDKProbe != "" {
 					freshEntry.capabilities[extension.CapabilityHumanEdits] = struct{}{}
 				}
@@ -19828,8 +19858,10 @@ func TestRepositoryIssuesCallbackUsesHumanAccessWithoutFactoryBinding(t *testing
 	}
 	request := func(index, cursor string, limit int, complete bool) (int, *extension.RepositoryIssuePage) {
 		t.Helper()
-		body, err := json.Marshal(extension.CallbackRequest{Operation: extension.OperationRepositoryIssues,
-			RepositoryID: "2", Query: index, Cursor: cursor, Limit: limit, Authority: fixture.authority, CompleteIssueBodies: complete})
+		body, err := json.Marshal(extension.CallbackRequest{
+			Operation:    extension.OperationRepositoryIssues,
+			RepositoryID: "2", Query: index, Cursor: cursor, Limit: limit, Authority: fixture.authority, CompleteIssueBodies: complete,
+		})
 		require.NoError(t, err)
 		r := httptest.NewRequest(http.MethodPost, extension.NativeCallbackPath, bytes.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")

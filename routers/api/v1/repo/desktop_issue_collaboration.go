@@ -170,8 +170,10 @@ func PrepareDesktopIssueCommand(ctx *context.APIContext) {
 			return extension.RepositoryActionCapability{State: "denied", Reason: "issue_action_unavailable"}
 		}
 		repoID, actorID := strconv.FormatInt(repository.ID, 10), strconv.FormatInt(actor.ID, 10)
-		capabilities := map[string]any{"repository_id": repoID, "actor_id": actorID, "archived": repository.IsArchived,
-			"can_create_issues": !repository.IsArchived && !user_model.IsBlocked(readContext, repository.OwnerID, actor.ID), "writer": permission.CanWriteIssuesOrPulls(false)}
+		capabilities := map[string]any{
+			"repository_id": repoID, "actor_id": actorID, "archived": repository.IsArchived,
+			"can_create_issues": !repository.IsArchived && !user_model.IsBlocked(readContext, repository.OwnerID, actor.ID), "writer": permission.CanWriteIssuesOrPulls(false),
+		}
 		if q.Kind == "capabilities" && q.Number == 0 {
 			return capabilities, nil
 		}

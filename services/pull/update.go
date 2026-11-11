@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	git_model "forgejo.org/models/git"
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
@@ -18,6 +16,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/log"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/repository"
 )
 

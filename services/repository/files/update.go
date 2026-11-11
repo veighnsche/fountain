@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	"forgejo.org/models"
 	git_model "forgejo.org/models/git"
 	repo_model "forgejo.org/models/repo"
@@ -22,6 +20,7 @@ import (
 	"forgejo.org/modules/gitrepo"
 	"forgejo.org/modules/lfs"
 	"forgejo.org/modules/log"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"
 	asymkey_service "forgejo.org/services/asymkey"

@@ -8,11 +8,10 @@ import (
 	"errors"
 	"fmt"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	user_model "forgejo.org/models/user"
+	execcontext "forgejo.org/modules/nativeoperation"
 	notify_service "forgejo.org/services/notify"
 	"forgejo.org/services/stats"
 )

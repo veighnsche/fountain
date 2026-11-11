@@ -132,8 +132,10 @@ func (s *PackageStore) InstallStaged(stage string, opts InstallOptions) (sdk.Man
 		if err != nil {
 			return sdk.Manifest{}, errRecoveryUnavailable
 		}
-		state := packageState{Schema: 1, PackageID: manifest.ID, Current: previous,
-			Replacement: &packageReplacement{Previous: previous, Next: next, Target: manifest.ID, Backup: ".previous-" + manifest.ID}}
+		state := packageState{
+			Schema: 1, PackageID: manifest.ID, Current: previous,
+			Replacement: &packageReplacement{Previous: previous, Next: next, Target: manifest.ID, Backup: ".previous-" + manifest.ID},
+		}
 		if err := writePackageState(s.root, state); err != nil {
 			return sdk.Manifest{}, err
 		}

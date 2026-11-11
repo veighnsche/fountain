@@ -7,11 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"forgejo.org/services/nativeownership"
-
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	"forgejo.org/models/unittest"
 	execcontext "forgejo.org/modules/nativeoperation"
+	"forgejo.org/services/nativeownership"
 
 	"github.com/stretchr/testify/require"
 )

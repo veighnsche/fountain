@@ -37,8 +37,10 @@ func (s *Service) WithRefRename(ctx context.Context, repo *repo_model.Repository
 	if err := repo.LoadOwner(ctx); err != nil {
 		return err
 	}
-	plan := execcontext.RefRenamePlan{RepositoryID: repo.ID, OwnerName: repo.OwnerName, RepositoryName: repo.Name, Target: target,
-		FromRef: git.BranchPrefix + from, ToRef: git.BranchPrefix + to, TipOID: tip}
+	plan := execcontext.RefRenamePlan{
+		RepositoryID: repo.ID, OwnerName: repo.OwnerName, RepositoryName: repo.Name, Target: target,
+		FromRef: git.BranchPrefix + from, ToRef: git.BranchPrefix + to, TipOID: tip,
+	}
 	if err := plan.Validate(); err != nil {
 		return err
 	}

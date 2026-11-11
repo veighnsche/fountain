@@ -5,14 +5,12 @@ package pull
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json" //nolint:depguard // Verify the persisted enclosing ownership scope.
 	"testing"
-
-	//nolint:depguard // Verify the persisted enclosing ownership scope.
-	execcontext "forgejo.org/modules/nativeoperation"
 
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	"forgejo.org/models/unittest"
+	execcontext "forgejo.org/modules/nativeoperation"
 
 	"github.com/stretchr/testify/require"
 )

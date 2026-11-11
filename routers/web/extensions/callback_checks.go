@@ -17,6 +17,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/git"
 	pull_service "forgejo.org/services/pull"
+
 	"github.com/gobwas/glob"
 )
 
@@ -50,11 +51,13 @@ func protectionRead(ctx context.Context, pr *issues_model.PullRequest) (*extensi
 	r.UnprotectedFiles = p.UnprotectedFilePatterns
 	return r, http.StatusOK
 }
+
 func checksFingerprint(v any) string {
 	data, _ := json.Marshal(v)
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
+
 func readChecksSnapshot(ctx context.Context, pr *issues_model.PullRequest, head, kind string) (*extension.RepositoryChecks, int) {
 	if kind == "job" {
 		return readCheckJobsSnapshot(ctx, pr, head)
@@ -125,6 +128,7 @@ func readChecksSnapshot(ctx context.Context, pr *issues_model.PullRequest, head,
 	r.Revision = checksFingerprint(r)
 	return r, http.StatusOK
 }
+
 func resolveRepositoryChecks(ctx context.Context, admission *callbackAdmission, request extension.CallbackRequest) (*extension.RepositoryChecks, int) {
 	q := *request.Checks
 	pr, status := pullFilesParent(ctx, admission, request.RepositoryID, q.Index)

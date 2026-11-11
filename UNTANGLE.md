@@ -599,6 +599,48 @@ These **25** entries retain their current behavior or compatibility surface. Rel
 
 - **P113** [special] `web_src/js/features/admin-extensions.ts:69` silently ignores every refresh failure and `:49` permanently stops observation for 401/403/404, while `:78`/`:85` retry observation every two seconds otherwise; status-observation failure and retry policy must change together across refresh, visibility restart and interval setup.
 
+
+## Final structural check
+
+The refreshed map at candidate `406cfe1b20` covers **1,162** Fountain-delta paths (**1,161** present), with **3,797** tracked Go files as context, **890** scoped Go files and **no production import cycles**. Nested SDK/session module resolution remains explicit. The desktop syntax error is gone; the only AST diagnostic is the unchanged upstream empty release-test fixture. Evidence and the pinned regeneration entrypoint live in `.artifacts/untangle-refactor/final-map/`; the original audit map is untouched.
+
+Fresh reviewers wrote blind findings before reading this plan for native ownership/admission/execution, extension runtime/SDK/tooling, and browser/session/widget boundaries. All three final reviews report **zero worthwhile unresolved findings**. The runtime reviewer separately identified the two missing fixture attributions during complete integration; their corrections and full-package reruns are recorded below. Per-fix execution, SQL/Git and recovery reviewers also closed R10–R11 before qualification.
+
+The conservative comparable special-case count is **28 → 21**: seven original mechanisms now use the regular contract; 21 original requirements still need distinct treatment even where their policy now has one named owner. This counts audited exception requirements, not syntactic branches, and does not pretend all 16 assigned specials disappeared. New validation/proof checks are ordinary fail-closed invariants, not authority exemptions. Exact source anchors and reasons are retained in `final-map/special-case-accounting.json`.
+
+| Original special | Final treatment | Why |
+| --- | --- | --- |
+| P009 | Regularized | Bound scope-refinement storage/proof errors propagate before effects. |
+| P015 | Regularized | Storage applies cursors before bounded projection and reports actual remaining rows. |
+| P035 | Retained explicitly | Failed-enable cleanup requires its expiring two-hop exception while activation remains pending. |
+| P036 | Retained explicitly | Configured appliance legacy intake remains fenced by explicit controller policy. |
+| P037 | Retained explicitly | Historical comment floating-point hash normalization preserves immutable intent bytes. |
+| P038 | Retained explicitly | Legacy removed intents without durable attribution remain preserved/fenced; proven other owners are excluded. |
+| P039 | Regularized | Listener failure is ordinary runtime liveness failure, reflected through readiness. |
+| P054 | Regularized | The delayed redirect uses its originating feature lifetime, like other asynchronous feature work. |
+| P059 | Retained explicitly | Four-page retention and the existing persist exemption remain host policy. |
+| P075 | Retained explicitly | Explicit participating Git origin retains the old receive-environment fallback and unchanged nonparticipant boundary. |
+| P076 | Regularized | Rename is a bounded admitted delete/create authority variant; no unbound rename-child exception. |
+| P077 | Retained explicitly | One-second bounded pre-effect admission retry remains necessary for deferred workers. |
+| P078 | Retained explicitly | Anchorless legacy rows require complete-context cardinality to preserve identity or ambiguity. |
+| P079 | Retained explicitly | Ambiguous or over-10,000-row location-only legacy reply forms remain refused. |
+| P080 | Retained explicitly | Conditional review refuses drafts while current human review may consume its own draft. |
+| P081 | Retained explicitly | Blank-proof retained enrollment remains repository-read-only. |
+| P082 | Retained explicitly | Exact protocol-2 and absent legacy-header consent remain distinct. |
+| P091 | Retained explicitly | Outbound network push releases/reacquires local ownership to avoid loopback deadlock. |
+| P092 | Retained explicitly | Unmerged PR merge evidence ignores the ORM-maintained MergedUnix value. |
+| P096 | Regularized | Runtime route recognition uses admitted manifest patterns; compatibility export remains unused by runtime. |
+| P097 | Regularized | Repository contribution routing uses admitted descriptors instead of a feed-only registration path. |
+| P098 | Retained explicitly | Linked shared panels retain their same-extension canonical page API identity with exact validation. |
+| P108 | Retained explicitly | GET form intent keeps refresh and submitted-form dirty-check semantics. |
+| P109 | Retained explicitly | Current navigation retains the 15-second full-load timeout policy. |
+| P110 | Retained explicitly | Browser history failures require explicit safe full-load/known-traversal compensation decisions. |
+| P111 | Retained explicitly | Terminal teardown attempts every peer/socket despite callback errors. |
+| P113 | Retained explicitly | Visible admin polling stops on auth/not-found and retries transient errors locally. |
+| P121 | Retained explicitly | Pinned session WebSocket Upgrade/writer compatibility remains an integration adapter. |
+
+All **25** Leave as is dispositions remain justified above: stable compatibility exports/codecs and consent adapters; necessary contention, mirror, session and retention policies; independent history/evidence boundaries; low-value cleanup excluded from this task; and the corrected upstream-provenance entry. They are not silently marked fixed or removed. Optional comment/test cleanup remains skipped.
+
 ## Progress
 
 - **Audit complete (phase-1 history).** The original audit was completed before design began. User selected neither optional cleanup addition; that selection still applies.
@@ -696,3 +738,5 @@ These **25** entries retain their current behavior or compatibility surface. Rel
 - **F09 fixture follow-through after F10 integration:** two fixtures that manufacture post-start intent state must also establish the attribution that production admission/capture writes. The new trusted-source fixture now binds its optional other package before testing catalog removal, and the existing idle-admin fixture explicitly records its previously admitted uncontrolled package. Original assertions and production fences are unchanged; the removed unused catalog helper is not restored. Both full affected packages pass: 108 module + 173 router events. This adds one existing fixture group to the three recorded for F09 above; the source-snapshot fixture is new to the refactor.
 - **Final affected-Go comparison:** reconciled complete package outcomes are **2,992 pass / the same three baseline failures / the same 12 skips**, with no missing original 1,213 or F09 2,877 pass identities, no new failures and unchanged skip identities. The reconciliation supersedes only the two fixture-corrected packages with their full reruns, rather than treating an interrupted or focused run as complete. Evidence: f10-integrated/comparison.json and host-reconciled.jsonl.
 - F10 commit: `149066eecc`.
+
+- **F05 required source-format follow-through:** the complete upstream formatter reaches host Go paths omitted from the earlier narrow checks. Applied its mechanical formatting to 123 scoped Go files, preserving normalized syntax/import multisets and every comment text; three new misplaced JSON lint directives move onto their intended imports. Independent SDK tidy now correctly lists its already-pinned go-hclog dependency as direct because the runtime liveness test imports it. No dependency version or behavior changes; optional comment/test cleanup remains skipped. Source equivalence, scope and patch hashes are recorded in final-qualification/source/format-* evidence. The original Swagger generator separately exposes 12 lines of pre-existing pagination documentation drift; its input/template hashes match the brace-only pre-refactor control and this unrelated generated change is not silently included.

@@ -8,12 +8,11 @@ import (
 	"context"
 	"errors"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	issues_model "forgejo.org/models/issues"
 	access_model "forgejo.org/models/perm/access"
 	unit_model "forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
+	execcontext "forgejo.org/modules/nativeoperation"
 )
 
 var ErrUserHasNoPermissionForAction = errors.New("user not allowed to do this action")

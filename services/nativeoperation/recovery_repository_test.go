@@ -8,13 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unittest"
+	execcontext "forgejo.org/modules/nativeoperation"
 
 	"github.com/stretchr/testify/require"
 )

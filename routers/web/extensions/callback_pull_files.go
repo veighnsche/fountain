@@ -36,6 +36,7 @@ func (b *pullDiffBuffer) Write(p []byte) (int, error) {
 	}
 	return b.buffer.Write(p)
 }
+
 func pullDiffCommand(ctx context.Context, repo *git.Repository, base, head string, output *pullDiffBuffer, kind string, paths ...string) error {
 	cmd := git.NewCommand(ctx, "--literal-pathspecs", "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-relative", "--ignore-submodules=none", "--submodule=short", "--find-renames=50%", "--diff-algorithm=histogram")
 	switch kind {

@@ -5,9 +5,10 @@ package extensions
 
 import (
 	"context"
+	"net/http"
+
 	extension "forgejo.org/extension-sdk"
 	repository_service "forgejo.org/services/repository"
-	"net/http"
 )
 
 const (

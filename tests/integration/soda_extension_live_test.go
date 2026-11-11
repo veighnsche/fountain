@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
 	"fmt"
-	"forgejo.org/models/db"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +23,7 @@ import (
 
 	extension "forgejo.org/extension-sdk"
 	auth_model "forgejo.org/models/auth"
+	"forgejo.org/models/db"
 	"forgejo.org/models/desktopgrant"
 	"forgejo.org/models/extensionauth"
 	native_model "forgejo.org/models/nativeoperation"

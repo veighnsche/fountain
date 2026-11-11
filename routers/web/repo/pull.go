@@ -19,8 +19,6 @@ import (
 	"strings"
 	"time"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	"forgejo.org/models"
 	actions_model "forgejo.org/models/actions"
 	activities_model "forgejo.org/models/activities"
@@ -43,6 +41,7 @@ import (
 	issue_template "forgejo.org/modules/issue/template"
 	"forgejo.org/modules/log"
 	"forgejo.org/modules/markup"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/optional"
 	"forgejo.org/modules/setting"
 	"forgejo.org/modules/structs"

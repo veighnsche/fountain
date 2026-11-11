@@ -19,8 +19,10 @@ import (
 	notify_service "forgejo.org/services/notify"
 )
 
-const CrashPointHumanCommentBeforePrimary = "human-comment-before-primary"
-const CrashPointHumanCommentAfterPrimary = "human-comment-after-primary"
+const (
+	CrashPointHumanCommentBeforePrimary = "human-comment-before-primary"
+	CrashPointHumanCommentAfterPrimary  = "human-comment-after-primary"
+)
 
 // HumanCommentAdmission is supplied by trusted native request composition. It
 // must revalidate the current human/session, installation and request lifetime
@@ -41,8 +43,10 @@ func humanCommentIntent(q sdk.HumanCommentRequest) (*ValidIntent, error) {
 	if !sdk.ValidHumanCommentRequest(q) {
 		return nil, ErrInvalidIntent
 	}
-	intent := &ValidIntent{OperationID: q.OperationID, ActorID: nativeCommentID(p.ActorID), RepositoryID: nativeCommentID(p.RepositoryID),
-		Kind: nativeoperation_model.KindHumanComment, AuthRevision: sdk.HumanCommentAuthorizationRevision, ExpectedNativeRevision: p.NativeRevision, NotAfter: q.NotAfter}
+	intent := &ValidIntent{
+		OperationID: q.OperationID, ActorID: nativeCommentID(p.ActorID), RepositoryID: nativeCommentID(p.RepositoryID),
+		Kind: nativeoperation_model.KindHumanComment, AuthRevision: sdk.HumanCommentAuthorizationRevision, ExpectedNativeRevision: p.NativeRevision, NotAfter: q.NotAfter,
+	}
 	var err error
 	intent.Canonical, intent.Digest, err = sdk.CanonicalHumanCommentIntent(q)
 	return intent, err
@@ -105,7 +109,8 @@ func (s *Service) executeHumanComment(ctx context.Context, op *nativeoperation_m
 	release := context.WithoutCancel(ctx)
 	refuse := func(reason string) (sdk.OperationRecord, terminalResult, error) {
 		record, err := nativeoperation_model.SetTerminal(release, op.InstallationID, op.OperationID, nativeoperation_model.TerminalOutcome{
-			EffectState: nativeoperation_model.EffectNotCommitted, Reason: reason, Cancellation: nativeoperation_model.CancellationNone}, execution.Owner)
+			EffectState: nativeoperation_model.EffectNotCommitted, Reason: reason, Cancellation: nativeoperation_model.CancellationNone,
+		}, execution.Owner)
 		if err != nil {
 			return sdk.OperationRecord{}, terminalResult{}, err
 		}
@@ -133,8 +138,10 @@ func (s *Service) executeHumanComment(ctx context.Context, op *nativeoperation_m
 		if err != nil {
 			return "", err
 		}
-		raw, err := json.Marshal(sdk.HumanCommentReceipt{RepositoryID: op.RepositoryID, ActorID: op.ActorID, Subject: q.Expected.Subject,
-			SubjectID: nativeCommentID(q.Expected.SubjectID), IssueID: issue.ID, Index: issue.Index, CommentID: comment.ID})
+		raw, err := json.Marshal(sdk.HumanCommentReceipt{
+			RepositoryID: op.RepositoryID, ActorID: op.ActorID, Subject: q.Expected.Subject,
+			SubjectID: nativeCommentID(q.Expected.SubjectID), IssueID: issue.ID, Index: issue.Index, CommentID: comment.ID,
+		})
 		return string(raw), err
 	})
 	if err != nil {

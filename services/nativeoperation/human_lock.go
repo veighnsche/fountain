@@ -23,8 +23,10 @@ import (
 	"forgejo.org/modules/setting"
 )
 
-const CrashPointHumanLockBeforePrimary = "human-lock-before-primary"
-const CrashPointHumanLockAfterPrimary = "human-lock-after-primary"
+const (
+	CrashPointHumanLockBeforePrimary = "human-lock-before-primary"
+	CrashPointHumanLockAfterPrimary  = "human-lock-after-primary"
+)
 
 // HumanLockAdmission rechecks this exact request's current human/session,
 // installation and lifetime before replay/claim and inside primary SQL.

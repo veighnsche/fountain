@@ -4,9 +4,9 @@
 package issue_test
 
 import (
-	"encoding/json"
+	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
 	"testing"
-	//nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
+
 	execcontext "forgejo.org/modules/nativeoperation"
 
 	"github.com/stretchr/testify/require"

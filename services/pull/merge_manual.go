@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	"forgejo.org/models"
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
@@ -18,6 +16,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/log"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/timeutil"
 	notify_service "forgejo.org/services/notify"
 )

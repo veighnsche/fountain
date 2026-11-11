@@ -101,6 +101,7 @@ func (g *threadGit) anchor(a *issues_model.CodeCommentAnchor) *extension.Reposit
 	}
 	return result
 }
+
 func (g *threadGit) placement(root *issues_model.Comment) (*extension.RepositoryThreadAnchor, *bool) {
 	if root.Invalidated {
 		value := true
@@ -129,6 +130,7 @@ func (g *threadGit) placement(root *issues_model.Comment) (*extension.Repository
 	a := &issues_model.CodeCommentAnchor{Base: g.base, Head: g.head, Path: blame.FilePath, Side: side, Scope: "lines", StartLine: int64(blame.LineNumber), EndLine: int64(blame.LineNumber)}
 	return g.anchor(a), &value
 }
+
 func resolveRepositoryThreads(ctx context.Context, admission *callbackAdmission, request extension.CallbackRequest) (*extension.RepositoryThreadPage, int) {
 	q := *request.Threads
 	issue, pullID, status := discussionParent(ctx, admission, request.RepositoryID, extension.RepositoryCommentsRequest{Subject: "pull", Index: q.Index, Limit: 1})

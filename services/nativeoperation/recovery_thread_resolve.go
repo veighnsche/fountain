@@ -23,8 +23,10 @@ func (s *Service) recoverConditionalThreadResolve(ctx context.Context, a *Recove
 	if err != nil {
 		return fenced(a, ReasonRecoveryUncertainEffect, "thread resolve payload differs")
 	}
-	expected := Scope{Kind: nativeoperation_model.OwnerConditional, RepositoryID: op.RepositoryID, Ref: want.BaseRef, OldOID: want.ExpectedBaseOID,
-		HeadRef: want.HeadRef, HeadOID: want.ExpectedHeadOID, PRNumber: want.PullRequestNumber}
+	expected := Scope{
+		Kind: nativeoperation_model.OwnerConditional, RepositoryID: op.RepositoryID, Ref: want.BaseRef, OldOID: want.ExpectedBaseOID,
+		HeadRef: want.HeadRef, HeadOID: want.ExpectedHeadOID, PRNumber: want.PullRequestNumber,
+	}
 	if op.Admitted {
 		repository, err := repo_model.GetRepositoryByID(ctx, op.RepositoryID)
 		if err != nil {

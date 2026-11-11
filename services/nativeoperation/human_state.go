@@ -18,8 +18,10 @@ import (
 	notify_service "forgejo.org/services/notify"
 )
 
-const CrashPointHumanStateBeforePrimary = "human-state-before-primary"
-const CrashPointHumanStateAfterPrimary = "human-state-after-primary"
+const (
+	CrashPointHumanStateBeforePrimary = "human-state-before-primary"
+	CrashPointHumanStateAfterPrimary  = "human-state-after-primary"
+)
 
 // HumanStateAdmission rechecks this exact request's current human/session,
 // installation and lifetime before replay/claim and inside primary SQL.

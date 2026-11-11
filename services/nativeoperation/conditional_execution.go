@@ -6,11 +6,12 @@ package nativeoperation
 import (
 	"context"
 	"errors"
+	"os"
+
 	sdk "forgejo.org/extension-sdk"
 	extensionauth_model "forgejo.org/models/extensionauth"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	execcontext "forgejo.org/modules/nativeoperation"
-	"os"
 )
 
 // claimBackgroundSubmit selects only the implementation bound by the closed

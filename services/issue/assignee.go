@@ -6,8 +6,6 @@ package issue
 import (
 	"context"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	issues_model "forgejo.org/models/issues"
 	"forgejo.org/models/organization"
 	"forgejo.org/models/perm"
@@ -16,6 +14,7 @@ import (
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/log"
+	execcontext "forgejo.org/modules/nativeoperation"
 	notify_service "forgejo.org/services/notify"
 )
 

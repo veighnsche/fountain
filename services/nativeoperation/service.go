@@ -21,13 +21,12 @@ import (
 	"sync"
 	"time"
 
+	sdk "forgejo.org/extension-sdk"
 	"forgejo.org/extension-sdk/gitsyntax"
 	"forgejo.org/extension-sdk/operationcontract"
-	execcontext "forgejo.org/modules/nativeoperation"
-
-	sdk "forgejo.org/extension-sdk"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	"forgejo.org/modules/git"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/setting"
 )
 

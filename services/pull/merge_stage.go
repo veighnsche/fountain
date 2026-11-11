@@ -106,6 +106,7 @@ func (p *PreparedExactMerge) Result() PreparedMergeResult {
 	r.Parents = append([]string(nil), r.Parents...)
 	return r
 }
+
 func (p *PreparedExactMerge) Close() {
 	if p == nil {
 		return

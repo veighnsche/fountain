@@ -11,10 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"forgejo.org/services/nativeownership"
-
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	execcontext "forgejo.org/modules/nativeoperation"
+	"forgejo.org/services/nativeownership"
 )
 
 // ReceiveClaimTimeout bounds how long a Git ingress claim waits for a

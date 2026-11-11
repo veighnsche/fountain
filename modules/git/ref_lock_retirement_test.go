@@ -16,8 +16,10 @@ func stoppedLockFixture(t *testing.T) (string, string, RefLockRetirementProof) {
 	t.Helper()
 	repository := t.TempDir()
 	require.NoError(t, InitRepository(t.Context(), repository, true, "sha1"))
-	proof := RefLockRetirementProof{StoppedDomain: true, InstallationID: "installation", OperationID: "merge-1",
-		Owner: "cond:installation/merge-1", Generation: 3, Ref: "refs/heads/main", NewOID: strings.Repeat("a", 40), ObjectFormat: "sha1"}
+	proof := RefLockRetirementProof{
+		StoppedDomain: true, InstallationID: "installation", OperationID: "merge-1",
+		Owner: "cond:installation/merge-1", Generation: 3, Ref: "refs/heads/main", NewOID: strings.Repeat("a", 40), ObjectFormat: "sha1",
+	}
 	path := filepath.Join(repository, "refs", "heads", "main.lock")
 	require.NoError(t, os.WriteFile(path, []byte(proof.NewOID+"\n"), 0o600))
 	return repository, path, proof
@@ -71,8 +73,10 @@ func TestRetireStoppedRefLockRequiresExactOperationAndContents(t *testing.T) {
 		}
 		repository := t.TempDir()
 		require.NoError(t, InitRepository(t.Context(), repository, true, "sha256"))
-		proof := RefLockRetirementProof{StoppedDomain: true, InstallationID: "installation", OperationID: "merge-1",
-			Owner: "cond:installation/merge-1", Generation: 3, Ref: "refs/heads/main", NewOID: strings.Repeat("a", 64), ObjectFormat: "sha256"}
+		proof := RefLockRetirementProof{
+			StoppedDomain: true, InstallationID: "installation", OperationID: "merge-1",
+			Owner: "cond:installation/merge-1", Generation: 3, Ref: "refs/heads/main", NewOID: strings.Repeat("a", 64), ObjectFormat: "sha256",
+		}
 		path := filepath.Join(repository, "refs", "heads", "main.lock")
 		require.NoError(t, os.WriteFile(path, []byte(proof.NewOID+"\n"), 0o600))
 		require.NoError(t, RetireStoppedRefLock(t.Context(), repository, proof))

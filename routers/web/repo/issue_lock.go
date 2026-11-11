@@ -6,9 +6,8 @@ package repo
 import (
 	stdCtx "context"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	issues_model "forgejo.org/models/issues"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/web"
 	"forgejo.org/services/context"
 	"forgejo.org/services/forms"

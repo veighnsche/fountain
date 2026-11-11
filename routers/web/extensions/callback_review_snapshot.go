@@ -78,8 +78,10 @@ func readReviewSnapshot(ctx context.Context, admission *callbackAdmission, repos
 		return nil, http.StatusConflict
 	}
 	issue := pr.Issue
-	snapshot := extension.RepositoryReviewSnapshot{RepositoryID: repository, ActorID: strconv.FormatInt(user.ID, 10), PullID: strconv.FormatInt(pr.ID, 10), IssueID: strconv.FormatInt(issue.ID, 10), Index: q.Index, BaseBranch: pr.BaseBranch, HeadOID: head, BaseOID: base, MergeBaseOID: mergeBase, IsClosed: issue.IsClosed, HasMerged: pr.HasMerged, IsAuthor: issue.IsPoster(user.ID),
-		CommentAction: capabilityFact("allowed", "review_comment"), DraftAction: capabilityFact("allowed", "review_start_draft"), ApproveAction: capabilityFact("allowed", "review_approve"), RequestChangesAction: capabilityFact("allowed", "review_request_changes")}
+	snapshot := extension.RepositoryReviewSnapshot{
+		RepositoryID: repository, ActorID: strconv.FormatInt(user.ID, 10), PullID: strconv.FormatInt(pr.ID, 10), IssueID: strconv.FormatInt(issue.ID, 10), Index: q.Index, BaseBranch: pr.BaseBranch, HeadOID: head, BaseOID: base, MergeBaseOID: mergeBase, IsClosed: issue.IsClosed, HasMerged: pr.HasMerged, IsAuthor: issue.IsPoster(user.ID),
+		CommentAction: capabilityFact("allowed", "review_comment"), DraftAction: capabilityFact("allowed", "review_start_draft"), ApproveAction: capabilityFact("allowed", "review_approve"), RequestChangesAction: capabilityFact("allowed", "review_request_changes"),
+	}
 	pending, err := issues_model.GetCurrentReview(ctx, user, issue)
 	if err != nil && !issues_model.IsErrReviewNotExist(err) {
 		return nil, http.StatusServiceUnavailable

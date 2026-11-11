@@ -11,8 +11,6 @@ import (
 	"slices"
 	"time"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	activities_model "forgejo.org/models/activities"
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
@@ -23,6 +21,7 @@ import (
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/log"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/storage"
 	"forgejo.org/modules/timeutil"
 	notify_service "forgejo.org/services/notify"

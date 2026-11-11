@@ -30,7 +30,8 @@ func (s *Service) recoverHumanIssueCreate(ctx context.Context, a *RecoveryAssess
 	}
 	if !op.Admitted && op.EffectState == nativeoperation_model.EffectPending {
 		if _, err := nativeoperation_model.SetTerminal(ctx, op.InstallationID, op.OperationID, nativeoperation_model.TerminalOutcome{
-			EffectState: nativeoperation_model.EffectNotCommitted, Reason: nativeoperation_model.ReasonRecoveredNoEffect, Cancellation: nativeoperation_model.CancellationNone}, ""); err != nil {
+			EffectState: nativeoperation_model.EffectNotCommitted, Reason: nativeoperation_model.ReasonRecoveredNoEffect, Cancellation: nativeoperation_model.CancellationNone,
+		}, ""); err != nil {
 			return RecoveryAssessment{}, err
 		}
 		return s.releaseRecovered(ctx, a, r, nativeoperation_model.EffectNotCommitted)

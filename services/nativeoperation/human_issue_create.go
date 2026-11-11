@@ -21,8 +21,10 @@ import (
 	notify_service "forgejo.org/services/notify"
 )
 
-const CrashPointHumanIssueCreateBeforePrimary = "human-issue-create-before-primary"
-const CrashPointHumanIssueCreateAfterPrimary = "human-issue-create-after-primary"
+const (
+	CrashPointHumanIssueCreateBeforePrimary = "human-issue-create-before-primary"
+	CrashPointHumanIssueCreateAfterPrimary  = "human-issue-create-after-primary"
+)
 
 // HumanIssueCreateAdmission revalidates the current human/session, installation
 // and exact request lifetime before replay/claim and inside the SQL transaction.
@@ -33,8 +35,10 @@ func humanIssueCreateIntent(q sdk.HumanIssueCreateRequest) (*ValidIntent, error)
 	if !sdk.ValidHumanIssueCreateRequest(q) {
 		return nil, ErrInvalidIntent
 	}
-	intent := &ValidIntent{OperationID: q.OperationID, ActorID: nativeCommentID(q.Expected.ActorID), RepositoryID: nativeCommentID(q.Expected.RepositoryID),
-		Kind: nativeoperation_model.KindHumanIssueCreate, AuthRevision: sdk.HumanIssueCreateAuthorizationRevision, ExpectedNativeRevision: q.Expected.NativeRevision, NotAfter: q.NotAfter}
+	intent := &ValidIntent{
+		OperationID: q.OperationID, ActorID: nativeCommentID(q.Expected.ActorID), RepositoryID: nativeCommentID(q.Expected.RepositoryID),
+		Kind: nativeoperation_model.KindHumanIssueCreate, AuthRevision: sdk.HumanIssueCreateAuthorizationRevision, ExpectedNativeRevision: q.Expected.NativeRevision, NotAfter: q.NotAfter,
+	}
 	var err error
 	intent.Canonical, intent.Digest, err = sdk.CanonicalHumanIssueCreateIntent(q)
 	return intent, err
@@ -80,7 +84,8 @@ func (s *Service) executeHumanIssueCreate(ctx context.Context, op *nativeoperati
 	release := context.WithoutCancel(ctx)
 	refuse := func(reason string) (sdk.OperationRecord, terminalResult, error) {
 		record, err := nativeoperation_model.SetTerminal(release, op.InstallationID, op.OperationID, nativeoperation_model.TerminalOutcome{
-			EffectState: nativeoperation_model.EffectNotCommitted, Reason: reason, Cancellation: nativeoperation_model.CancellationNone}, execution.Owner)
+			EffectState: nativeoperation_model.EffectNotCommitted, Reason: reason, Cancellation: nativeoperation_model.CancellationNone,
+		}, execution.Owner)
 		if err != nil {
 			return sdk.OperationRecord{}, terminalResult{}, err
 		}
@@ -108,8 +113,10 @@ func (s *Service) executeHumanIssueCreate(ctx context.Context, op *nativeoperati
 			return "", err
 		}
 		sum := sha256.Sum256([]byte(issue.Content))
-		raw, err := json.Marshal(sdk.HumanIssueCreateReceipt{RepositoryID: repo.ID, ActorID: actor.ID, IssueID: issue.ID, Index: issue.Index,
-			Title: issue.Title, BodyDigest: hex.EncodeToString(sum[:]), ContentVersion: int64(issue.ContentVersion)})
+		raw, err := json.Marshal(sdk.HumanIssueCreateReceipt{
+			RepositoryID: repo.ID, ActorID: actor.ID, IssueID: issue.ID, Index: issue.Index,
+			Title: issue.Title, BodyDigest: hex.EncodeToString(sum[:]), ContentVersion: int64(issue.ContentVersion),
+		})
 		return string(raw), err
 	})
 	if err != nil {

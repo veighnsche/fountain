@@ -17,8 +17,10 @@ import (
 	pull_service "forgejo.org/services/pull"
 )
 
-const CrashPointHumanInlineBeforePrimary = "human-inline-before-primary"
-const CrashPointHumanInlineAfterPrimary = "human-inline-after-primary"
+const (
+	CrashPointHumanInlineBeforePrimary = "human-inline-before-primary"
+	CrashPointHumanInlineAfterPrimary  = "human-inline-after-primary"
+)
 
 func humanInlineIntent(q sdk.HumanInlineRequest) (*ValidIntent, error) {
 	if !sdk.ValidHumanInlineRequest(q) {

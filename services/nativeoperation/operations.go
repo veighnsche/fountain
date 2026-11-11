@@ -17,10 +17,12 @@ import (
 // Keeping that packet here prevents a newly added credential/grant binding
 // from being lost by an individual publisher, reviewer or issue writer.
 func operationForSubmission(decision extensionauth_model.SubmissionDecision, installation string, intent *ValidIntent) *nativeoperation_model.Operation {
-	return &nativeoperation_model.Operation{InstallationID: installation, OperationID: intent.OperationID, Kind: intent.Kind,
+	return &nativeoperation_model.Operation{
+		InstallationID: installation, OperationID: intent.OperationID, Kind: intent.Kind,
 		ActorID: decision.ActorID, RepositoryID: intent.RepositoryID, TokenID: decision.TokenID, CredentialFingerprint: decision.CredentialFingerprint,
 		PackageID: decision.PackageID, ControllerGrantID: decision.ControllerGrantID, AuthRevision: intent.AuthRevision,
-		ExpectedNativeRevision: intent.ExpectedNativeRevision, NotAfter: intent.NotAfter, IntentDigest: intent.Digest, Intent: intent.Canonical}
+		ExpectedNativeRevision: intent.ExpectedNativeRevision, NotAfter: intent.NotAfter, IntentDigest: intent.Digest, Intent: intent.Canonical,
+	}
 }
 
 // Submit authenticates the installation/principal (already verified by the
@@ -36,9 +38,11 @@ func (s *Service) Submit(ctx context.Context, decision extensionauth_model.Submi
 		return sdk.OperationRecord{}, ErrAuthorityLost
 	}
 	if decision.ControllerGrantID != "" {
-		if _, err := extensionauth_model.CheckControllerUse(ctx, extensionauth_model.ControllerUse{GrantID: decision.ControllerGrantID, InstallationID: installationID,
+		if _, err := extensionauth_model.CheckControllerUse(ctx, extensionauth_model.ControllerUse{
+			GrantID: decision.ControllerGrantID, InstallationID: installationID,
 			PackageID: decision.PackageID, ActorID: decision.ActorID, RepositoryID: intent.RepositoryID, TokenID: decision.TokenID,
-			CredentialFingerprint: decision.CredentialFingerprint, Kind: intent.Kind, NotAfter: intent.NotAfter}); err != nil {
+			CredentialFingerprint: decision.CredentialFingerprint, Kind: intent.Kind, NotAfter: intent.NotAfter,
+		}); err != nil {
 			return sdk.OperationRecord{}, ErrAuthorityLost
 		}
 	}

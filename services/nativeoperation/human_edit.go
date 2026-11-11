@@ -22,8 +22,10 @@ import (
 	notify_service "forgejo.org/services/notify"
 )
 
-const CrashPointHumanEditBeforePrimary = "human-edit-before-primary"
-const CrashPointHumanEditAfterPrimary = "human-edit-after-primary"
+const (
+	CrashPointHumanEditBeforePrimary = "human-edit-before-primary"
+	CrashPointHumanEditAfterPrimary  = "human-edit-after-primary"
+)
 
 // HumanEditAdmission revalidates this request's current human, installation and
 // lifetime before claim/replay and again inside the primary SQL transaction.
@@ -40,8 +42,10 @@ func humanEditIntent(q sdk.HumanEditRequest) (*ValidIntent, error) {
 	if !sdk.ValidHumanEditRequest(q) {
 		return nil, ErrInvalidIntent
 	}
-	intent := &ValidIntent{OperationID: q.OperationID, ActorID: nativeCommentID(q.Expected.ActorID), RepositoryID: nativeCommentID(q.Expected.RepositoryID),
-		Kind: nativeoperation_model.KindHumanEdit, AuthRevision: sdk.HumanEditAuthorizationRevision, ExpectedNativeRevision: q.Expected.NativeRevision, NotAfter: q.NotAfter}
+	intent := &ValidIntent{
+		OperationID: q.OperationID, ActorID: nativeCommentID(q.Expected.ActorID), RepositoryID: nativeCommentID(q.Expected.RepositoryID),
+		Kind: nativeoperation_model.KindHumanEdit, AuthRevision: sdk.HumanEditAuthorizationRevision, ExpectedNativeRevision: q.Expected.NativeRevision, NotAfter: q.NotAfter,
+	}
 	var err error
 	intent.Canonical, intent.Digest, err = sdk.CanonicalHumanEditIntent(q)
 	return intent, err
@@ -154,8 +158,10 @@ func (s *Service) executeHumanEdit(ctx context.Context, op *nativeoperation_mode
 		if err := tx.Err(); err != nil {
 			return "", ErrAuthorityLost
 		}
-		raw, err := json.Marshal(sdk.HumanEditReceipt{RepositoryID: op.RepositoryID, ActorID: op.ActorID, Subject: q.Expected.Subject, SubjectID: nativeCommentID(q.Expected.SubjectID), IssueID: issue.ID, Index: issue.Index,
-			Title: issue.Title, BodyDigest: editBodyDigest(issue.Content), ContentVersion: int64(issue.ContentVersion), TitleCommentID: titleCommentID})
+		raw, err := json.Marshal(sdk.HumanEditReceipt{
+			RepositoryID: op.RepositoryID, ActorID: op.ActorID, Subject: q.Expected.Subject, SubjectID: nativeCommentID(q.Expected.SubjectID), IssueID: issue.ID, Index: issue.Index,
+			Title: issue.Title, BodyDigest: editBodyDigest(issue.Content), ContentVersion: int64(issue.ContentVersion), TitleCommentID: titleCommentID,
+		})
 		return string(raw), err
 	})
 	if err != nil {

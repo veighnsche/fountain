@@ -89,17 +89,21 @@ func SelectDesktopRuntime(ctx *context.APIContext) {
 func desktopOperationProjection(ctx *context.APIContext, g *desktopgrant.OperationGrant) sdk.DesktopOperationGrant {
 	active := false
 	for _, kind := range strings.Split(g.Operations, ",") {
-		_, err := extensionauth.CheckControllerUse(ctx, extensionauth.ControllerUse{GrantID: g.ID, InstallationID: g.InstallationID,
-			ActorID: g.ActorID, RepositoryID: g.RepositoryID, CredentialFingerprint: g.Fingerprint(), Kind: kind})
+		_, err := extensionauth.CheckControllerUse(ctx, extensionauth.ControllerUse{
+			GrantID: g.ID, InstallationID: g.InstallationID,
+			ActorID: g.ActorID, RepositoryID: g.RepositoryID, CredentialFingerprint: g.Fingerprint(), Kind: kind,
+		})
 		if err == nil {
 			active = true
 			break
 		}
 	}
-	return sdk.DesktopOperationGrant{ID: g.ID, EnrollmentID: g.EnrollmentID, RuntimeID: g.RuntimeID, InstallationID: g.InstallationID,
+	return sdk.DesktopOperationGrant{
+		ID: g.ID, EnrollmentID: g.EnrollmentID, RuntimeID: g.RuntimeID, InstallationID: g.InstallationID,
 		Generation: g.Generation, Actor: sdk.Actor{ID: strconv.FormatInt(g.ActorID, 10), Username: ctx.Doer().Name},
 		Repository: sdk.Repository{ID: strconv.FormatInt(g.RepositoryID, 10), Owner: ctx.Repo().Owner.Name, Name: ctx.Repo().Repository.Name, DefaultBranch: ctx.Repo().Repository.DefaultBranch},
-		Operations: strings.Split(g.Operations, ","), NotAfter: g.NotAfter, Active: active}
+		Operations: strings.Split(g.Operations, ","), NotAfter: g.NotAfter, Active: active,
+	}
 }
 
 func AuthorizeDesktopOperations(ctx *context.APIContext) {

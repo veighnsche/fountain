@@ -7,12 +7,11 @@ import (
 	"context"
 	"testing"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	actions_model "forgejo.org/models/actions"
 	"forgejo.org/models/db"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	"forgejo.org/models/unittest"
+	execcontext "forgejo.org/modules/nativeoperation"
 
 	"github.com/stretchr/testify/require"
 )

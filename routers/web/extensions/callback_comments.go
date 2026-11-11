@@ -13,6 +13,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/models/unit"
 	user_model "forgejo.org/models/user"
+
 	"xorm.io/builder"
 )
 
@@ -73,6 +74,7 @@ func issueOrPullParent(ctx context.Context, admission *callbackAdmission, reposi
 	}
 	return issue, strconv.FormatInt(id, 10), http.StatusOK
 }
+
 func resolveRepositoryComments(ctx context.Context, admission *callbackAdmission, request extension.CallbackRequest) (*extension.RepositoryCommentPage, int) {
 	q := *request.Comments
 	issue, id, status := discussionParent(ctx, admission, request.RepositoryID, q)

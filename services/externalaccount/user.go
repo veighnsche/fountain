@@ -8,12 +8,11 @@ import (
 	"strconv"
 	"strings"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	"forgejo.org/models/auth"
 	issues_model "forgejo.org/models/issues"
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
+	execcontext "forgejo.org/modules/nativeoperation"
 	"forgejo.org/modules/structs"
 	nativeoperation_service "forgejo.org/services/nativeoperation"
 

@@ -266,8 +266,10 @@ func TestRefRenameEnteredMetadataFailureKeepsWitnessAndFence(t *testing.T) {
 	zero := strings.Repeat("0", len(tip))
 	err = service.WithOrdinaryOwnership(ctx, nativeoperation_service.FamilyRefWrite,
 		execcontext.RefWriteResource(repository.ID, nativeoperation_service.RefWriteRename, from+"->"+to),
-		nativeoperation_service.Scope{RepositoryID: repository.ID, RepositoryTarget: execcontext.TargetCode,
-			Refs: []nativeoperation_service.ScopedRef{{Ref: "refs/heads/" + from, OldOID: tip, NewOID: zero}, {Ref: "refs/heads/" + to, NewOID: tip}}},
+		nativeoperation_service.Scope{
+			RepositoryID: repository.ID, RepositoryTarget: execcontext.TargetCode,
+			Refs: []nativeoperation_service.ScopedRef{{Ref: "refs/heads/" + from, OldOID: tip, NewOID: zero}, {Ref: "refs/heads/" + to, NewOID: tip}},
+		},
 		func(owned context.Context) error {
 			return service.WithRefRename(owned, repository, gitRepo, execcontext.TargetCode, from, to, tip, func(run func() error) error {
 				return git_model.RenameBranch(owned, repository, from, to, func(context.Context, bool) error {
@@ -314,8 +316,10 @@ func TestRefRenameSwallowedLateGitFailureKeepsWitnessAndFence(t *testing.T) {
 	var launchErr error
 	err = service.WithOrdinaryOwnership(ctx, nativeoperation_service.FamilyRefWrite,
 		execcontext.RefWriteResource(repository.ID, nativeoperation_service.RefWriteRename, from+"->"+to),
-		nativeoperation_service.Scope{RepositoryID: repository.ID, RepositoryTarget: execcontext.TargetCode,
-			Refs: []nativeoperation_service.ScopedRef{{Ref: "refs/heads/" + from, OldOID: tip, NewOID: zero}, {Ref: "refs/heads/" + to, NewOID: tip}}},
+		nativeoperation_service.Scope{
+			RepositoryID: repository.ID, RepositoryTarget: execcontext.TargetCode,
+			Refs: []nativeoperation_service.ScopedRef{{Ref: "refs/heads/" + from, OldOID: tip, NewOID: zero}, {Ref: "refs/heads/" + to, NewOID: tip}},
+		},
 		func(owned context.Context) error {
 			return service.WithRefRename(owned, repository, gitRepo, execcontext.TargetCode, from, to, tip, func(run func() error) error {
 				launchErr = run()

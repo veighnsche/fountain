@@ -17,24 +17,28 @@ func EncodeRefWriteTarget(target RepositoryTarget, ref string) string {
 	}
 	return ref
 }
+
 func DecodeRefWriteTarget(ref string) (RepositoryTarget, string) {
 	if plain, ok := strings.CutPrefix(ref, "wiki/"); ok {
 		return TargetWiki, plain
 	}
 	return TargetCode, ref
 }
+
 func EncodeScopedRefTarget(target RepositoryTarget, ref string) string {
 	if target == TargetWiki {
 		return "wiki:" + ref
 	}
 	return ref
 }
+
 func DecodeScopedRefTarget(ref string) (RepositoryTarget, string) {
 	if plain, ok := strings.CutPrefix(ref, "wiki:"); ok {
 		return TargetWiki, plain
 	}
 	return TargetCode, ref
 }
+
 func ResolveRepositoryTarget(explicit, legacy RepositoryTarget) (RepositoryTarget, error) {
 	if explicit == "" {
 		return legacy, nil
@@ -53,6 +57,7 @@ func RefWriteRepositoryTarget(explicit RepositoryTarget, resource string) (Repos
 	target, _ := DecodeRefWriteTarget(parts[2])
 	return ResolveRepositoryTarget(explicit, target)
 }
+
 func ScopedRefRepositoryTarget(ref ScopedRef) (RepositoryTarget, string, error) {
 	legacy, plain := DecodeScopedRefTarget(ref.Ref)
 	target, err := ResolveRepositoryTarget(ref.RepositoryTarget, legacy)

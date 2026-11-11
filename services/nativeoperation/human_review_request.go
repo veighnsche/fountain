@@ -17,8 +17,10 @@ import (
 	issue_service "forgejo.org/services/issue"
 )
 
-const CrashPointHumanReviewRequestBeforePrimary = "human-review-request-before-primary"
-const CrashPointHumanReviewRequestAfterPrimary = "human-review-request-after-primary"
+const (
+	CrashPointHumanReviewRequestBeforePrimary = "human-review-request-before-primary"
+	CrashPointHumanReviewRequestAfterPrimary  = "human-review-request-after-primary"
+)
 
 func humanReviewRequestIntent(q sdk.HumanReviewRequestChange) (*ValidIntent, error) {
 	if !sdk.ValidHumanReviewRequestChange(q) {

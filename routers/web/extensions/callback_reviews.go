@@ -10,6 +10,7 @@ import (
 	"forgejo.org/models/db"
 	issues_model "forgejo.org/models/issues"
 	user_model "forgejo.org/models/user"
+
 	"xorm.io/builder"
 )
 
@@ -22,6 +23,7 @@ func readableReviewCondition(issue int64, user *user_model.User) builder.Cond {
 	}
 	return cond
 }
+
 func resolveRepositoryReviews(ctx context.Context, admission *callbackAdmission, request extension.CallbackRequest) (*extension.RepositoryReviewPage, int) {
 	q := *request.Reviews
 	issue, id, status := discussionParent(ctx, admission, request.RepositoryID, extension.RepositoryCommentsRequest{Subject: "pull", Index: q.Index, Limit: 1})

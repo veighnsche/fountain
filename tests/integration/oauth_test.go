@@ -2225,8 +2225,10 @@ func testNativeDesktopEnrollment(t *testing.T) {
 		DecodeJSON(t, call(http.MethodGet, selected+"/native-revision", nil, http.StatusOK), &revision)
 		payload, err := json.Marshal(extension.LifecycleNotePayload{IssueID: 5, Content: "Controller qualification receipt", MergeRef: "qualification-no-merge"})
 		require.NoError(t, err)
-		intent := extension.OperationIntent{ControllerGrantID: operationGrant.ID, OperationID: "controller-comment-1", InstallationID: operationGrant.InstallationID, ActorID: binding.Actor.ID, RepositoryID: binding.Repository.ID,
-			Kind: extension.OperationKindLifecycleNote, AuthorizationRevision: operationGrant.ID, ExpectedNativeRevision: revision.Revision, NotAfter: authorize.NotAfter, Payload: payload}
+		intent := extension.OperationIntent{
+			ControllerGrantID: operationGrant.ID, OperationID: "controller-comment-1", InstallationID: operationGrant.InstallationID, ActorID: binding.Actor.ID, RepositoryID: binding.Repository.ID,
+			Kind: extension.OperationKindLifecycleNote, AuthorizationRevision: operationGrant.ID, ExpectedNativeRevision: revision.Revision, NotAfter: authorize.NotAfter, Payload: payload,
+		}
 		var record extension.OperationRecord
 		DecodeJSON(t, call(http.MethodPost, opBase+"/submit", intent, http.StatusOK), &record)
 		require.Equal(t, extension.EffectCommitted, record.EffectState)
@@ -2519,7 +2521,7 @@ jobs:
 						mergeSends.Add(1)
 						recorder := httptest.NewRecorder()
 						testWebRoutes.ServeHTTP(recorder, r)
-						require.NoError(t, os.WriteFile(filepath.Join(root, "publication-merge-reply.json"), recorder.Body.Bytes(), 0600))
+						require.NoError(t, os.WriteFile(filepath.Join(root, "publication-merge-reply.json"), recorder.Body.Bytes(), 0o600))
 						http.Error(w, "fixture lost original merge reply", http.StatusServiceUnavailable)
 						return
 					}
@@ -2527,7 +2529,7 @@ jobs:
 						reviewSends.Add(1)
 						recorder := httptest.NewRecorder()
 						testWebRoutes.ServeHTTP(recorder, r)
-						require.NoError(t, os.WriteFile(filepath.Join(root, "publication-review-reply.json"), recorder.Body.Bytes(), 0600))
+						require.NoError(t, os.WriteFile(filepath.Join(root, "publication-review-reply.json"), recorder.Body.Bytes(), 0o600))
 						if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_MERGE") == "1" && recorder.Code == http.StatusOK {
 							var recorded extension.OperationRecord
 							require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &recorded))
@@ -2541,8 +2543,8 @@ jobs:
 									{"path": "native-publication-fixture.txt", "new_position": 1, "body": "First recorded native observation.\n"},
 									{"path": "native-publication-fixture.txt", "new_position": 1, "body": "Second recorded native observation.\n"},
 								}}, http.StatusOK)
-								require.NoError(t, os.WriteFile(filepath.Join(root, "native-discussion-review.json"), inline.Body.Bytes(), 0600))
-								require.NoError(t, os.WriteFile(filepath.Join(root, "ci", "review-receipt-ready"), []byte(recorded.OperationID), 0600))
+								require.NoError(t, os.WriteFile(filepath.Join(root, "native-discussion-review.json"), inline.Body.Bytes(), 0o600))
+								require.NoError(t, os.WriteFile(filepath.Join(root, "ci", "review-receipt-ready"), []byte(recorded.OperationID), 0o600))
 							}
 						}
 						http.Error(w, "fixture lost original review reply", http.StatusServiceUnavailable)
@@ -2594,7 +2596,7 @@ jobs:
 			if os.Getenv("FACTORY_FOUNTAIN_CONTROLLER_MERGE") == "1" {
 				runnerRoot := filepath.Join(root, "ci")
 				for _, dir := range []string{runnerRoot, filepath.Join(runnerRoot, "home"), filepath.Join(runnerRoot, "tmp"), filepath.Join(runnerRoot, "work")} {
-					require.NoError(t, os.MkdirAll(dir, 0700))
+					require.NoError(t, os.MkdirAll(dir, 0o700))
 				}
 				var registration struct {
 					Token string `json:"token"`
@@ -2603,24 +2605,24 @@ jobs:
 				ciToken := getTokenForLoggedInUser(t, ciSession, auth_model.AccessTokenScopeWriteRepository)
 				defer func() {
 					jobs := MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/repos/user2/repo1/actions/runners/jobs?limit=50").AddTokenAuth(ciToken), http.StatusOK)
-					require.NoError(t, os.WriteFile(filepath.Join(runnerRoot, "jobs.json"), jobs.Body.Bytes(), 0600))
+					require.NoError(t, os.WriteFile(filepath.Join(runnerRoot, "jobs.json"), jobs.Body.Bytes(), 0o600))
 					tasks := MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/repos/user2/repo1/actions/tasks?limit=50").AddTokenAuth(ciToken), http.StatusOK)
-					require.NoError(t, os.WriteFile(filepath.Join(runnerRoot, "tasks.json"), tasks.Body.Bytes(), 0600))
+					require.NoError(t, os.WriteFile(filepath.Join(runnerRoot, "tasks.json"), tasks.Body.Bytes(), 0o600))
 					runs := MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/repos/user2/repo1/actions/runs?limit=50").AddTokenAuth(ciToken), http.StatusOK)
-					require.NoError(t, os.WriteFile(filepath.Join(runnerRoot, "runs.json"), runs.Body.Bytes(), 0600))
+					require.NoError(t, os.WriteFile(filepath.Join(runnerRoot, "runs.json"), runs.Body.Bytes(), 0o600))
 				}()
 				DecodeJSON(t, MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/repos/user2/repo1/actions/runners/registration-token").AddTokenAuth(ciToken), http.StatusOK), &registration)
 				config := fmt.Sprintf("log:\n  level: warn\nrunner:\n  file: %s\n  capacity: 1\n  timeout: 2m\n  shutdown_timeout: 5s\n  insecure: false\n  fetch_interval: 1s\n  labels: [factory-native-conditional:host]\n  envs:\n    GIT_SSL_CAINFO: %s\n    SSL_CERT_FILE: %s\n    TMPDIR: %s\ncache:\n  enabled: false\nhost:\n  workdir_parent: %s\n", filepath.Join(runnerRoot, "runner.json"), filepath.Join(root, "ca.pem"), filepath.Join(root, "ca.pem"), filepath.Join(runnerRoot, "tmp"), filepath.Join(runnerRoot, "work"))
 				configPath := filepath.Join(runnerRoot, "config.yml")
-				require.NoError(t, os.WriteFile(configPath, []byte(config), 0600))
+				require.NoError(t, os.WriteFile(configPath, []byte(config), 0o600))
 				environment := append(os.Environ(), "SSL_CERT_FILE="+filepath.Join(root, "ca.pem"), "HOME="+filepath.Join(runnerRoot, "home"), "TMPDIR="+filepath.Join(runnerRoot, "tmp"))
 				register := exec.CommandContext(t.Context(), "/home/vince/.local/bin/forgejo-runner", "--config", configPath, "register", "--no-interactive", "--instance", server.URL, "--name", "factory-native-conditional", "--labels", "factory-native-conditional:host", "--token", registration.Token)
 				register.Env = environment
 				register.Dir = runnerRoot
 				registered, registerErr := register.CombinedOutput()
-				require.NoError(t, os.WriteFile(filepath.Join(runnerRoot, "register.log"), registered, 0600))
+				require.NoError(t, os.WriteFile(filepath.Join(runnerRoot, "register.log"), registered, 0o600))
 				require.NoError(t, registerErr, "actual runner registration failed; inspect private retained log")
-				output, err := os.OpenFile(filepath.Join(runnerRoot, "runner.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+				output, err := os.OpenFile(filepath.Join(runnerRoot, "runner.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 				require.NoError(t, err)
 				runner := exec.CommandContext(t.Context(), "/bin/bash", "-c", `trap 'exit 0' INT TERM; while [[ ! -f "$1" ]]; do sleep .05; done; exec /home/vince/.local/bin/forgejo-runner --config "$2" daemon`, "fixture-ci-after-review", filepath.Join(runnerRoot, "review-receipt-ready"), configPath)
 				runner.Env = environment

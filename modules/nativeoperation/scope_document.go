@@ -154,8 +154,10 @@ func (document *ScopeDocument) WithNativeRename(plan *RefRenamePlan) (string, er
 func (document *ScopeDocument) WithCompletion(ref, oldOID, newOID, phase string) (string, error) {
 	raw := document.Original()
 	for _, field := range []struct{ key, value string }{
-		{"completion_ref", ref}, {"completion_old_oid", oldOID},
-		{"completion_new_oid", newOID}, {"completion_phase", phase},
+		{"completion_ref", ref},
+		{"completion_old_oid", oldOID},
+		{"completion_new_oid", newOID},
+		{"completion_phase", phase},
 	} {
 		object, err := parseScopeObject(raw)
 		if err != nil {

@@ -18,8 +18,10 @@ import (
 	repo_module "forgejo.org/modules/repository"
 )
 
-var ErrPreparedMergeHooks = errors.New("native prepared merge hooks are unavailable")
-var ErrPreparedMergeStarted = errors.New("native prepared merge push was already attempted")
+var (
+	ErrPreparedMergeHooks   = errors.New("native prepared merge hooks are unavailable")
+	ErrPreparedMergeStarted = errors.New("native prepared merge push was already attempted")
+)
 
 // CheckPreparedMergeHooks requires the actual Git-selected hook path and current
 // native delegates. A missing/overridden hook must refuse before any push, not

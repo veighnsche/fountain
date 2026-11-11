@@ -49,8 +49,10 @@ func openPullComparison(ctx context.Context, admission *callbackAdmission, repos
 		native.Close()
 		return nil, http.StatusServiceUnavailable
 	}
-	return &pullComparison{native: native, repository: repositoryID, index: index, base: pr.MergeBase, head: head,
-		pullID: pr.ID, headRepositoryID: pr.HeadRepoID, headBranch: pr.HeadBranch, baseBranch: pr.BaseBranch}, http.StatusOK
+	return &pullComparison{
+		native: native, repository: repositoryID, index: index, base: pr.MergeBase, head: head,
+		pullID: pr.ID, headRepositoryID: pr.HeadRepoID, headBranch: pr.HeadBranch, baseBranch: pr.BaseBranch,
+	}, http.StatusOK
 }
 
 func (c *pullComparison) verifyObjects() int {

@@ -6,11 +6,10 @@ package doctor
 import (
 	"context"
 
-	execcontext "forgejo.org/modules/nativeoperation"
-
 	repo_model "forgejo.org/models/repo"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/log"
+	execcontext "forgejo.org/modules/nativeoperation"
 	nativeoperation_service "forgejo.org/services/nativeoperation"
 )
 

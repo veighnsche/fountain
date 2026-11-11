@@ -46,6 +46,8 @@ func readCommentSnapshot(ctx context.Context, admission *callbackAdmission, repo
 		return nil, http.StatusNotFound
 	}
 	action := discussionCommentCapability(facts, q.Subject)
-	return &extension.RepositoryCommentSnapshot{RepositoryID: repository, ActorID: strconv.FormatInt(user.ID, 10),
-		Subject: q.Subject, SubjectID: subjectID, IssueID: strconv.FormatInt(issue.ID, 10), Index: q.Index, Action: action}, http.StatusOK
+	return &extension.RepositoryCommentSnapshot{
+		RepositoryID: repository, ActorID: strconv.FormatInt(user.ID, 10),
+		Subject: q.Subject, SubjectID: subjectID, IssueID: strconv.FormatInt(issue.ID, 10), Index: q.Index, Action: action,
+	}, http.StatusOK
 }

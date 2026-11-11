@@ -18,11 +18,15 @@ import (
 	pull_service "forgejo.org/services/pull"
 )
 
-const HumanPullCreateFinishStarted = "human-pull-create-finish-started"
-const HumanPullCreateFinishDone = "human-pull-create-finish-done"
+const (
+	HumanPullCreateFinishStarted = "human-pull-create-finish-started"
+	HumanPullCreateFinishDone    = "human-pull-create-finish-done"
+)
 
-var ErrHumanPullCreateFinishClaimed = errors.New("native human pull creation finishing was already claimed")
-var ErrHumanPullCreateCompletionNotReady = errors.New("native human pull creation completion is not ready")
+var (
+	ErrHumanPullCreateFinishClaimed      = errors.New("native human pull creation finishing was already claimed")
+	ErrHumanPullCreateCompletionNotReady = errors.New("native human pull creation completion is not ready")
+)
 
 func (s *Service) checkHumanPullCreateRefEvidence(ctx context.Context, q sdk.HumanPullCreateRequest, pr *issues_model.PullRequest) error {
 	if err := checkHumanPullCreateTips(ctx, q, pr); err != nil {

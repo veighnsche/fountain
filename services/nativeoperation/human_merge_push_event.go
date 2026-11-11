@@ -21,8 +21,10 @@ import (
 	pull_service "forgejo.org/services/pull"
 )
 
-const HumanMergePushEventStarted = "human-merge-push-event-started"
-const HumanMergePushEventDone = "human-merge-push-event-done"
+const (
+	HumanMergePushEventStarted = "human-merge-push-event-started"
+	HumanMergePushEventDone    = "human-merge-push-event-done"
+)
 
 var (
 	ErrHumanMergePushEventNotReady = errors.New("native human merge finishing is not complete")

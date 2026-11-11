@@ -631,8 +631,10 @@ func scopePermitsRef(scope Scope, ref string) bool {
 // verifier's tail checks; any failure is ErrAuthorityLost.
 func (s *Service) revalidateSubmission(ctx context.Context, op *nativeoperation_model.Operation) error {
 	if op.ControllerGrantID != "" {
-		if _, err := extensionauth.CheckControllerUse(ctx, extensionauth.ControllerUse{GrantID: op.ControllerGrantID, InstallationID: op.InstallationID,
-			PackageID: op.PackageID, ActorID: op.ActorID, RepositoryID: op.RepositoryID, TokenID: op.TokenID, CredentialFingerprint: op.CredentialFingerprint, Kind: op.Kind, NotAfter: op.NotAfter}); err != nil {
+		if _, err := extensionauth.CheckControllerUse(ctx, extensionauth.ControllerUse{
+			GrantID: op.ControllerGrantID, InstallationID: op.InstallationID,
+			PackageID: op.PackageID, ActorID: op.ActorID, RepositoryID: op.RepositoryID, TokenID: op.TokenID, CredentialFingerprint: op.CredentialFingerprint, Kind: op.Kind, NotAfter: op.NotAfter,
+		}); err != nil {
 			return ErrAuthorityLost
 		}
 	} else if op.TokenID > 0 {
