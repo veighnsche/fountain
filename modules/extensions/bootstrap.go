@@ -153,9 +153,9 @@ type PreparedPackage struct {
 	Size    int64  `json:"size"`
 }
 
-// PrepareRelease is the one cache-only release preparation
-// implementation behind the explicit offline prepare command. It
-// validates the target catalog and selection, rejects a frozen source
+// PrepareRelease retains the local-state-only preparation adapter. It cannot
+// authenticate source catalog identity; production callers use
+// PrepareReleaseFromSource with independently loaded source trust. It validates the target catalog and selection, rejects a frozen source
 // snapshot whose catalog SHA, installation UUIDs or desired generations
 // differ from current source state, then verifies and stages every
 // selected cached package before the first installed-directory swap and
@@ -175,6 +175,67 @@ func (s *PackageStore) PrepareRelease(target sdk.Catalog, source Snapshot, requi
 	if err := checkSnapshotCurrent(s.root, source, requiredIDs); err != nil {
 		return nil, err
 	}
+	return s.prepareRelease(target, source, requiredIDs)
+}
+
+// PrepareReleaseFromSource verifies the source release independently of the
+// target, then stages all selected target archives before the first replacement.
+// Existing desired intents are never rewritten by release preparation.
+func (s *PackageStore) PrepareReleaseFromSource(target sdk.Catalog, snapshot Snapshot, requiredIDs []string, trust SourceTrust) ([]PreparedPackage, error) {
+	if err := sdk.ValidateCatalog(target); err != nil {
+		return nil, err
+	}
+	if err := ValidateCatalogSelection(target, requiredIDs); err != nil {
+		return nil, err
+	}
+	if err := validateSourceTrust(snapshot, trust); err != nil {
+		return nil, err
+	}
+	inScope := sourceSnapshotScope(s.root, trust)
+	var recoverIDs []string
+	for _, id := range RecoveryCandidates(s.root, trust.Catalog.Packages, trust.RequiredIDs) {
+		included, err := inScope(id)
+		if err != nil {
+			return nil, err
+		}
+		if included {
+			recoverIDs = append(recoverIDs, id)
+		}
+	}
+	if failures := s.RecoverInterrupted(recoverIDs); len(failures) != 0 {
+		return nil, errRecoveryUnavailable
+	}
+	for _, entry := range trust.Catalog.Packages {
+		if entry.Required || entry.LifecycleController != trust.ControllerID {
+			continue
+		}
+		intent, err := LoadIntent(s.root, entry.ID)
+		if err != nil {
+			return nil, err
+		}
+		if intent.Generation != "0" {
+			if err := BindIntentController(s.root, entry.ID, intent.InstallationID, trust.ControllerID); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := VerifySourceSnapshot(s.root, snapshot, trust); err != nil {
+		return nil, err
+	}
+	for _, row := range snapshot.Entries {
+		if row.Required || !row.DesiredEnabled {
+			continue
+		}
+		for _, entry := range target.Packages {
+			if entry.ID == row.PackageID && entry.LifecycleController != trust.ControllerID {
+				return nil, errSourceSnapshot
+			}
+		}
+	}
+	return s.prepareRelease(target, snapshot, requiredIDs)
+}
+
+func (s *PackageStore) prepareRelease(target sdk.Catalog, source Snapshot, requiredIDs []string) ([]PreparedPackage, error) {
 	enabled := make(map[string]bool)
 	for _, entry := range source.Entries {
 		if !entry.Required && entry.DesiredEnabled {
@@ -255,52 +316,5 @@ func (s *PackageStore) PrepareRelease(target sdk.Catalog, source Snapshot, requi
 // recorded intent generation, desired and pending values and
 // installation UUID, and every live intent must be represented.
 func checkSnapshotCurrent(root string, source Snapshot, requiredIDs []string) error {
-	required := make(map[string]bool, len(requiredIDs))
-	for _, id := range requiredIDs {
-		required[id] = true
-	}
-	seen := make(map[string]bool, len(source.Entries))
-	for _, entry := range source.Entries {
-		if required[entry.PackageID] {
-			continue
-		}
-		seen[entry.PackageID] = true
-		intent, err := LoadIntent(root, entry.PackageID)
-		if err != nil {
-			return errors.New("source snapshot does not match current state")
-		}
-		if intent.Generation != entry.Generation || intent.DesiredEnabled != entry.DesiredEnabled {
-			return errors.New("source snapshot does not match current state")
-		}
-		if (intent.PendingOperation == nil) != (entry.PendingOperation == nil) {
-			return errors.New("source snapshot does not match current state")
-		}
-		if intent.PendingOperation != nil && entry.PendingOperation != nil && *intent.PendingOperation != *entry.PendingOperation {
-			return errors.New("source snapshot does not match current state")
-		}
-		if entry.Generation == "0" {
-			if entry.InstallationID != nil {
-				return errors.New("source snapshot does not match current state")
-			}
-			continue
-		}
-		if entry.InstallationID == nil || *entry.InstallationID != intent.InstallationID {
-			return errors.New("source snapshot does not match current state")
-		}
-		installation, err := LoadInstallation(root, entry.PackageID)
-		if err != nil || installation != intent.InstallationID {
-			return errors.New("source snapshot does not match current state")
-		}
-	}
-	intents, err := listIntents(root)
-	if err != nil {
-		return errors.New("source snapshot does not match current state")
-	}
-	for _, id := range intents {
-		if required[id] || seen[id] {
-			continue
-		}
-		return errors.New("source snapshot does not match current state")
-	}
-	return nil
+	return checkSnapshotIntents(root, source, requiredIDs, func(string) (bool, error) { return true, nil })
 }

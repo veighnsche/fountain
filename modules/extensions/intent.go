@@ -27,6 +27,27 @@ const (
 	IntentDeactivate = "deactivate"
 )
 
+// IntentErrorKind separates invalid state/input, stale CAS and exhausted
+// generations from their diagnostic prose.
+type IntentErrorKind uint8
+
+const (
+	IntentInvalid IntentErrorKind = iota
+	IntentStale
+	IntentExhausted
+)
+
+type IntentError struct {
+	Kind    IntentErrorKind
+	message string
+}
+
+func (e *IntentError) Error() string { return e.message }
+
+func intentError(kind IntentErrorKind, message string) error {
+	return &IntentError{Kind: kind, message: message}
+}
+
 // maximumIntentBytes bounds one persisted intent document: 4 KiB.
 const maximumIntentBytes = 4 << 10
 
@@ -66,11 +87,11 @@ func VirtualIntent(id string) Intent {
 // than "0" itself) is accepted.
 func ParseGeneration(generation string) (uint64, error) {
 	if generation == "" || (len(generation) > 1 && generation[0] == '0') {
-		return 0, errors.New("extension intent generation is invalid")
+		return 0, intentError(IntentInvalid, "extension intent generation is invalid")
 	}
 	value, err := strconv.ParseUint(generation, 10, 64)
 	if err != nil {
-		return 0, errors.New("extension intent generation is invalid")
+		return 0, intentError(IntentInvalid, "extension intent generation is invalid")
 	}
 	return value, nil
 }
@@ -84,14 +105,14 @@ func validatePending(desired bool, pending *string) error {
 	switch *pending {
 	case IntentActivate:
 		if !desired {
-			return errors.New("extension intent activation requires desired enabled")
+			return intentError(IntentInvalid, "extension intent activation requires desired enabled")
 		}
 	case IntentDeactivate:
 		if desired {
-			return errors.New("extension intent deactivation requires desired disabled")
+			return intentError(IntentInvalid, "extension intent deactivation requires desired disabled")
 		}
 	default:
-		return errors.New("extension intent operation is invalid")
+		return intentError(IntentInvalid, "extension intent operation is invalid")
 	}
 	return nil
 }
@@ -106,7 +127,7 @@ func validatePending(desired bool, pending *string) error {
 // installation. Omitted booleans are never read as false.
 func LoadIntent(root, id string) (Intent, error) {
 	if !sdk.ValidID(id) {
-		return Intent{}, errors.New("invalid extension id")
+		return Intent{}, intentError(IntentInvalid, "invalid extension id")
 	}
 	file, err := os.Open(IntentPath(root, id))
 	if errors.Is(err, os.ErrNotExist) {
@@ -118,10 +139,10 @@ func LoadIntent(root, id string) (Intent, error) {
 	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, maximumIntentBytes+1))
 	if err != nil {
-		return Intent{}, errors.New("extension intent is invalid")
+		return Intent{}, intentError(IntentInvalid, "extension intent is invalid")
 	}
 	if len(data) > maximumIntentBytes {
-		return Intent{}, errors.New("extension intent exceeds size limit")
+		return Intent{}, intentError(IntentInvalid, "extension intent exceeds size limit")
 	}
 	if err := checkIntentDocument(data); err != nil {
 		return Intent{}, err
@@ -130,10 +151,10 @@ func LoadIntent(root, id string) (Intent, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&intent); err != nil {
-		return Intent{}, errors.New("extension intent is invalid")
+		return Intent{}, intentError(IntentInvalid, "extension intent is invalid")
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return Intent{}, errors.New("extension intent is invalid")
+		return Intent{}, intentError(IntentInvalid, "extension intent is invalid")
 	}
 	if err := validateIntent(root, intent, id, false); err != nil {
 		return Intent{}, err
@@ -155,10 +176,10 @@ var intentRequiredFields = []string{
 func checkIntentDocument(data []byte) error {
 	fields, err := wirejson.ObjectFields(data, "extension intent")
 	if err != nil {
-		return errors.New("extension intent is invalid")
+		return intentError(IntentInvalid, "extension intent is invalid")
 	}
 	if err := wirejson.RequireFields(fields, "extension intent", intentRequiredFields, []string{"desired_enabled"}); err != nil {
-		return errors.New("extension intent is invalid")
+		return intentError(IntentInvalid, "extension intent is invalid")
 	}
 	return nil
 }
@@ -169,36 +190,36 @@ func checkIntentDocument(data []byte) error {
 // load through LoadIntent; persisted intents always carry generation >= 1.
 func validateIntent(root string, intent Intent, id string, allowVirtual bool) error {
 	if intent.Schema != 1 {
-		return errors.New("extension intent is invalid")
+		return intentError(IntentInvalid, "extension intent is invalid")
 	}
 	if intent.PackageID != id {
-		return errors.New("extension intent is invalid")
+		return intentError(IntentInvalid, "extension intent is invalid")
 	}
 	generation, err := ParseGeneration(intent.Generation)
 	if err != nil {
 		return err
 	}
 	if generation == 0 && !allowVirtual {
-		return errors.New("extension intent generation is invalid")
+		return intentError(IntentInvalid, "extension intent generation is invalid")
 	}
 	if err := validatePending(intent.DesiredEnabled, intent.PendingOperation); err != nil {
 		return err
 	}
 	if generation == 0 {
 		if intent.InstallationID != "" || intent.DesiredEnabled || intent.PendingOperation != nil {
-			return errors.New("extension intent is invalid")
+			return intentError(IntentInvalid, "extension intent is invalid")
 		}
 		return nil
 	}
 	if _, err := uuid.Parse(intent.InstallationID); err != nil {
-		return errors.New("extension intent installation is invalid")
+		return intentError(IntentInvalid, "extension intent installation is invalid")
 	}
 	recorded, err := LoadInstallation(root, id)
 	if err != nil {
 		return errors.New("extension intent installation is unavailable")
 	}
 	if recorded != intent.InstallationID {
-		return errors.New("extension intent installation does not match")
+		return intentError(IntentInvalid, "extension intent installation does not match")
 	}
 	return nil
 }
@@ -212,21 +233,21 @@ func validateIntent(root string, intent Intent, id string, allowVirtual bool) er
 // interruption marker goes through this same path.
 func StoreIntent(root, id, installationID string, desired bool, pending *string, expectedGeneration string) (Intent, error) {
 	if !sdk.ValidID(id) {
-		return Intent{}, errors.New("invalid extension id")
+		return Intent{}, intentError(IntentInvalid, "invalid extension id")
+	}
+	value, err := ParseGeneration(expectedGeneration)
+	if err != nil {
+		return Intent{}, err
 	}
 	current, err := LoadIntent(root, id)
 	if err != nil {
 		return Intent{}, err
 	}
 	if current.Generation != expectedGeneration {
-		return Intent{}, errors.New("extension intent changed; reload and retry with the current generation")
-	}
-	value, err := ParseGeneration(expectedGeneration)
-	if err != nil {
-		return Intent{}, err
+		return Intent{}, intentError(IntentStale, "extension intent changed; reload and retry with the current generation")
 	}
 	if value == ^uint64(0) {
-		return Intent{}, errors.New("extension intent generation exhausted")
+		return Intent{}, intentError(IntentExhausted, "extension intent generation exhausted")
 	}
 	intent := Intent{
 		Schema:           1,
@@ -256,17 +277,20 @@ func StoreIntent(root, id, installationID string, desired bool, pending *string,
 // generation to mark: pending operations require a persisted intent.
 func StorePendingSameGeneration(root, id string, desired bool, pending *string, expectedGeneration string) (Intent, error) {
 	if !sdk.ValidID(id) {
-		return Intent{}, errors.New("invalid extension id")
+		return Intent{}, intentError(IntentInvalid, "invalid extension id")
+	}
+	if _, err := ParseGeneration(expectedGeneration); err != nil {
+		return Intent{}, err
 	}
 	current, err := LoadIntent(root, id)
 	if err != nil {
 		return Intent{}, err
 	}
 	if current.Generation != expectedGeneration {
-		return Intent{}, errors.New("extension intent changed; reload and retry with the current generation")
+		return Intent{}, intentError(IntentStale, "extension intent changed; reload and retry with the current generation")
 	}
 	if current.Generation == "0" {
-		return Intent{}, errors.New("extension intent has no persisted generation")
+		return Intent{}, intentError(IntentInvalid, "extension intent has no persisted generation")
 	}
 	next := Intent{
 		Schema:           1,
@@ -362,9 +386,12 @@ func listIntents(root string) ([]string, error) {
 // missing file is not an error.
 func RemoveIntent(root, id string) error {
 	if !sdk.ValidID(id) {
-		return errors.New("invalid extension id")
+		return intentError(IntentInvalid, "invalid extension id")
 	}
 	if err := os.Remove(IntentPath(root, id)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Remove(IntentControllerPath(root, id)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil

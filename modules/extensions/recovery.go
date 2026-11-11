@@ -15,7 +15,7 @@ import (
 
 // RecoveryCandidates lists known package IDs eligible for interrupted-swap
 // repair (RCX-2 FX04): required IDs, trusted catalog IDs, and IDs carrying
-// intent or installation records. The result is deduplicated and sorted so
+// intent, installation or host origin records. The result is deduplicated and sorted so
 // startup repair runs deterministically. Exact `.previous-<id>` paths are
 // derived per ID by RecoverPackage; no directory is swept for hidden
 // names, so staging residue (`.install-*`, `.rollback-*`), the package
@@ -43,6 +43,13 @@ func RecoveryCandidates(root string, catalog []sdk.CatalogPackage, requiredIDs [
 	}
 	for _, id := range listInstallations(root) {
 		add(id)
+	}
+	if entries, err := os.ReadDir(filepath.Dir(packageStatePath(root, "probe"))); err == nil {
+		for _, entry := range entries {
+			if id, ok := strings.CutSuffix(entry.Name(), ".json"); ok && !entry.IsDir() {
+				add(id)
+			}
+		}
 	}
 	candidates := make([]string, 0, len(known))
 	for id := range known {

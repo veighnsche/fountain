@@ -78,7 +78,7 @@ func (m *Manager) acquireMutation(id string) error {
 		return errors.New("another extension operation is active")
 	}
 	m.mutation = id
-	m.mutationPhase = "active"
+	m.mutationPhase = transitionCommand
 	m.mutationTokens = nil
 	return nil
 }
@@ -90,7 +90,7 @@ func (m *Manager) releaseMutation() {
 	m.mu.Lock()
 	tokens := m.mutationTokens
 	m.mutation = ""
-	m.mutationPhase = ""
+	m.mutationPhase = transitionIdle
 	m.mutationTokens = nil
 	m.mu.Unlock()
 	for _, token := range tokens {
@@ -98,9 +98,9 @@ func (m *Manager) releaseMutation() {
 	}
 }
 
-// issueCallAdmission mints one opaque single-use token for a full tuple
-// and tracks it for command-end revocation.
-func (m *Manager) issueCallAdmission(call sdk.LifecycleCall, desired, cleanupException bool) (string, error) {
+// issueCallAdmission mints one opaque token for a full tuple and tracks
+// it for command-end revocation.
+func (m *Manager) issueCallAdmission(call sdk.LifecycleCall, desired bool, purpose lifecycleAdmissionPurpose) (string, error) {
 	m.mu.Lock()
 	instance := ""
 	for _, state := range m.controllers {
@@ -118,7 +118,7 @@ func (m *Manager) issueCallAdmission(call sdk.LifecycleCall, desired, cleanupExc
 		InstanceID:       call.ControllerInstanceID,
 		Call:             call,
 		DesiredEnabled:   desired,
-		CleanupException: cleanupException,
+		lifecyclePurpose: purpose,
 	})
 	if err != nil {
 		return "", err
@@ -134,7 +134,7 @@ func (m *Manager) issueCallAdmission(call sdk.LifecycleCall, desired, cleanupExc
 // buildCall pins one operation to its full identity tuple with a deadline
 // of now plus the lesser of the operation cap and the remaining whole
 // operation budget.
-func buildCall(controllerID, instanceID string, entry sdk.CatalogPackage, installationID, generation, operation string, budgetLeft int64) sdk.LifecycleCall {
+func buildCall(controllerID, instanceID string, entry sdk.CatalogPackage, installationID, generation string, operation lifecycleCommand, budgetLeft int64) sdk.LifecycleCall {
 	capSeconds := int64(observeCallSeconds)
 	switch operation {
 	case sdk.LifecycleActivate:
@@ -156,7 +156,7 @@ func buildCall(controllerID, instanceID string, entry sdk.CatalogPackage, instal
 		PackageSHA256:        entry.SHA256,
 		InstallationID:       installationID,
 		Generation:           generation,
-		Operation:            operation,
+		Operation:            string(operation),
 		DeadlineUnix:         time.Now().Unix() + capSeconds,
 	}
 }
@@ -264,13 +264,22 @@ func (m *Manager) journalEffectUnknown(call sdk.LifecycleCall) {
 // failed-enable command. Observe accepts either current desired value
 // and echoes it. Per-instance callers must present their own instance.
 func (m *Manager) VerifyLifecycleCall(token string, call sdk.LifecycleCall) (sdk.LifecycleVerification, *AuthError) {
+	return m.verifyLifecycleCall(token, call, controllerVerification)
+}
+
+// VerifyServiceLifecycleCall is used only after authenticating the configured
+// service peer. Cleanup verifies once at the controller and once at its service.
+func (m *Manager) VerifyServiceLifecycleCall(token string, call sdk.LifecycleCall) (sdk.LifecycleVerification, *AuthError) {
+	return m.verifyLifecycleCall(token, call, serviceVerification)
+}
+
+func (m *Manager) verifyLifecycleCall(token string, call sdk.LifecycleCall, hop lifecycleVerificationHop) (sdk.LifecycleVerification, *AuthError) {
 	now := time.Now().Unix()
 	admission, ok := m.VerifyLifecycleAdmission(token)
 	if !ok {
 		return sdk.LifecycleVerification{}, &AuthError{Code: "unauthorized", Message: "lifecycle admission is unknown or revoked", HTTP: 403}
 	}
 	if admission.Call.DeadlineUnix <= now {
-		m.RevokeLifecycleAdmission(token)
 		return sdk.LifecycleVerification{}, &AuthError{Code: "unauthorized", Message: "lifecycle admission expired", HTTP: 403}
 	}
 	if call != admission.Call {
@@ -315,31 +324,31 @@ func (m *Manager) VerifyLifecycleCall(token string, call sdk.LifecycleCall) (sdk
 	if intent.PendingOperation != nil {
 		pending = *intent.PendingOperation
 	}
+	if admission.lifecyclePurpose == purposeFailedEnableCleanup && call.Operation != sdk.LifecycleDeactivate {
+		return sdk.LifecycleVerification{}, &AuthError{Code: "unauthorized", Message: "cleanup admission cannot authorize " + call.Operation, HTTP: 403}
+	}
 	switch call.Operation {
 	case sdk.LifecycleObserve:
-		return sdk.LifecycleVerification{Call: call, DesiredEnabled: intent.DesiredEnabled}, nil
+		return m.completeLifecycleVerification(token, admission, sdk.LifecycleVerification{Call: call, DesiredEnabled: intent.DesiredEnabled}, hop)
 	case sdk.LifecycleActivate:
-		if admission.CleanupException {
-			return sdk.LifecycleVerification{}, &AuthError{Code: "unauthorized", Message: "cleanup admission cannot authorize activate", HTTP: 403}
-		}
 		if !intent.DesiredEnabled || pending != packages.IntentActivate || !admission.DesiredEnabled {
 			return sdk.LifecycleVerification{}, &AuthError{Code: "unauthorized", Message: "activate mismatches requested state", HTTP: 403}
 		}
-		return sdk.LifecycleVerification{Call: call, DesiredEnabled: true}, nil
+		return m.completeLifecycleVerification(token, admission, sdk.LifecycleVerification{Call: call, DesiredEnabled: true}, hop)
 	case sdk.LifecycleDeactivate:
-		if admission.CleanupException {
-			if mutation != call.PackageID || phase != "cleanup" {
+		if admission.lifecyclePurpose == purposeFailedEnableCleanup {
+			if mutation != call.PackageID || phase != transitionFailedEnableCleanup {
 				return sdk.LifecycleVerification{}, &AuthError{Code: "unauthorized", Message: "cleanup admission is not in its command", HTTP: 403}
 			}
-			if !intent.DesiredEnabled || pending != packages.IntentActivate {
+			if !intent.DesiredEnabled || pending != packages.IntentActivate || !admission.DesiredEnabled {
 				return sdk.LifecycleVerification{}, &AuthError{Code: "unauthorized", Message: "cleanup mismatches failed-enable state", HTTP: 403}
 			}
-			return sdk.LifecycleVerification{Call: call, DesiredEnabled: true}, nil
+			return m.completeLifecycleVerification(token, admission, sdk.LifecycleVerification{Call: call, DesiredEnabled: true}, hop)
 		}
-		if intent.DesiredEnabled || pending != packages.IntentDeactivate {
+		if intent.DesiredEnabled || pending != packages.IntentDeactivate || admission.DesiredEnabled {
 			return sdk.LifecycleVerification{}, &AuthError{Code: "unauthorized", Message: "deactivate mismatches requested state", HTTP: 403}
 		}
-		return sdk.LifecycleVerification{Call: call, DesiredEnabled: false}, nil
+		return m.completeLifecycleVerification(token, admission, sdk.LifecycleVerification{Call: call, DesiredEnabled: false}, hop)
 	}
 	return sdk.LifecycleVerification{}, &AuthError{Code: "invalid_request", Message: "unknown lifecycle operation", HTTP: 400}
 }
@@ -352,8 +361,8 @@ func (m *Manager) observeControlledOnce(ctx context.Context, controllerID string
 	if !ready {
 		return sdk.LifecycleObservation{}, errControllerNotReady
 	}
-	call := buildCall(controllerID, instance, entry, intent.InstallationID, intent.Generation, sdk.LifecycleObserve, budgetLeft)
-	token, err := m.issueCallAdmission(call, intent.DesiredEnabled, false)
+	call := buildCall(controllerID, instance, entry, intent.InstallationID, intent.Generation, lifecycleObserve, budgetLeft)
+	token, err := m.issueCallAdmission(call, intent.DesiredEnabled, purposeLifecycle)
 	if err != nil {
 		return sdk.LifecycleObservation{}, err
 	}
@@ -369,8 +378,8 @@ func (m *Manager) activateControlledOnce(ctx context.Context, controllerID strin
 	if !ready {
 		return sdk.LifecycleObservation{}, errControllerNotReady
 	}
-	call := buildCall(controllerID, instance, entry, intent.InstallationID, intent.Generation, sdk.LifecycleActivate, budgetLeft)
-	token, err := m.issueCallAdmission(call, intent.DesiredEnabled, false)
+	call := buildCall(controllerID, instance, entry, intent.InstallationID, intent.Generation, lifecycleActivate, budgetLeft)
+	token, err := m.issueCallAdmission(call, intent.DesiredEnabled, purposeLifecycle)
 	if err != nil {
 		return sdk.LifecycleObservation{}, err
 	}
@@ -386,8 +395,8 @@ func (m *Manager) deactivateControlledOnce(ctx context.Context, controllerID str
 	if !ready {
 		return sdk.LifecycleObservation{}, errControllerNotReady
 	}
-	call := buildCall(controllerID, instance, entry, intent.InstallationID, intent.Generation, sdk.LifecycleDeactivate, budgetLeft)
-	token, err := m.issueCallAdmission(call, intent.DesiredEnabled, false)
+	call := buildCall(controllerID, instance, entry, intent.InstallationID, intent.Generation, lifecycleDeactivate, budgetLeft)
+	token, err := m.issueCallAdmission(call, intent.DesiredEnabled, purposeLifecycle)
 	if err != nil {
 		return sdk.LifecycleObservation{}, err
 	}
@@ -600,7 +609,7 @@ func (m *Manager) RequestEnabled(ctx context.Context, id, expectedGeneration, ca
 		return packages.FailedResult(operation, id, packages.LifecycleErrInProgress, "another extension operation is active")
 	}
 	defer m.acceptMu.Unlock()
-	adopted, failure := m.adoptMutation(id, "", expectedGeneration, catalogSHA, enabled)
+	adopted, failure := m.adoptMutation(id, "", expectedGeneration, catalogSHA, commandForEnabled(enabled))
 	if failure != nil {
 		return *failure
 	}
@@ -650,7 +659,7 @@ func (m *Manager) isStarted() bool {
 // disk before any external effect runs.
 type adoptedMutation struct {
 	id            string
-	operation     string
+	operation     lifecycleCommand
 	pending       string
 	budgetSeconds int64
 	entry         sdk.CatalogPackage
@@ -666,21 +675,26 @@ type adoptedMutation struct {
 // the next generation with the interruption marker before any external
 // effect. Failure returns a terminal result with no effects and no
 // held reservations.
-func (m *Manager) adoptMutation(id, pinnedVersion, expectedGeneration, catalogSHA string, enabled bool) (*adoptedMutation, *packages.LifecycleResult) {
-	operation := sdk.LifecycleActivate
+func (m *Manager) adoptMutation(id, pinnedVersion, expectedGeneration, catalogSHA string, operation lifecycleCommand) (*adoptedMutation, *packages.LifecycleResult) {
+	enabled := operation == lifecycleActivate
 	pending := packages.IntentActivate
 	budget := int64(enableBudgetSeconds)
 	if !enabled {
-		operation = sdk.LifecycleDeactivate
 		pending = packages.IntentDeactivate
 		budget = int64(disableBudgetSeconds)
 	}
 	failed := func(code, message string) *packages.LifecycleResult {
-		result := packages.FailedResult(operation, id, code, message)
+		result := packages.FailedResult(string(operation), id, code, message)
 		return &result
+	}
+	if operation != lifecycleActivate && operation != lifecycleDeactivate {
+		return nil, failed(packages.LifecycleErrInvalidRequest, "invalid lifecycle command")
 	}
 	if !sdk.ValidID(id) {
 		return nil, failed(packages.LifecycleErrInvalidRequest, "invalid extension id")
+	}
+	if _, err := packages.ParseGeneration(expectedGeneration); err != nil {
+		return nil, failed(packages.LifecycleErrInvalidRequest, err.Error())
 	}
 	m.mu.Lock()
 	started := m.started
@@ -726,7 +740,7 @@ func (m *Manager) adoptMutation(id, pinnedVersion, expectedGeneration, catalogSH
 		return nil, failed(packages.LifecycleErrInProgress, "another extension operation is active")
 	}
 	m.mu.Lock()
-	m.busy[id] = operation
+	m.busy[id] = string(operation)
 	m.mu.Unlock()
 	unwind := func() {
 		m.mu.Lock()
@@ -740,10 +754,32 @@ func (m *Manager) adoptMutation(id, pinnedVersion, expectedGeneration, catalogSH
 		unwind()
 		return nil, failed(packages.LifecycleErrUnavailable, "installation identity is unavailable")
 	}
+	if found {
+		if err := packages.BindIntentController(m.root, id, installation, entry.LifecycleController); err != nil {
+			unwind()
+			return nil, failed(packages.LifecycleErrCatalogBinding, "controller attribution conflicts with trusted catalog")
+		}
+	} else {
+		current, err := packages.LoadIntent(m.root, id)
+		m.mu.Lock()
+		snapshot := m.snapshotAdmissionLocked(id)
+		m.mu.Unlock()
+		if !m.attributionAllows(id, snapshot, current, err) {
+			unwind()
+			return nil, failed(packages.LifecycleErrCatalogBinding, "controller attribution is unavailable; restore the catalog entry and retry")
+		}
+		if snapshot.trustedCatalog && current.Generation == "0" {
+			if err := packages.BindIntentController(m.root, id, installation, ""); err != nil {
+				unwind()
+				return nil, failed(packages.LifecycleErrCatalogBinding, "controller attribution conflicts with trusted catalog")
+			}
+		}
+	}
 	intent, err := packages.StoreIntent(m.root, id, installation, enabled, &pending, expectedGeneration)
 	if err != nil {
 		unwind()
-		if staleIntentError(err) {
+		var intentErr *packages.IntentError
+		if errors.As(err, &intentErr) && intentErr.Kind == packages.IntentStale {
 			return nil, failed(packages.LifecycleErrStaleState, "intent changed; reload and retry with the current generation")
 		}
 		return nil, failed(packages.LifecycleErrUnavailable, "requested state is unavailable")
@@ -765,7 +801,7 @@ func (m *Manager) finishAdopted(adopted *adoptedMutation, op *activeOperation) {
 	delete(m.busy, adopted.id)
 	tokens := m.mutationTokens
 	m.mutation = ""
-	m.mutationPhase = ""
+	m.mutationPhase = transitionIdle
 	m.mutationTokens = nil
 	if op != nil && m.activeOp == op {
 		m.activeOp = nil
@@ -807,7 +843,7 @@ func (m *Manager) executeMutation(ctx context.Context, adopted *adoptedMutation)
 }
 
 func (m *Manager) requestEnabled(ctx context.Context, id, pinnedVersion, expectedGeneration, catalogSHA string, enabled bool) packages.LifecycleResult {
-	adopted, failure := m.adoptMutation(id, pinnedVersion, expectedGeneration, catalogSHA, enabled)
+	adopted, failure := m.adoptMutation(id, pinnedVersion, expectedGeneration, catalogSHA, commandForEnabled(enabled))
 	if failure != nil {
 		return *failure
 	}
@@ -815,23 +851,6 @@ func (m *Manager) requestEnabled(ctx context.Context, id, pinnedVersion, expecte
 	work, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(adopted.budgetSeconds)*time.Second)
 	defer cancel()
 	return m.executeMutation(work, adopted)
-}
-
-func staleIntentError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := err.Error()
-	return len(message) >= 9 && (containsSubstring(message, "changed; reload") || containsSubstring(message, "generation"))
-}
-
-func containsSubstring(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
 
 // abortPending clears the interruption marker after a definite
@@ -854,6 +873,21 @@ func (m *Manager) abortPending(id string, desired bool, generation string) {
 // ordinary backend absent.
 func (m *Manager) ensurePackageBytes(ctx context.Context, entry sdk.CatalogPackage, intent packages.Intent, opDeadline int64, allowAcquire bool) (sdk.Manifest, *packages.LifecycleResult) {
 	packageDir := filepath.Join(m.root, entry.ID)
+	_, targetErr := os.Lstat(packageDir)
+	if errors.Is(targetErr, os.ErrNotExist) {
+		targetErr = packages.RecoverPackage(m.root, entry.ID)
+		if targetErr == nil {
+			_, targetErr = os.Lstat(packageDir)
+		}
+	}
+	if targetErr == nil {
+		targetErr = packages.ValidateKnownPackageOrigin(m.root, entry.ID)
+	}
+	if targetErr != nil && !errors.Is(targetErr, os.ErrNotExist) {
+		result := packages.UnconfirmedResult(sdk.LifecycleActivate, entry.ID, packages.LifecycleErrUnavailable, "installed package origin is unavailable; explicit repair is required")
+		m.recordFailure(entry.ID, result.Error.Code, result.Error.Message)
+		return sdk.Manifest{}, &result
+	}
 	if err := packages.ValidateInstalled(m.root, entry); err == nil {
 		manifest, err := sdk.LoadManifest(packageDir)
 		if err != nil {
@@ -939,7 +973,6 @@ type activateSequenceResult struct {
 	manifest      sdk.Manifest
 	completed     packages.LifecycleResult
 	failure       packages.LifecycleResult
-	cause         error
 	backendFailed bool
 	blocked       bool
 	ok            bool
@@ -1002,11 +1035,11 @@ func (m *Manager) runActivateSequence(ctx context.Context, entry sdk.CatalogPack
 		return unconfirmed(packages.LifecycleErrUnconfirmed, "activation is unconfirmed")
 	}
 	if _, err := m.startControlledBackend(entry.ID, pinnedVersion); err != nil {
-		return activateSequenceResult{backendFailed: true, cause: err}
+		return activateSequenceResult{backendFailed: true}
 	}
 	confirmed, err := m.observeControlledOnce(ctx, entry.LifecycleController, entry, intent, opDeadline-time.Now().Unix())
 	if err != nil {
-		return activateSequenceResult{backendFailed: true, cause: err}
+		return activateSequenceResult{backendFailed: true}
 	}
 	if confirmed.State != sdk.LifecycleStateRunning || !confirmed.AdmissionReady || confirmed.Error != nil {
 		return activateSequenceResult{backendFailed: true}
@@ -1029,7 +1062,7 @@ func (m *Manager) controlledEnable(ctx context.Context, entry sdk.CatalogPackage
 		return result.completed
 	}
 	if result.backendFailed {
-		return m.cleanupFailedEnable(ctx, entry, intent, opDeadline, result.cause)
+		return m.cleanupFailedEnable(ctx, entry, intent, opDeadline)
 	}
 	return result.failure
 }
@@ -1039,9 +1072,9 @@ func (m *Manager) controlledEnable(ctx context.Context, entry sdk.CatalogPackage
 // failed-enable admission exception. Desired and generation are
 // unchanged; pending activate is retained even when cleanup confirms
 // stopped, so a later explicit retry authorizes another activation.
-func (m *Manager) cleanupFailedEnable(ctx context.Context, entry sdk.CatalogPackage, intent packages.Intent, opDeadline int64, cause error) packages.LifecycleResult {
+func (m *Manager) cleanupFailedEnable(ctx context.Context, entry sdk.CatalogPackage, intent packages.Intent, opDeadline int64) packages.LifecycleResult {
 	m.mu.Lock()
-	m.mutationPhase = "cleanup"
+	m.mutationPhase = transitionFailedEnableCleanup
 	m.mu.Unlock()
 	remaining := opDeadline - time.Now().Unix()
 	if remaining < 1 {
@@ -1053,8 +1086,8 @@ func (m *Manager) cleanupFailedEnable(ctx context.Context, entry sdk.CatalogPack
 		m.recordFailure(entry.ID, packages.LifecycleErrUnconfirmed, "controller is not ready for cleanup")
 		return packages.UnconfirmedResult(sdk.LifecycleActivate, entry.ID, packages.LifecycleErrActivateFailed, "backend failed; cleanup is unconfirmed")
 	}
-	call := buildCall(entry.LifecycleController, instance, entry, intent.InstallationID, intent.Generation, sdk.LifecycleDeactivate, remaining)
-	token, err := m.issueCallAdmission(call, true, true)
+	call := buildCall(entry.LifecycleController, instance, entry, intent.InstallationID, intent.Generation, lifecycleDeactivate, remaining)
+	token, err := m.issueCallAdmission(call, true, purposeFailedEnableCleanup)
 	if err != nil {
 		m.recordFailure(entry.ID, packages.LifecycleErrUnconfirmed, "cleanup admission is unavailable")
 		return packages.UnconfirmedResult(sdk.LifecycleActivate, entry.ID, packages.LifecycleErrActivateFailed, "backend failed; cleanup is unconfirmed")
@@ -1065,11 +1098,6 @@ func (m *Manager) cleanupFailedEnable(ctx context.Context, entry sdk.CatalogPack
 		return packages.UnconfirmedResult(sdk.LifecycleActivate, entry.ID, packages.LifecycleErrActivateFailed, "backend failed; cleanup is unconfirmed")
 	}
 	m.recordFailure(entry.ID, packages.LifecycleErrActivateFailed, "failed activation cleaned up; explicit retry is required")
-	detail := "backend failed; failed activation cleaned up; explicit retry is required"
-	if cause == nil {
-		detail = "activation unconfirmed after backend start; failed activation cleaned up; explicit retry is required"
-	}
-	_ = detail
 	return packages.UnconfirmedResult(sdk.LifecycleActivate, entry.ID, packages.LifecycleErrActivateFailed, "backend failed; failed activation cleaned up; explicit retry is required")
 }
 

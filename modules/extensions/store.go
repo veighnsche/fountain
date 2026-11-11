@@ -102,16 +102,22 @@ func (s *PackageStore) InstallStaged(stage string, opts InstallOptions) (sdk.Man
 			return sdk.Manifest{}, err
 		}
 	}
+	kind := prebuiltOrigin
+	if opts.Entry != nil {
+		kind = catalogOrigin
+	}
+	next, err := inspectPackageOrigin(stage, kind)
+	if err != nil {
+		return sdk.Manifest{}, err
+	}
 	// A replacement first repairs any interrupted swap for this
 	// package, whether or not the target currently exists: a crash
 	// between the old-bytes rename and staged publication leaves an
 	// absent target whose valid backup restores here, so the swap
 	// below preserves installation UUID, intent and private data.
 	// Unrepairable state fails closed before anything moves.
-	if opts.Replace {
-		if err := RecoverPackage(s.root, manifest.ID); err != nil {
-			return sdk.Manifest{}, err
-		}
+	if err := RecoverPackage(s.root, manifest.ID); err != nil {
+		return sdk.Manifest{}, err
 	}
 	target := filepath.Join(s.root, manifest.ID)
 	info, err := os.Lstat(target)
@@ -122,28 +128,56 @@ func (s *PackageStore) InstallStaged(stage string, opts InstallOptions) (sdk.Man
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return sdk.Manifest{}, errors.New("installed package is not a regular directory")
 		}
+		previous, err := provenPackageOrigin(s.root, manifest.ID, target)
+		if err != nil {
+			return sdk.Manifest{}, errRecoveryUnavailable
+		}
+		state := packageState{Schema: 1, PackageID: manifest.ID, Current: previous,
+			Replacement: &packageReplacement{Previous: previous, Next: next, Target: manifest.ID, Backup: ".previous-" + manifest.ID}}
+		if err := writePackageState(s.root, state); err != nil {
+			return sdk.Manifest{}, err
+		}
 		backup := previousPackagePath(s.root, manifest.ID)
 		if err := os.Rename(target, backup); err != nil {
 			return sdk.Manifest{}, err
 		}
 		if err := os.Rename(stage, target); err != nil {
-			return sdk.Manifest{}, errors.Join(err, os.Rename(backup, target))
+			restoreErr := os.Rename(backup, target)
+			if restoreErr == nil {
+				restoreErr = writePackageState(s.root, packageState{Schema: 1, PackageID: manifest.ID, Current: previous})
+			}
+			return sdk.Manifest{}, errors.Join(err, restoreErr)
 		}
 		if err := directorySync(s.root); err != nil {
 			if rollbackErr := rollbackInstallSwap(s.root, manifest.ID); rollbackErr != nil {
 				return manifest, fmt.Errorf("package installation failed (%v) and rollback is incomplete: %v", err, rollbackErr)
+			}
+			if stateErr := writePackageState(s.root, packageState{Schema: 1, PackageID: manifest.ID, Current: previous}); stateErr != nil {
+				return sdk.Manifest{}, errors.Join(err, stateErr)
 			}
 			return sdk.Manifest{}, fmt.Errorf("package installation failed (%v); previous version restored", err)
 		}
 		if err := os.RemoveAll(backup); err != nil {
 			return manifest, fmt.Errorf("package updated but old package cleanup failed: %w", err)
 		}
+		if err := fsyncDirectory(s.root); err != nil {
+			return manifest, err
+		}
+		if err := writePackageState(s.root, packageState{Schema: 1, PackageID: manifest.ID, Current: next}); err != nil {
+			return manifest, err
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return sdk.Manifest{}, err
-	} else if err := os.Rename(stage, target); err != nil {
-		return sdk.Manifest{}, err
-	} else if err := fsyncDirectory(s.root); err != nil {
-		return sdk.Manifest{}, err
+	} else {
+		if err := writePackageState(s.root, packageState{Schema: 1, PackageID: manifest.ID, Current: next}); err != nil {
+			return sdk.Manifest{}, err
+		}
+		if err := os.Rename(stage, target); err != nil {
+			return sdk.Manifest{}, err
+		}
+		if err := fsyncDirectory(s.root); err != nil {
+			return sdk.Manifest{}, err
+		}
 	}
 	// Fresh installation assigns a new UUID; replacement preserves the
 	// recorded one. Identity failures leave the package installed but the
@@ -240,7 +274,13 @@ func (s *PackageStore) Remove(id string) error {
 	if err := RemoveInstallation(s.root, id); err != nil {
 		return err
 	}
-	return RemoveIntent(s.root, id)
+	if err := RemoveIntent(s.root, id); err != nil {
+		return err
+	}
+	if err := os.Remove(packageStatePath(s.root, id)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // previousPackagePath is the fixed task-owned backup directory for one
@@ -313,47 +353,95 @@ func RecoverPackage(root, id string) error {
 	if backupErr != nil && !errors.Is(backupErr, os.ErrNotExist) {
 		return backupErr
 	}
+	state, stateErr := loadPackageState(root, id)
+	if stateErr != nil && !errors.Is(stateErr, os.ErrNotExist) {
+		return errRecoveryUnavailable
+	}
+	if state.Replacement != nil {
+		return recoverWitnessedReplacement(root, id, state, targetExists, backupExists)
+	}
+	if !backupExists {
+		if targetExists && stateErr == nil {
+			return state.Current.verify(target)
+		}
+		return nil
+	}
+	previous, err := provenPackageOrigin(root, id, backup)
+	if err != nil {
+		if stateErr == nil && !targetExists {
+			return errRecoveryUnavailable
+		}
+		// A legacy catalog backup may predate the current origin record.
+		previous, err = inspectPackageOrigin(backup, catalogOrigin)
+		if err != nil || previous.PackageID != id {
+			return errRecoveryUnavailable
+		}
+	}
+	current := previous
+	if targetExists {
+		current, err = provenPackageOrigin(root, id, target)
+		if err != nil {
+			return errRecoveryUnavailable
+		}
+		if err := fsyncDirectory(root); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(backup); err != nil {
+			return err
+		}
+	} else if err := os.Rename(backup, target); err != nil {
+		return err
+	}
+	if err := fsyncDirectory(root); err != nil {
+		return err
+	}
+	return writePackageState(root, packageState{Schema: 1, PackageID: id, Current: current})
+}
+
+func recoverWitnessedReplacement(root, id string, state packageState, targetExists, backupExists bool) error {
+	target, backup := filepath.Join(root, id), previousPackagePath(root, id)
+	witness := state.Replacement
+	var current packageOrigin
 	switch {
 	case !targetExists && !backupExists:
-		return nil
+		return errRecoveryUnavailable
 	case !targetExists:
-		if err := validatePackageDir(backup); err != nil {
-			return errRecoveryUnavailable
+		if err := witness.Previous.verify(backup); err != nil {
+			return err
 		}
 		if err := os.Rename(backup, target); err != nil {
 			return err
 		}
-		return fsyncDirectory(root)
+		current = witness.Previous
 	case !backupExists:
-		return nil
-	default:
-		if err := validatePackageDir(target); err != nil {
+		if witness.Next.verify(target) == nil {
+			current = witness.Next
+		} else if witness.Previous.verify(target) == nil {
+			current = witness.Previous
+		} else {
 			return errRecoveryUnavailable
 		}
-		return os.RemoveAll(backup)
+	default:
+		if witness.Next.verify(target) != nil || witness.Previous.verify(backup) != nil {
+			return errRecoveryUnavailable
+		}
+		if err := fsyncDirectory(root); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(backup); err != nil {
+			return err
+		}
+		current = witness.Next
 	}
+	if err := fsyncDirectory(root); err != nil {
+		return err
+	}
+	return writePackageState(root, packageState{Schema: 1, PackageID: id, Current: current})
 }
 
 // validatePackageDir checks that an installed directory is a regular
 // directory carrying a loadable receipt, manifest and package files.
 func validatePackageDir(directory string) error {
-	info, err := os.Lstat(directory)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return errors.New("installed package is not a regular directory")
-	}
-	receipt, err := LoadReceipt(directory)
-	if err != nil {
-		return err
-	}
-	manifest, err := sdk.LoadManifest(directory)
-	if err != nil {
-		return err
-	}
-	if manifest.ID != receipt.PackageID || manifest.Version != receipt.PackageVersion {
-		return errors.New("installed package does not match its receipt")
-	}
-	return checkPackageFiles(directory, manifest)
+	_, err := inspectPackageOrigin(directory, catalogOrigin)
+	return err
 }

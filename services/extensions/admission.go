@@ -46,11 +46,13 @@ type admissionSnapshot struct {
 	controllerReady  bool
 	busySnapshot     string
 	drainingSnapshot bool
+	catalogKnown     bool
+	trustedCatalog   bool
 }
 
 // snapshotAdmissionLocked fills an admissionSnapshot; callers hold m.mu.
 func (m *Manager) snapshotAdmissionLocked(id string) admissionSnapshot {
-	snapshot := admissionSnapshot{started: m.started}
+	snapshot := admissionSnapshot{started: m.started, trustedCatalog: m.catalogPath != "" || len(m.catalog) != 0}
 	if operation, busy := m.busy[id]; busy {
 		snapshot.busy, snapshot.busySnapshot = true, operation
 	}
@@ -69,6 +71,7 @@ func (m *Manager) snapshotAdmissionLocked(id string) admissionSnapshot {
 		if entry.ID != id {
 			continue
 		}
+		snapshot.catalogKnown = true
 		if entry.Required {
 			snapshot.required = true
 		}
@@ -133,6 +136,9 @@ func (m *Manager) ordinaryAdmissionOpen(id string) bool {
 		return false
 	}
 	intent, intentErr := packages.LoadIntent(m.root, id)
+	if !m.attributionAllows(id, snapshot, intent, intentErr) {
+		return false
+	}
 	fenced := maintenanceHeld(m.maintenanceDir)
 	var effect controlledEffect
 	var effectOK bool
@@ -167,6 +173,9 @@ func (m *Manager) VerifyOrdinaryToken(packageID, instanceID string) bool {
 		return snapshotAllowsUntracked(snapshot)
 	}
 	intent, intentErr := packages.LoadIntent(m.root, packageID)
+	if !m.attributionAllows(packageID, snapshot, intent, intentErr) {
+		return false
+	}
 	fenced := maintenanceHeld(m.maintenanceDir)
 	var effect controlledEffect
 	var effectOK bool
@@ -199,6 +208,20 @@ func (m *Manager) VerifyOrdinaryToken(packageID, instanceID string) bool {
 // never started lifecycle tracking: only registry checks govern.
 func snapshotAllowsUntracked(snapshot admissionSnapshot) bool {
 	return !snapshot.busy && !snapshot.draining
+}
+
+func (m *Manager) attributionAllows(id string, snapshot admissionSnapshot, intent packages.Intent, intentErr error) bool {
+	if !snapshot.trustedCatalog || snapshot.catalogKnown {
+		return true
+	}
+	if intentErr != nil {
+		return false
+	}
+	if intent.Generation == "0" {
+		return true
+	}
+	binding, known, err := packages.LoadIntentController(m.root, id)
+	return err == nil && known && binding.ControllerID == ""
 }
 
 // admissionDecide evaluates the full affirmative state from a

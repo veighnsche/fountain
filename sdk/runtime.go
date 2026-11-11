@@ -5,6 +5,7 @@ package extensions
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"net/rpc"
 	"os"
 	"sort"
+	"sync/atomic"
 
 	plugin "github.com/hashicorp/go-plugin"
 )
@@ -170,19 +172,36 @@ var handshake = plugin.HandshakeConfig{
 	MagicCookieValue: "forgejo-extension-v1",
 }
 
-type controlPlugin struct{ registration Registration }
+type runtimeLiveness struct{ failed atomic.Bool }
+
+func (l *runtimeLiveness) serve(server *http.Server, listener net.Listener) {
+	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		l.failed.Store(true)
+	}
+}
+
+type controlPlugin struct {
+	registration Registration
+	liveness     *runtimeLiveness
+}
 
 func (p controlPlugin) Server(*plugin.MuxBroker) (any, error) {
-	return &controlRPC{registration: p.registration}, nil
+	return &controlRPC{registration: p.registration, liveness: p.liveness}, nil
 }
 
 func (controlPlugin) Client(_ *plugin.MuxBroker, client *rpc.Client) (any, error) {
 	return &controlClient{client: client}, nil
 }
 
-type controlRPC struct{ registration Registration }
+type controlRPC struct {
+	registration Registration
+	liveness     *runtimeLiveness
+}
 
-func (*controlRPC) Ready(_ struct{}, ready *bool) error { *ready = true; return nil }
+func (c *controlRPC) Ready(_ struct{}, ready *bool) error {
+	*ready = c.liveness != nil && !c.liveness.failed.Load()
+	return nil
+}
 func (c *controlRPC) Registration(_ struct{}, registration *Registration) error {
 	*registration = c.registration
 	return nil
@@ -202,9 +221,23 @@ func (*controlRPC) DeliverBackgroundAdmission(delivery BackgroundAdmissionDelive
 type controlClient struct{ client *rpc.Client }
 
 func (c *controlClient) Ready() error {
-	var ready bool
-	if err := c.client.Call("Plugin.Ready", struct{}{}, &ready); err != nil {
+	return c.ReadyContext(context.Background())
+}
+
+func (c *controlClient) ReadyContext(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
 		return err
+	}
+	var ready bool
+	done := make(chan error, 1)
+	go func() { done <- c.client.Call("Plugin.Ready", struct{}{}, &ready) }()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		if err != nil {
+			return err
+		}
 	}
 	if !ready {
 		return errors.New("extension is not ready")
@@ -251,11 +284,16 @@ func Serve(application Application) error {
 		_ = listener.Close()
 		return err
 	}
+	return serveRuntime(application, listener)
+}
+
+func serveRuntime(application Application, listener net.Listener) error {
 	server := &http.Server{Handler: application.handler()}
-	go func() { _ = server.Serve(listener) }()
+	liveness := &runtimeLiveness{}
+	go liveness.serve(server, listener)
 	plugin.Serve(&plugin.ServeConfig{
 		HandshakeConfig: handshake,
-		Plugins:         plugin.PluginSet{"control": controlPlugin{registration: application.registration()}},
+		Plugins:         plugin.PluginSet{"control": controlPlugin{registration: application.registration(), liveness: liveness}},
 	})
 	return server.Close()
 }

@@ -135,7 +135,13 @@ func serveLifecycleAuthorize(w http.ResponseWriter, r *http.Request, manager *ex
 			return
 		}
 	}
-	verification, authErr := manager.VerifyLifecycleCall(token, call)
+	var verification extension.LifecycleVerification
+	var authErr *extensions_service.AuthError
+	if service {
+		verification, authErr = manager.VerifyServiceLifecycleCall(token, call)
+	} else {
+		verification, authErr = manager.VerifyLifecycleCall(token, call)
+	}
 	if authErr != nil {
 		http.Error(w, authErr.Message, authErr.HTTP)
 		return

@@ -87,6 +87,8 @@ func extensionPrepareCommand() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.BoolFlag{Name: "offline", Usage: "Confirm no network access; preparation is cache-only"},
 			&cli.StringFlag{Name: "catalog", Usage: "Absolute path to the target release catalog file"},
+			&cli.StringFlag{Name: "source-catalog", Usage: "Absolute path to the trusted source release catalog file"},
+			&cli.StringFlag{Name: "controller", Usage: "Required lifecycle controller that owns the frozen source snapshot"},
 			&cli.StringFlag{Name: "snapshot", Usage: "Absolute path to the frozen source snapshot file"},
 		},
 		Action: func(_ context.Context, c *cli.Command) error {
@@ -94,13 +96,25 @@ func extensionPrepareCommand() *cli.Command {
 				return errors.New("prepare requires --offline: there is no network fallback")
 			}
 			catalogPath := c.String("catalog")
+			sourceCatalogPath := c.String("source-catalog")
 			snapshotPath := c.String("snapshot")
-			if catalogPath == "" || snapshotPath == "" {
-				return errors.New("prepare requires --catalog and --snapshot")
+			controllerID := c.String("controller")
+			if catalogPath == "" || sourceCatalogPath == "" || snapshotPath == "" || !sdk.ValidID(controllerID) {
+				return errors.New("prepare requires --catalog, --source-catalog, --controller and --snapshot")
 			}
 			catalog, _, err := extensions.LoadCatalogFile(catalogPath)
 			if err != nil {
 				return err
+			}
+			sourceCatalog, sourceSHA, err := extensions.LoadCatalogFile(sourceCatalogPath)
+			if err != nil {
+				return err
+			}
+			sourceRequiredIDs := make([]string, 0)
+			for _, entry := range sourceCatalog.Packages {
+				if entry.Required {
+					sourceRequiredIDs = append(sourceRequiredIDs, entry.ID)
+				}
 			}
 			data, err := os.ReadFile(snapshotPath)
 			if err != nil {
@@ -115,7 +129,9 @@ func extensionPrepareCommand() *cli.Command {
 				return err
 			}
 			defer store.Close()
-			prepared, err := store.PrepareRelease(catalog, snapshot, setting.Extensions.RequiredIDs)
+			prepared, err := store.PrepareReleaseFromSource(catalog, snapshot, setting.Extensions.RequiredIDs, extensions.SourceTrust{
+				Catalog: sourceCatalog, CatalogSHA256: sourceSHA, RequiredIDs: sourceRequiredIDs, ControllerID: controllerID,
+			})
 			if err != nil {
 				return err
 			}

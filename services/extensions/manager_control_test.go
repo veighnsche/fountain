@@ -45,6 +45,7 @@ func controlManager(t *testing.T, root string) *Manager {
 	sodaDir := filepath.Join(root, "soda")
 	require.NoError(t, os.MkdirAll(sodaDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(sodaDir, "extension.json"), []byte(`{"protocol":1,"id":"soda","name":"Soda","version":"1.0","executable":"backend"}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(sodaDir, "backend"), []byte("controller fixture"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(sodaDir, ".fountain-package.json"), []byte(`{"schema":1,"package_id":"soda","package_version":"1.0","archive_sha256":"`+controlReceiptSHA+`"}`), 0o600))
 	require.NoError(t, os.MkdirAll(filepath.Join(root, ".installations"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".installations", "soda.json"), []byte(`{"protocol":1,"installation_id":"`+controlSodaUUID+`"}`), 0o600))
@@ -365,7 +366,7 @@ func TestControlCacheHit(t *testing.T) {
 		{ID: "sample", Version: "1.0", URL: "https://publisher.example/releases/sample-1.0.tar.gz", Size: int64(len(sampleArchive)), SHA256: sampleSHA, Required: false, FountainProto: 1, BrowserContract: 1, Capabilities: []string{}, LifecycleController: "soda"},
 	}}
 	source := packages.Snapshot{CatalogSHA256: controlLiveSHA, Entries: []packages.SnapshotEntry{
-		{PackageID: "soda", InstallationID: &[]string{controlSodaUUID}[0], Generation: "0", DesiredEnabled: true, Required: true},
+		{PackageID: "soda", InstallationID: &[]string{controlSodaUUID}[0], Generation: "0", DesiredEnabled: true, Required: true, InstalledVersion: &[]string{"1.0"}[0], PackageSHA256: &[]string{controlReceiptSHA}[0]},
 		{PackageID: "sample", InstallationID: &[]string{installation}[0], Generation: "1", DesiredEnabled: true, Required: false},
 	}}
 

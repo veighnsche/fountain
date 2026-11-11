@@ -1051,6 +1051,13 @@ func TestEnableDownloadsCatalogArtifact(t *testing.T) {
 			root := shortTestRoot(t)
 			installLifecyclePackage(t, root, "controller", controllerManifest, testFixtureKnobs{Role: "controller"})
 			installLifecyclePackage(t, root, "sample", sampleManifest, testFixtureKnobs{})
+			stage := filepath.Join(root, ".initial-sample")
+			require.NoError(t, os.Rename(filepath.Join(root, "sample"), stage))
+			store, err := packages.OpenPackageStore(root)
+			require.NoError(t, err)
+			_, err = store.InstallStaged(stage, packages.InstallOptions{})
+			require.NoError(t, err)
+			require.NoError(t, store.Close())
 			body := buildSampleArchive(t, controller)
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write(body)

@@ -87,6 +87,17 @@ func (m *Manager) controlSnapshotEntries(controllerID string) ([]packages.Snapsh
 	byID := make(map[string]sdk.CatalogPackage, len(entries))
 	for _, entry := range entries {
 		byID[entry.ID] = entry
+		if !entry.Required && entry.LifecycleController == controllerID {
+			intent, err := packages.LoadIntent(m.root, entry.ID)
+			if err != nil {
+				return nil, err
+			}
+			if intent.Generation != "0" {
+				if err := packages.BindIntentController(m.root, entry.ID, intent.InstallationID, controllerID); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 	managed := func(id string) bool {
 		if slices.Contains(m.requiredIDs, id) {
@@ -101,16 +112,25 @@ func (m *Manager) controlSnapshotEntries(controllerID string) ([]packages.Snapsh
 			ids = append(ids, entry.ID)
 		}
 	}
-	// Intents for catalog-unknown IDs managed by this controller are
-	// still reported when an intent file exists for them.
+	// Catalog-removed rows need their durable source attribution. Known
+	// other controllers are excluded; unknown legacy rows cannot be guessed.
 	if names, err := os.ReadDir(filepath.Join(m.root, ".intents")); err == nil {
 		for _, name := range names {
 			id, ok := strings.CutSuffix(name.Name(), ".json")
 			if !ok || !sdk.ValidID(id) || managed(id) {
 				continue
 			}
-			if intent, err := packages.LoadIntent(m.root, id); err == nil {
-				_ = intent
+			if _, current := byID[id]; current {
+				continue
+			}
+			binding, known, err := packages.LoadIntentController(m.root, id)
+			if err != nil {
+				return nil, err
+			}
+			if !known {
+				return nil, errors.New("catalog-removed intent controller is unknown")
+			}
+			if binding.ControllerID == controllerID {
 				ids = append(ids, id)
 			}
 		}
@@ -377,6 +397,11 @@ func (m *Manager) ControlSnapshot(ctx context.Context, controllerID string) (Con
 			return empty, controlReject(http.StatusConflict, "conflict", "an extension intent has a pending operation")
 		}
 	}
+	entries, _ := m.controlCatalog()
+	trust := packages.SourceTrust{Catalog: sdk.Catalog{Version: sdk.CatalogVersion, Packages: entries}, CatalogSHA256: sha, RequiredIDs: slices.Clone(m.requiredIDs), ControllerID: controllerID}
+	if err := packages.VerifySourceSnapshot(m.root, packages.Snapshot{CatalogSHA256: sha, Entries: rows}, trust); err != nil {
+		return empty, controlReject(http.StatusConflict, "stale_state", "source snapshot does not match live state")
+	}
 	m.mu.Lock()
 	afterMutation := m.mutation
 	afterSHA := m.catalogSHA
@@ -583,49 +608,28 @@ func (m *Manager) ControlCache(ctx context.Context, controllerID string, target 
 	if len(packageIDs) != len(expected) {
 		return empty, controlReject(http.StatusBadRequest, "invalid_request", "cache selection must be required plus desired-enabled packages")
 	}
+	selected := make(map[string]bool, len(packageIDs))
 	for _, id := range packageIDs {
-		if !expected[id] {
+		entry, ok := byID[id]
+		if !ok || selected[id] || !expected[id] || !entry.Required && entry.LifecycleController != controllerID {
 			return empty, controlReject(http.StatusBadRequest, "invalid_request", "cache selection must be required plus desired-enabled packages")
 		}
+		selected[id] = true
 	}
 	m.mu.Lock()
-	sha := m.catalogSHA
+	trust := packages.SourceTrust{Catalog: sdk.Catalog{Version: sdk.CatalogVersion, Packages: append([]sdk.CatalogPackage(nil), m.catalog...)}, CatalogSHA256: m.catalogSHA, RequiredIDs: slices.Clone(m.requiredIDs), ControllerID: controllerID}
 	started := m.started
 	m.mu.Unlock()
 	if !started {
 		return empty, controlReject(http.StatusServiceUnavailable, "unavailable", "extension manager is not running")
 	}
-	if source.CatalogSHA256 != sha {
-		return empty, controlReject(http.StatusConflict, "stale_state", "source snapshot catalog does not match live state")
-	}
-	for _, row := range source.Entries {
-		if slices.Contains(m.requiredIDs, row.PackageID) {
-			installation, err := packages.LoadInstallation(m.root, row.PackageID)
-			if err != nil || (row.InstallationID != nil && installation != *row.InstallationID) {
-				return empty, controlReject(http.StatusConflict, "stale_state", "source snapshot does not match live state")
-			}
-			continue
-		}
-		live, err := packages.LoadIntent(m.root, row.PackageID)
-		if err != nil {
-			if row.Generation != "0" {
-				return empty, controlReject(http.StatusConflict, "stale_state", "source snapshot does not match live state")
-			}
-			continue
-		}
-		sourceInstallation := ""
-		if row.InstallationID != nil {
-			sourceInstallation = *row.InstallationID
-		}
-		if live.Generation != row.Generation || live.DesiredEnabled != row.DesiredEnabled || live.InstallationID != sourceInstallation {
-			return empty, controlReject(http.StatusConflict, "stale_state", "source snapshot does not match live state")
-		}
-	}
-	_ = controllerID
 	if err := m.acquireMutation("cache"); err != nil {
 		return empty, controlReject(http.StatusConflict, "conflict", "another extension operation is active")
 	}
 	defer m.releaseMutation()
+	if err := packages.VerifySourceSnapshot(m.root, source, trust); err != nil {
+		return empty, controlReject(http.StatusConflict, "stale_state", "source snapshot does not match live state")
+	}
 	sorted := slices.Clone(packageIDs)
 	slices.Sort(sorted)
 	response := ControlCacheResponse{Cached: make([]ControlCachedPackage, 0, len(sorted))}

@@ -45,11 +45,15 @@ type Descriptor struct {
 type running struct {
 	descriptor     Descriptor
 	client         *plugin.Client
+	process        *os.Process
+	control        interface{ ReadyContext(context.Context) error }
 	transport      *http.Transport
 	runtimeDir     string
 	callbackServer *http.Server
 	installation   string
 }
+
+const runtimeReadyTimeout = 2 * time.Second
 
 type Manager struct {
 	validateManifest       func(sdk.Manifest) error
@@ -89,7 +93,7 @@ type Manager struct {
 	// Guarded by mu; no HTTP, download, process wait, or callback runs
 	// while holding it.
 	mutation       string
-	mutationPhase  string
+	mutationPhase  lifecycleTransition
 	mutationTokens []string
 	controllers    map[string]controllerState
 	// catalogPath configures the release-supplied trusted catalog file;
@@ -347,6 +351,22 @@ func (m *Manager) Start(ctx context.Context) (err error) {
 			m.recoveryBlocked[id] = true
 		}
 	}
+	for _, entry := range m.catalog {
+		if entry.Required || m.recoveryBlocked[entry.ID] {
+			continue
+		}
+		intent, attributionErr := packages.LoadIntent(m.root, entry.ID)
+		if attributionErr == nil && intent.Generation != "0" {
+			attributionErr = packages.BindIntentController(m.root, entry.ID, intent.InstallationID, entry.LifecycleController)
+		}
+		if attributionErr != nil {
+			m.recordFailure(entry.ID, packages.LifecycleErrUnavailable, "controller attribution unavailable; explicit repair is required")
+			if m.recoveryBlocked == nil {
+				m.recoveryBlocked = make(map[string]bool)
+			}
+			m.recoveryBlocked[entry.ID] = true
+		}
+	}
 	// Reject contradictory required intent before acquisition or replacement.
 	for _, id := range m.requiredIDs {
 		intent, err := packages.LoadIntent(m.root, id)
@@ -437,6 +457,12 @@ func (m *Manager) Start(ctx context.Context) (err error) {
 			if err != nil || !intent.DesiredEnabled {
 				continue
 			}
+			m.mu.Lock()
+			snapshot := m.snapshotAdmissionLocked(id)
+			m.mu.Unlock()
+			if !m.attributionAllows(id, snapshot, intent, err) {
+				continue
+			}
 		}
 		manifest, err := sdk.LoadManifest(filepath.Join(m.root, id))
 		if err != nil || manifest.ID != id {
@@ -514,6 +540,9 @@ func (m *Manager) startOne(packageDir, dirName string) (_ *running, err error) {
 			err = errors.New(phase + " failed")
 		}
 	}()
+	if err := packages.ValidateKnownPackageOrigin(m.root, dirName); err != nil {
+		return nil, err
+	}
 	manifest, err := sdk.LoadManifest(packageDir)
 	if err != nil {
 		return nil, err
@@ -623,6 +652,9 @@ func (m *Manager) startOne(packageDir, dirName string) (_ *running, err error) {
 	})
 	defer func() {
 		if err != nil {
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
 			client.Kill()
 		}
 	}()
@@ -635,7 +667,11 @@ func (m *Manager) startOne(packageDir, dirName string) (_ *running, err error) {
 		return nil, err
 	}
 	phase = "control readiness"
-	if err = control.(interface{ Ready() error }).Ready(); err != nil {
+	readyControl := control.(interface{ ReadyContext(context.Context) error })
+	readyCtx, readyCancel := context.WithTimeout(context.Background(), runtimeReadyTimeout)
+	err = readyControl.ReadyContext(readyCtx)
+	readyCancel()
+	if err != nil {
 		return nil, err
 	}
 	phase = "runtime registration"
@@ -687,7 +723,7 @@ func (m *Manager) startOne(packageDir, dirName string) (_ *running, err error) {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}
-	return &running{descriptor: Descriptor{Manifest: manifest, Root: packageDir, InstanceID: instanceID}, client: client, transport: transport, runtimeDir: runtimeDir, callbackServer: callbackServer, installation: installation}, nil
+	return &running{descriptor: Descriptor{Manifest: manifest, Root: packageDir, InstanceID: instanceID}, client: client, process: cmd.Process, control: readyControl, transport: transport, runtimeDir: runtimeDir, callbackServer: callbackServer, installation: installation}, nil
 }
 
 func needsNativeCallback(capabilities []string) bool {
@@ -867,6 +903,11 @@ func (m *Manager) stopOne(id string, item *running, crashed bool) {
 	if item.callbackServer != nil {
 		_ = item.callbackServer.Close()
 	}
+	if crashed && item.process != nil {
+		// go-plugin's graceful Quit RPC has no deadline. An unavailable
+		// child must exit before that cleanup can wait on its control plane.
+		_ = item.process.Kill()
+	}
 	item.client.Kill()
 	_ = os.RemoveAll(item.runtimeDir)
 	if crashed {
@@ -885,7 +926,20 @@ func (m *Manager) observeExit(id string, item *running) {
 			m.mu.Unlock()
 			return
 		}
-		if item.client.Exited() {
+		control := item.control
+		m.mu.Unlock()
+		unavailable := item.client.Exited()
+		if !unavailable {
+			ctx, cancel := context.WithTimeout(context.Background(), runtimeReadyTimeout)
+			unavailable = control.ReadyContext(ctx) != nil
+			cancel()
+		}
+		m.mu.Lock()
+		if m.running[id] != item {
+			m.mu.Unlock()
+			return
+		}
+		if unavailable {
 			m.stopOne(id, item, true)
 			m.mu.Unlock()
 			return

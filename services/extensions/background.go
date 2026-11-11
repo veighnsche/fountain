@@ -42,10 +42,12 @@ type BackgroundAdmission struct {
 	// may issue. Ordinary background operations reject this variant;
 	// browser admissions and lifecycle admissions are never
 	// interchangeable.
-	Lifecycle        bool
-	Call             sdk.LifecycleCall
-	DesiredEnabled   bool
-	CleanupException bool
+	Lifecycle                 bool
+	Call                      sdk.LifecycleCall
+	DesiredEnabled            bool
+	CleanupException          bool
+	lifecyclePurpose          lifecycleAdmissionPurpose
+	cleanupControllerVerified bool
 }
 
 type backgroundRegistry struct {
@@ -181,15 +183,25 @@ func (m *Manager) VerifyBackgroundAdmission(token string) (BackgroundAdmission, 
 	return admission, true
 }
 
-// IssueLifecycleAdmission mints one opaque single-use lifecycle token for
-// a full call tuple. The cleanup exception is chosen by the issuer from
-// internal command state, never from a request flag.
+// IssueLifecycleAdmission mints one opaque lifecycle token for a full call
+// tuple. Cleanup is limited to one check at each authenticated hop; its purpose
+// is chosen by the issuer from internal command state, never a request flag.
 func (m *Manager) IssueLifecycleAdmission(admission *BackgroundAdmission) (string, error) {
 	if admission == nil || !admission.Lifecycle || admission.InstallationID == "" || admission.InstanceID == "" {
 		return "", errors.New("lifecycle admission requires installation, instance and tuple")
 	}
-	admission.Capabilities = map[string]struct{}{}
-	return m.background.issue(admission)
+	issued := *admission
+	issued.Capabilities = map[string]struct{}{}
+	issued.cleanupControllerVerified = false
+	// Compatibility callers retain the original exported flag; production
+	// issuance selects a named purpose and never carries a cleanup boolean.
+	if issued.lifecyclePurpose == "" {
+		issued.lifecyclePurpose = purposeLifecycle
+		if issued.CleanupException {
+			issued.lifecyclePurpose = purposeFailedEnableCleanup
+		}
+	}
+	return m.background.issue(&issued)
 }
 
 // VerifyLifecycleAdmission resolves one lifecycle admission. Ordinary
