@@ -33,6 +33,9 @@ func trustedPrepareFixture(t *testing.T) (string, sdk.Catalog, Snapshot, SourceT
 	tailnetInstallation, err := LoadInstallation(root, "tailnet")
 	require.NoError(t, err)
 	require.NoError(t, BindIntentController(root, "tailnet", tailnetInstallation, "soda"))
+	otherInstallation, err := LoadInstallation(root, "other")
+	require.NoError(t, err)
+	require.NoError(t, BindIntentController(root, "other", otherInstallation, "soda"))
 	return root, target, snapshot, SourceTrust{Catalog: source, CatalogSHA256: snapshot.CatalogSHA256, RequiredIDs: []string{"soda"}, ControllerID: "soda"}
 }
 

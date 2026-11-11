@@ -227,6 +227,7 @@ func TestAdminDisableIdlePackageRedirects(t *testing.T) {
 	setAdminDesiredState(t, root, "sample", false)
 	intent, err := packages.LoadIntent(root, "sample")
 	require.NoError(t, err)
+	require.NoError(t, packages.BindIntentController(root, "sample", intent.InstallationID, ""))
 
 	ctx, recorder := adminTestContext(t, http.MethodPost, "/admin/extensions/disable/sample", true)
 	setAdminOrigin(t, ctx)
