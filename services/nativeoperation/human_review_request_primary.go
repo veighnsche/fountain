@@ -37,19 +37,19 @@ type PreparedHumanReviewRequestResult struct {
 // notifications, claims no owner and activates no journal/transport.
 func ApplyPreparedHumanReviewRequest(ctx context.Context, actorID int64, want sdk.RepositoryReviewRequestSnapshot, requested bool, admit HumanReviewAdmission) (*PreparedHumanReviewRequestResult, error) {
 	p := want.Review
-	refuse := func(reason string) (*PreparedHumanReviewRequestResult, error) {
-		return nil, issues_model.ErrExactReviewRefused{Reason: reason}
+	refuse := func(code issues_model.ExactReviewRefusalCode, reason string) (*PreparedHumanReviewRequestResult, error) {
+		return nil, issues_model.NewExactReviewRefusal(code, reason)
 	}
 	q := sdk.RepositoryReviewRequestSnapshotRequest{Index: p.Index, ReviewerKind: want.ReviewerKind, ReviewerID: want.ReviewerID}
 	if actorID <= 0 || actorID != nativeCommentID(p.ActorID) || admit == nil || !sdk.ValidRepositoryReviewRequestSnapshot(&want, p.RepositoryID, p.ActorID, q) {
-		return refuse("invalid human reviewer target")
+		return refuse(reviewRefusalInvalidHumanReviewerTarget, "invalid human reviewer target")
 	}
 	action := want.RemoveAction
 	if requested {
 		action = want.AddAction
 	}
 	if action.State != "allowed" {
-		return refuse("reviewer action was not admitted")
+		return refuse(reviewRefusalReviewerActionWasNotAdmitted, "reviewer action was not admitted")
 	}
 	if err := requireHumanPrimaryOwner(ctx, p.NativeRevision); err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func ApplyPreparedHumanReviewRequest(ctx context.Context, actorID int64, want sd
 		return nil, err
 	}
 	if !reflect.DeepEqual(beforeRows, freshRows) {
-		return refuse("reviewer history changed")
+		return refuse(reviewRefusalReviewerHistoryChanged, "reviewer history changed")
 	}
 	if err := requireHumanPrimaryOwner(ctx, p.NativeRevision); err != nil {
 		return nil, err
@@ -121,7 +121,7 @@ func ApplyPreparedHumanReviewRequest(ctx context.Context, actorID int64, want sd
 				return nil, err
 			}
 			if comment == nil || comment.ID <= 0 {
-				return refuse("reviewer primary did not record expected history")
+				return refuse(reviewRefusalReviewerPrimaryDidNotRecordExpectedHistory, "reviewer primary did not record expected history")
 			}
 			stored, err := issues_model.GetCommentByID(ctx, comment.ID)
 			if err != nil {
@@ -134,7 +134,7 @@ func ApplyPreparedHumanReviewRequest(ctx context.Context, actorID int64, want sd
 				teamID = selected.Team.ID
 			}
 			if stored.Type != issues_model.CommentTypeReviewRequest || stored.IssueID != issue.ID || stored.PosterID != actor.ID || stored.AssigneeID != userID || stored.AssigneeTeamID != teamID || stored.RemovedAssignee == requested || stored.Content != "" || stored.OriginalAuthorID != 0 || stored.OriginalAuthor != "" {
-				return refuse("reviewer history differs from native effect")
+				return refuse(reviewRefusalReviewerHistoryDiffersFromNativeEffect, "reviewer history differs from native effect")
 			}
 			if requested {
 				created, err = issues_model.GetReviewByID(ctx, stored.ReviewID)
@@ -142,10 +142,10 @@ func ApplyPreparedHumanReviewRequest(ctx context.Context, actorID int64, want sd
 					return nil, err
 				}
 				if created.Type != issues_model.ReviewTypeRequest || created.IssueID != issue.ID || created.ReviewerID != userID || created.ReviewerTeamID != teamID || created.Official != official || created.Content != "" || created.CommitID != "" || created.Stale || created.Dismissed || created.OriginalAuthorID != 0 || created.OriginalAuthor != "" {
-					return refuse("created reviewer request differs")
+					return refuse(reviewRefusalCreatedReviewerRequestDiffers, "created reviewer request differs")
 				}
 			} else if stored.ReviewID != 0 {
-				return refuse("removed reviewer history differs")
+				return refuse(reviewRefusalRemovedReviewerHistoryDiffers, "removed reviewer history differs")
 			}
 			result.HistoryIDs = append(result.HistoryIDs, strconv.FormatInt(stored.ID, 10))
 		}
@@ -194,7 +194,7 @@ func ApplyPreparedHumanReviewRequest(ctx context.Context, actorID int64, want sd
 		return nil, err
 	}
 	if !reflect.DeepEqual(expected, afterRows) || requested != (len(result.After.RequestIDs) > 0) || requested && result.Changed && (len(result.After.RequestIDs) != 1 || result.After.RequestIDs[0] != strconv.FormatInt(created.ID, 10)) || !result.Changed && !reflect.DeepEqual(result.Before, result.After) {
-		return refuse("reviewer primary readback differs")
+		return refuse(reviewRefusalReviewerPrimaryReadbackDiffers, "reviewer primary readback differs")
 	}
 	result.ReviewsBeforeDigest, err = humanReviewRequestDigest(beforeRows)
 	if err != nil {
@@ -218,36 +218,36 @@ func ApplyPreparedHumanReviewRequest(ctx context.Context, actorID int64, want sd
 
 func loadHumanReviewRequestPrimary(ctx context.Context, actorID int64, want sdk.RepositoryReviewRequestSnapshot, requested bool) (*user_model.User, *issues_model.Issue, *HumanReviewRequestSelection, error) {
 	p := want.Review
-	refuse := func(reason string) (*user_model.User, *issues_model.Issue, *HumanReviewRequestSelection, error) {
-		return nil, nil, nil, issues_model.ErrExactReviewRefused{Reason: reason}
+	refuse := func(code issues_model.ExactReviewRefusalCode, reason string) (*user_model.User, *issues_model.Issue, *HumanReviewRequestSelection, error) {
+		return nil, nil, nil, issues_model.NewExactReviewRefusal(code, reason)
 	}
 	actor, err := user_model.GetUserByID(ctx, actorID)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	if !actor.IsAccessAllowed(ctx) {
-		return refuse("reviewer actor is inactive")
+		return refuse(reviewRefusalReviewerActorIsInactive, "reviewer actor is inactive")
 	}
 	issue, err := issues_model.GetIssueByID(ctx, nativeCommentID(p.IssueID))
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	if issue.RepoID != nativeCommentID(p.RepositoryID) || issue.Index != nativeCommentID(p.Index) || !issue.IsPull || issue.IsClosed != p.IsClosed || issue.IsPoster(actorID) != p.IsAuthor {
-		return refuse("reviewer parent changed")
+		return refuse(reviewRefusalReviewerParentChanged, "reviewer parent changed")
 	}
 	if err := issue.LoadPullRequest(ctx); err != nil {
 		return nil, nil, nil, err
 	}
 	pr := issue.PullRequest
 	if pr == nil || pr.ID != nativeCommentID(p.PullID) || pr.BaseRepoID != issue.RepoID || pr.IssueID != issue.ID || pr.Index != issue.Index || pr.BaseBranch != p.BaseBranch || pr.HasMerged != p.HasMerged {
-		return refuse("reviewer pull changed")
+		return refuse(reviewRefusalReviewerPullChanged, "reviewer pull changed")
 	}
 	if err := issue.LoadRepo(ctx); err != nil {
 		return nil, nil, nil, err
 	}
 	repo := issue.Repo
 	if repo.IsArchived || !repo.AllowsPulls(ctx) {
-		return refuse("reviewer workflow unavailable")
+		return refuse(reviewRefusalReviewerWorkflowUnavailable, "reviewer workflow unavailable")
 	}
 	permission, err := access_model.GetUserRepoPermission(ctx, repo, actor)
 	if err != nil {
@@ -255,7 +255,7 @@ func loadHumanReviewRequestPrimary(ctx context.Context, actorID int64, want sdk.
 	}
 	for _, kind := range []unit.Type{unit.TypeCode, unit.TypePullRequests} {
 		if kind.UnitGlobalDisabled() || !repo.UnitEnabled(ctx, kind) || !permission.CanRead(kind) {
-			return refuse("reviewer actor cannot read pull")
+			return refuse(reviewRefusalReviewerActorCannotReadPull, "reviewer actor cannot read pull")
 		}
 	}
 	native, err := git.OpenRepository(ctx, repo.RepoPath())
@@ -265,15 +265,15 @@ func loadHumanReviewRequestPrimary(ctx context.Context, actorID int64, want sdk.
 	defer native.Close()
 	head, err := native.GetRefCommitID(pr.GetGitRefName())
 	if err != nil || head != p.HeadOID {
-		return refuse("reviewer head changed")
+		return refuse(reviewRefusalReviewerHeadChanged, "reviewer head changed")
 	}
 	base, err := native.GetRefCommitID(git.BranchPrefix + p.BaseBranch)
 	if err != nil || base != p.BaseOID {
-		return refuse("reviewer base changed")
+		return refuse(reviewRefusalReviewerBaseChanged, "reviewer base changed")
 	}
 	mergeBase, err := native.GetMergeBaseSimple(base, head)
 	if err != nil || mergeBase != p.MergeBaseOID {
-		return refuse("reviewer merge base changed")
+		return refuse(reviewRefusalReviewerMergeBaseChanged, "reviewer merge base changed")
 	}
 	selected, err := ReadHumanReviewRequestSelection(ctx, actor, issue, want.ReviewerKind, nativeCommentID(want.ReviewerID))
 	if err != nil {
@@ -284,7 +284,7 @@ func loadHumanReviewRequestPrimary(ctx context.Context, actorID int64, want sdk.
 		action = selected.AddAction
 	}
 	if action.State != "allowed" || !reflect.DeepEqual(selected.Requests, want.Requests) {
-		return refuse("reviewer policy or selected requests changed")
+		return refuse(reviewRefusalReviewerPolicyOrSelectedRequestsChanged, "reviewer policy or selected requests changed")
 	}
 	return actor, issue, selected, nil
 }
@@ -313,7 +313,7 @@ func humanReviewRequestHistory(ctx context.Context, issueID int64, kind string, 
 			return nil, ErrHumanReviewRequestTooLarge
 		}
 		if !utf8.ValidString(r.Content) || !utf8.ValidString(r.OriginalAuthor) || !utf8.ValidString(r.CommitID) {
-			return nil, issues_model.ErrExactReviewRefused{Reason: "invalid persisted reviewer history"}
+			return nil, issues_model.NewExactReviewRefusal(reviewRefusalInvalidPersistedReviewerHistory, "invalid persisted reviewer history")
 		}
 		rows = append(rows, humanReviewRequestStored(r))
 	}

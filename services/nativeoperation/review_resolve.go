@@ -76,7 +76,7 @@ func (s *Service) submitThreadResolve(ctx context.Context, decision extensionaut
 		HeadOID:      intent.ThreadResolve.ExpectedHeadOID,
 		PRNumber:     intent.ThreadResolve.PullRequestNumber,
 	}
-	return s.claimConditionalSubmit(ctx, decision, installationID, intent, scope, s.executeThreadResolve)
+	return s.claimBackgroundSubmit(ctx, decision, installationID, intent, scope)
 }
 
 // executeThreadResolve runs the guarded resolution and reconciles its
@@ -85,7 +85,7 @@ func (s *Service) submitThreadResolve(ctx context.Context, decision extensionaut
 // nested resolve attributes to this execution; terminal records and the
 // owner release run detached so a caller disconnect cannot stick the
 // reservation.
-func (s *Service) executeThreadResolve(ctx context.Context, op *nativeoperation_model.Operation, intent *ValidIntent, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
+func (s *Service) executeThreadResolve(ctx context.Context, op *nativeoperation_model.Operation, intent *ValidIntent, _ Scope, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
 	owner := execution.Owner
 	resolve := intent.ThreadResolve
 	// Terminal records and the owner release must complete even when the
@@ -93,23 +93,7 @@ func (s *Service) executeThreadResolve(ctx context.Context, op *nativeoperation_
 	// context so cancellation still stops it.
 	releaseCtx := context.WithoutCancel(ctx)
 	owned := execcontext.NewContext(ctx, execution)
-	refuse := func(reason string) (sdk.OperationRecord, terminalResult, error) {
-		recorded, err := nativeoperation_model.SetTerminal(releaseCtx, op.InstallationID, op.OperationID, nativeoperation_model.TerminalOutcome{
-			EffectState:  nativeoperation_model.EffectNotCommitted,
-			Reason:       reason,
-			Cancellation: nativeoperation_model.CancellationNone,
-		}, owner)
-		if err != nil {
-			return sdk.OperationRecord{}, terminalResult{}, err
-		}
-		return ToRecord(recorded), terminalResult{}, nil
-	}
-	if err := s.revalidateSubmission(owned, op); err != nil {
-		if errors.Is(err, ErrAuthorityLost) {
-			return refuse(nativeoperation_model.ReasonAuthorityLost)
-		}
-		return sdk.OperationRecord{}, terminalResult{}, err
-	}
+	refuse := conditionalRefusal(ctx, op, execution)
 	repository, err := repo_model.GetRepositoryByID(owned, op.RepositoryID)
 	if err != nil {
 		return refuse(nativeoperation_model.ReasonNativeRefused)
@@ -190,6 +174,9 @@ func (s *Service) executeThreadResolve(ctx context.Context, op *nativeoperation_
 	// cancellation and expiry on the same operation row. Re-resolution
 	// of an already-resolved root is stable: no error, no ownership
 	// change, and the receipt replays exactly.
+	if err := TestCrashBarrier(CrashPointThreadResolveBeforePrimary); err != nil {
+		return sdk.OperationRecord{}, terminalResult{}, err
+	}
 	committed, err := nativeoperation_model.CommitReviewSubmitPrimary(owned, op.InstallationID, op.OperationID, owner, s.clock(), func(tx context.Context) (string, error) {
 		if err := s.revalidateSubmission(tx, op); err != nil {
 			return "", err
@@ -224,6 +211,9 @@ func (s *Service) executeThreadResolve(ctx context.Context, op *nativeoperation_
 		default:
 			return refuse(nativeoperation_model.ReasonNativeRefused)
 		}
+	}
+	if err := TestCrashBarrier(CrashPointThreadResolveAfterPrimary); err != nil {
+		return sdk.OperationRecord{}, terminalResult{}, err
 	}
 	op = committed
 	return s.finalizeThreadResolve(releaseCtx, op, execution, nativeoperation_model.CompletionComplete)

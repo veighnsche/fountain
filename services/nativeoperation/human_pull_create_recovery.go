@@ -15,6 +15,7 @@ import (
 	repo_model "forgejo.org/models/repo"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
+	pull_service "forgejo.org/services/pull"
 
 	"github.com/google/uuid"
 )
@@ -150,10 +151,5 @@ func humanPullCreateRecoveryHistory(ctx context.Context, pr *issues_model.PullRe
 	if err != nil || len(comparison.Commits) == 0 {
 		return "", err
 	}
-	data := issues_model.PushActionContent{IsForcePush: false, CommitIDs: make([]string, 0, len(comparison.Commits))}
-	for i := len(comparison.Commits) - 1; i >= 0; i-- {
-		data.CommitIDs = append(data.CommitIDs, comparison.Commits[i].ID.String())
-	}
-	raw, err := json.Marshal(data)
-	return string(raw), err
+	return pull_service.PullRequestCreationHistory(comparison.Commits)
 }

@@ -21,7 +21,6 @@ import (
 	"forgejo.org/modules/container"
 	"forgejo.org/modules/git"
 	"forgejo.org/modules/gitrepo"
-	"forgejo.org/modules/json"
 	"forgejo.org/modules/log"
 	nativeoperation "forgejo.org/modules/nativeoperation"
 	repo_module "forgejo.org/modules/repository"
@@ -189,13 +188,7 @@ func FinishPullRequestCreation(ctx context.Context, repo *repo_model.Repository,
 		return nil, nil
 	}
 
-	data := issues_model.PushActionContent{IsForcePush: false}
-	data.CommitIDs = make([]string, 0, len(compareInfo.Commits))
-	for i := len(compareInfo.Commits) - 1; i >= 0; i-- {
-		data.CommitIDs = append(data.CommitIDs, compareInfo.Commits[i].ID.String())
-	}
-
-	dataJSON, err := json.Marshal(data)
+	history, err := PullRequestCreationHistory(compareInfo.Commits)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +199,7 @@ func FinishPullRequestCreation(ctx context.Context, repo *repo_model.Repository,
 		Repo:        repo,
 		Issue:       pr.Issue,
 		IsForcePush: false,
-		Content:     string(dataJSON),
+		Content:     history,
 	}
 
 	if _, err = issues_model.CreateComment(ctx, ops); err != nil {

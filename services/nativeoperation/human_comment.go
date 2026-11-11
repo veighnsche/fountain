@@ -8,10 +8,8 @@ import (
 	"encoding/json" //nolint:depguard // Persisted native intent and receipt.
 	"errors"
 	"strconv"
-	"time"
 
 	sdk "forgejo.org/extension-sdk"
-	extensionauth_model "forgejo.org/models/extensionauth"
 	issues_model "forgejo.org/models/issues"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	access_model "forgejo.org/models/perm/access"
@@ -19,8 +17,6 @@ import (
 	user_model "forgejo.org/models/user"
 	execcontext "forgejo.org/modules/nativeoperation"
 	notify_service "forgejo.org/services/notify"
-
-	"github.com/google/uuid"
 )
 
 const CrashPointHumanCommentBeforePrimary = "human-comment-before-primary"
@@ -56,32 +52,13 @@ func humanCommentIntent(q sdk.HumanCommentRequest) (*ValidIntent, error) {
 // credential or enrollment. The native caller derives installation/actor from
 // its live admission. This service is not a public route or a background kind.
 func (s *Service) SubmitHumanComment(ctx context.Context, installation string, q sdk.HumanCommentRequest, admit HumanCommentAdmission) (sdk.OperationRecord, error) {
-	installationID, err := uuid.Parse(installation)
-	if err != nil || installationID.String() != installation || admit == nil {
-		return sdk.OperationRecord{}, ErrInvalidIntent
+	submission, record, err := s.beginHumanSubmission(ctx, installation, admit, func() (*ValidIntent, error) { return humanCommentIntent(q) })
+	if submission == nil {
+		return record, err
 	}
-	intent, err := humanCommentIntent(q)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if ctx.Err() != nil {
-		return sdk.OperationRecord{}, ctx.Err()
-	}
-	if err := admit(ctx); err != nil {
-		return sdk.OperationRecord{}, ErrAuthorityLost
-	}
-	existing, err := nativeoperation_model.LookupOperation(ctx, installation, q.OperationID)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if existing != nil {
-		return s.reconcileExisting(existing, intent)
-	}
-	if q.NotAfter <= s.clock() || q.NotAfter > s.clock()+int64(MaxOperationLifetime/time.Second) {
-		return sdk.OperationRecord{}, ErrInvalidIntent
-	}
+	intent := submission.intent
 	scope := Scope{Kind: nativeoperation_model.OwnerConditional, RepositoryID: intent.RepositoryID, IssueID: nativeCommentID(q.Expected.IssueID)}
-	return s.claimConditionalSubmit(ctx, extensionauth_model.SubmissionDecision{ActorID: intent.ActorID}, installation, intent, scope,
+	return submission.run(scope,
 		func(ctx context.Context, op *nativeoperation_model.Operation, _ *ValidIntent, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
 			return s.executeHumanComment(ctx, op, q, admit, execution)
 		})

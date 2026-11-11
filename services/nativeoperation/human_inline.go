@@ -7,18 +7,14 @@ import (
 	"context"
 	"encoding/json" //nolint:depguard // Exact persisted intent and native receipt.
 	"errors"
-	"time"
 
 	sdk "forgejo.org/extension-sdk"
-	extensionauth_model "forgejo.org/models/extensionauth"
 	issues_model "forgejo.org/models/issues"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	user_model "forgejo.org/models/user"
 	"forgejo.org/modules/git"
 	execcontext "forgejo.org/modules/nativeoperation"
 	pull_service "forgejo.org/services/pull"
-
-	"github.com/google/uuid"
 )
 
 const CrashPointHumanInlineBeforePrimary = "human-inline-before-primary"
@@ -39,32 +35,13 @@ func humanInlineIntent(q sdk.HumanInlineRequest) (*ValidIntent, error) {
 // exact journal receipt. The caller supplies current human request admission;
 // no background binding or credential can authorize this operation.
 func (s *Service) SubmitHumanInline(ctx context.Context, installation string, q sdk.HumanInlineRequest, admit HumanReviewAdmission) (sdk.OperationRecord, error) {
-	id, err := uuid.Parse(installation)
-	if err != nil || id.String() != installation || admit == nil {
-		return sdk.OperationRecord{}, ErrInvalidIntent
+	submission, record, err := s.beginHumanSubmission(ctx, installation, admit, func() (*ValidIntent, error) { return humanInlineIntent(q) })
+	if submission == nil {
+		return record, err
 	}
-	intent, err := humanInlineIntent(q)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if admit(ctx) != nil {
-		return sdk.OperationRecord{}, ErrAuthorityLost
-	}
-	existing, err := nativeoperation_model.LookupOperation(ctx, installation, q.OperationID)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if existing != nil {
-		return s.reconcileExisting(existing, intent)
-	}
-	if q.NotAfter <= s.clock() || q.NotAfter > s.clock()+int64(MaxOperationLifetime/time.Second) {
-		return sdk.OperationRecord{}, ErrInvalidIntent
-	}
+	intent := submission.intent
 	scope := Scope{Kind: nativeoperation_model.OwnerConditional, RepositoryID: intent.RepositoryID, IssueID: nativeCommentID(q.Expected.Review.IssueID)}
-	return s.claimConditionalSubmit(ctx, extensionauth_model.SubmissionDecision{ActorID: intent.ActorID}, installation, intent, scope, func(ctx context.Context, op *nativeoperation_model.Operation, _ *ValidIntent, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
+	return submission.run(scope, func(ctx context.Context, op *nativeoperation_model.Operation, _ *ValidIntent, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
 		return s.executeHumanInline(ctx, op, q, admit, execution)
 	})
 }
@@ -112,15 +89,15 @@ func (s *Service) executeHumanInline(ctx context.Context, op *nativeoperation_mo
 		defer native.Close()
 		head, err := native.GetRefCommitID(issue.PullRequest.GetGitRefName())
 		if err != nil {
-			return "", issues_model.ErrExactReviewRefused{Reason: "head changed"}
+			return "", issues_model.NewExactReviewRefusal(issues_model.ReviewRefusalHeadChanged, "head changed")
 		}
 		base, err := native.GetRefCommitID(git.BranchPrefix + p.BaseBranch)
 		if err != nil {
-			return "", issues_model.ErrExactReviewRefused{Reason: "base changed"}
+			return "", issues_model.NewExactReviewRefusal(issues_model.ReviewRefusalBaseChanged, "base changed")
 		}
 		mergeBase, err := native.GetMergeBaseSimple(base, head)
 		if err != nil {
-			return "", issues_model.ErrExactReviewRefused{Reason: "merge base changed"}
+			return "", issues_model.NewExactReviewRefusal(issues_model.ReviewRefusalMergeBaseChanged, "merge base changed")
 		}
 		a := q.Expected.Anchor
 		anchor := issues_model.CodeCommentAnchor{Base: a.Base, Head: a.Head, Path: a.Path, Side: a.Side, Scope: a.Scope, StartLine: a.StartLine, EndLine: a.EndLine}
@@ -156,20 +133,7 @@ func (s *Service) executeHumanInline(ctx context.Context, op *nativeoperation_mo
 		case errors.Is(err, ErrAuthorityLost):
 			return refuse(nativeoperation_model.ReasonAuthorityLost)
 		case errors.As(err, &deterministic):
-			reason := nativeoperation_model.ReasonNativeRefused
-			switch deterministic.Reason {
-			case "head changed":
-				reason = nativeoperation_model.ReasonStaleHead
-			case "base changed", "merge base changed":
-				reason = nativeoperation_model.ReasonStaleBaseOrResult
-			case "pending draft changed":
-				reason = nativeoperation_model.ReasonPendingReviewExists
-			case "reviewer is inactive", "reviewer cannot read this pull request", "reviewer is blocked", "review workflow unavailable":
-				reason = nativeoperation_model.ReasonAuthorityLost
-			case "human review parent changed", "human review pull changed":
-				reason = nativeoperation_model.ReasonPRMismatch
-			}
-			return refuse(reason)
+			return refuse(mapHumanInlineRefusal(deterministic))
 		case issues_model.IsContentEmptyErr(err):
 			return refuse(nativeoperation_model.ReasonNativeRefused)
 		case errors.Is(err, nativeoperation_model.ErrOperationExpired):

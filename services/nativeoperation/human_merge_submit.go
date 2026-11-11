@@ -5,18 +5,14 @@ package nativeoperation
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	sdk "forgejo.org/extension-sdk"
 	"forgejo.org/models/db"
-	extensionauth_model "forgejo.org/models/extensionauth"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	repo_model "forgejo.org/models/repo"
 	execcontext "forgejo.org/modules/nativeoperation"
 	repo_module "forgejo.org/modules/repository"
-
-	"github.com/google/uuid"
 )
 
 const (
@@ -32,40 +28,14 @@ const (
 // dispatch is supplied by the repository service to join its native push engine
 // without an import cycle; all event facts still come from the proved receipt.
 func (s *Service) SubmitHumanMerge(ctx context.Context, installation string, q sdk.HumanMergeRequest, admit HumanReviewAdmission, dispatch func(context.Context, *repo_model.Repository, []*repo_module.PushUpdateOptions) error) (sdk.OperationRecord, error) {
-	id, err := uuid.Parse(installation)
-	if err != nil || id.String() != installation || admit == nil || dispatch == nil || db.InTransaction(ctx) {
+	if dispatch == nil || db.InTransaction(ctx) {
 		return sdk.OperationRecord{}, ErrInvalidIntent
 	}
-	intent, err := humanMergeIntent(q)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if admit(ctx) != nil {
-		return sdk.OperationRecord{}, ErrAuthorityLost
-	}
-	finish := func(record sdk.OperationRecord, err error) (sdk.OperationRecord, error) {
-		if err == nil || errors.Is(err, ErrCancelledBeforeSubmit) {
-			if ctx.Err() != nil || admit(ctx) != nil {
-				return sdk.OperationRecord{}, ErrAuthorityLost
-			}
-		}
+	submission, record, err := s.beginHumanSubmission(ctx, installation, admit, func() (*ValidIntent, error) { return humanMergeIntent(q) })
+	if submission == nil {
 		return record, err
 	}
-	existing, err := nativeoperation_model.LookupOperation(ctx, installation, q.OperationID)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if existing != nil {
-		record, err := s.reconcileExisting(existing, intent)
-		return finish(record, err)
-	}
-	if q.NotAfter <= s.clock() || q.NotAfter > s.clock()+int64(MaxOperationLifetime/time.Second) {
-		return sdk.OperationRecord{}, ErrInvalidIntent
-	}
-	record, err := s.claimConditionalSubmit(ctx, extensionauth_model.SubmissionDecision{ActorID: intent.ActorID}, installation, intent, humanMergeCaptureScope(q), func(ctx context.Context, _ *nativeoperation_model.Operation, _ *ValidIntent, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
+	return submission.run(humanMergeCaptureScope(q), func(ctx context.Context, _ *nativeoperation_model.Operation, _ *ValidIntent, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
 		owned := execcontext.NewContext(ctx, execution)
 		settle := context.WithoutCancel(owned)
 		live, cancel := context.WithDeadline(owned, time.Unix(q.NotAfter, 0))
@@ -128,7 +98,6 @@ func (s *Service) SubmitHumanMerge(ctx context.Context, installation string, q s
 		record, err = s.CompleteHumanMerge(settle, installation, q, stage)
 		return record, terminalResult{}, err
 	})
-	return finish(record, err)
 }
 
 // Preparation is local-only. Before any result is bound, this exact scope can

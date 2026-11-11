@@ -9,7 +9,6 @@ import (
 	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
 	"errors"
 	"io"
-	"os"
 
 	sdk "forgejo.org/extension-sdk"
 	extensionauth_model "forgejo.org/models/extensionauth"
@@ -85,86 +84,25 @@ func (s *Service) submitLifecycleReview(ctx context.Context, decision extensiona
 	if intent.LifecycleReview == nil {
 		return sdk.OperationRecord{}, ErrInvalidIntent
 	}
-	dir, err := s.execDir()
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	capabilityPath, secret, err := execcontext.WriteCapabilityFile(dir)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	retire := func() { _ = os.Remove(capabilityPath) }
-	owner := conditionalOwner(installationID, intent.OperationID)
 	scope := Scope{
 		Kind:                 nativeoperation_model.OwnerConditional,
 		RepositoryID:         intent.RepositoryID,
 		IssueID:              intent.LifecycleReview.IssueID,
 		LifecycleReviewerIDs: intent.LifecycleReview.ReviewerIDs,
 	}
-	encoded, err := encodeScope(scope)
-	if err != nil {
-		retire()
-		return sdk.OperationRecord{}, err
-	}
-	op := operationForSubmission(decision, installationID, intent)
-	claimed, err := nativeoperation_model.ClaimConditional(ctx, op, owner, encoded, execcontext.Verifier(secret))
-	if err != nil {
-		retire()
-		if errors.Is(err, nativeoperation_model.ErrBusy) {
-			return sdk.OperationRecord{}, ErrBusy
-		}
-		if errors.Is(err, nativeoperation_model.ErrInhibited) {
-			return sdk.OperationRecord{}, err
-		}
-		if errors.Is(err, nativeoperation_model.ErrStaleRevision) {
-			return s.recordStaleRevision(ctx, op)
-		}
-		existing, lookupErr := nativeoperation_model.LookupOperation(ctx, installationID, intent.OperationID)
-		if lookupErr != nil {
-			return sdk.OperationRecord{}, lookupErr
-		}
-		if existing != nil {
-			return s.reconcileSubmission(existing, decision, intent)
-		}
-		return sdk.OperationRecord{}, err
-	}
-	execution := &execcontext.Execution{Owner: owner, Generation: claimed.Generation, CapabilityPath: capabilityPath}
-	record, terminal, err := s.executeLifecycleReview(ctx, op, intent, execution)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if !terminal.retain {
-		retire()
-	}
-	return record, nil
+	return s.claimBackgroundSubmit(ctx, decision, installationID, intent, scope)
 }
 
 // executeLifecycleReview runs the guarded reviewer-request write. All
 // native work runs on the owned context; terminal records and the owner
 // release run detached so a caller disconnect cannot stick the
 // reservation.
-func (s *Service) executeLifecycleReview(ctx context.Context, op *nativeoperation_model.Operation, intent *ValidIntent, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
+func (s *Service) executeLifecycleReview(ctx context.Context, op *nativeoperation_model.Operation, intent *ValidIntent, _ Scope, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
 	owner := execution.Owner
 	submit := intent.LifecycleReview
 	releaseCtx := context.WithoutCancel(ctx)
 	owned := execcontext.NewContext(ctx, execution)
-	refuse := func(reason string) (sdk.OperationRecord, terminalResult, error) {
-		recorded, err := nativeoperation_model.SetTerminal(releaseCtx, op.InstallationID, op.OperationID, nativeoperation_model.TerminalOutcome{
-			EffectState:  nativeoperation_model.EffectNotCommitted,
-			Reason:       reason,
-			Cancellation: nativeoperation_model.CancellationNone,
-		}, owner)
-		if err != nil {
-			return sdk.OperationRecord{}, terminalResult{}, err
-		}
-		return ToRecord(recorded), terminalResult{}, nil
-	}
-	if err := s.revalidateSubmission(owned, op); err != nil {
-		if errors.Is(err, ErrAuthorityLost) {
-			return refuse(nativeoperation_model.ReasonAuthorityLost)
-		}
-		return sdk.OperationRecord{}, terminalResult{}, err
-	}
+	refuse := conditionalRefusal(ctx, op, execution)
 	repository, err := repo_model.GetRepositoryByID(owned, op.RepositoryID)
 	if err != nil {
 		return refuse(nativeoperation_model.ReasonNativeRefused)
@@ -198,6 +136,9 @@ func (s *Service) executeLifecycleReview(ctx context.Context, op *nativeoperatio
 			return refuse(nativeoperation_model.ReasonNativeRefused)
 		}
 		reviewers = append(reviewers, reviewer)
+	}
+	if err := TestCrashBarrier(CrashPointLifecycleReviewBeforePrimary); err != nil {
+		return sdk.OperationRecord{}, terminalResult{}, err
 	}
 	committed, err := nativeoperation_model.CommitLifecycleReviewPrimary(owned, op.InstallationID, op.OperationID, owner, s.clock(), func(tx context.Context) (string, error) {
 		if err := s.revalidateSubmission(tx, op); err != nil {
@@ -237,6 +178,9 @@ func (s *Service) executeLifecycleReview(ctx context.Context, op *nativeoperatio
 			}
 			return refuse(nativeoperation_model.ReasonNativeRefused)
 		}
+	}
+	if err := TestCrashBarrier(CrashPointLifecycleReviewAfterPrimary); err != nil {
+		return sdk.OperationRecord{}, terminalResult{}, err
 	}
 	op = committed
 	recorded, err := nativeoperation_model.SetCompletionAndRelease(releaseCtx, op.InstallationID, op.OperationID, owner, execution.Generation, nativeoperation_model.CompletionComplete)

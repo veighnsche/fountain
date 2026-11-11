@@ -43,9 +43,11 @@ func SubmitPreparedHumanReview(ctx context.Context, reviewType ReviewType, conte
 	if err := validatePreparedHumanReviewTarget(ctx, want); err != nil {
 		return nil, nil, err
 	}
-	refuse := func(reason string) (*Review, *Comment, error) { return nil, nil, ErrExactReviewRefused{Reason: reason} }
+	refuse := func(code ExactReviewRefusalCode, reason string) (*Review, *Comment, error) {
+		return nil, nil, NewExactReviewRefusal(code, reason)
+	}
 	if len(content) > MaxPreparedHumanReviewBodyBytes || !utf8.ValidString(content) || strings.ContainsRune(content, 0) {
-		return refuse("invalid human review body")
+		return refuse(ReviewRefusalInvalidHumanReviewBody, "invalid human review body")
 	}
 	switch reviewType {
 	case ReviewTypeReject:
@@ -54,7 +56,7 @@ func SubmitPreparedHumanReview(ctx context.Context, reviewType ReviewType, conte
 		}
 	case ReviewTypePending, ReviewTypeApprove, ReviewTypeComment:
 	default:
-		return refuse("invalid human review event")
+		return refuse(ReviewRefusalInvalidHumanReviewEvent, "invalid human review event")
 	}
 	ctx, committer, err := db.TxContext(ctx)
 	if err != nil {
@@ -66,7 +68,7 @@ func SubmitPreparedHumanReview(ctx context.Context, reviewType ReviewType, conte
 		return nil, nil, err
 	}
 	if want.IsAuthor && (reviewType == ReviewTypeApprove || reviewType == ReviewTypeReject) {
-		return refuse("cannot review your own pull request")
+		return refuse(ReviewRefusalCannotReviewYourOwnPullRequest, "cannot review your own pull request")
 	}
 	var review *Review
 	var comment *Comment
@@ -107,52 +109,52 @@ func validatePreparedHumanReviewTarget(ctx context.Context, want PreparedHumanRe
 	if execution == nil || held.Owner == "" || execution.Owner != held.Owner || execution.Generation != held.Generation {
 		return nativeoperation_model.ErrBusy
 	}
-	refuse := func(reason string) error { return ErrExactReviewRefused{Reason: reason} }
+	refuse := func(code ExactReviewRefusalCode, reason string) error { return NewExactReviewRefusal(code, reason) }
 	if want.RepositoryID <= 0 || want.ReviewerID <= 0 || want.PullID <= 0 || want.IssueID <= 0 || want.Index <= 0 || want.BaseBranch == "" || want.PendingReviewID < 0 || want.PendingReviewID == 0 && want.PendingCommitID != "" {
-		return refuse("invalid human review target")
+		return refuse(ReviewRefusalInvalidHumanReviewTarget, "invalid human review target")
 	}
 	for _, oid := range []string{want.HeadOID, want.BaseOID, want.MergeBaseOID, want.CurrentHeadOID, want.CurrentBaseOID, want.CurrentMergeBaseOID} {
 		if !validFullOID(oid) || oid != strings.ToLower(oid) {
-			return refuse("invalid object id")
+			return refuse(ReviewRefusalInvalidObjectID, "invalid object id")
 		}
 	}
 	if want.HeadOID != want.CurrentHeadOID {
-		return refuse("head changed")
+		return refuse(ReviewRefusalHeadChanged, "head changed")
 	}
 	if want.BaseOID != want.CurrentBaseOID {
-		return refuse("base changed")
+		return refuse(ReviewRefusalBaseChanged, "base changed")
 	}
 	if want.MergeBaseOID != want.CurrentMergeBaseOID {
-		return refuse("merge base changed")
+		return refuse(ReviewRefusalMergeBaseChanged, "merge base changed")
 	}
 	return nil
 }
 
 // Caller already owns a joined transaction and exact native ownership.
 func loadPreparedHumanReview(ctx context.Context, want PreparedHumanReviewTarget) (*user_model.User, *Issue, *Review, error) {
-	refuse := func(reason string) (*user_model.User, *Issue, *Review, error) {
-		return nil, nil, nil, ErrExactReviewRefused{Reason: reason}
+	refuse := func(code ExactReviewRefusalCode, reason string) (*user_model.User, *Issue, *Review, error) {
+		return nil, nil, nil, NewExactReviewRefusal(code, reason)
 	}
 	actor, err := user_model.GetUserByID(ctx, want.ReviewerID)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	if !actor.IsAccessAllowed(ctx) {
-		return refuse("reviewer is inactive")
+		return refuse(ReviewRefusalReviewerIsInactive, "reviewer is inactive")
 	}
 	issue, err := GetIssueByID(ctx, want.IssueID)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	if issue.RepoID != want.RepositoryID || issue.Index != want.Index || !issue.IsPull || issue.IsClosed != want.IsClosed || issue.IsPoster(actor.ID) != want.IsAuthor {
-		return refuse("human review parent changed")
+		return refuse(ReviewRefusalHumanReviewParentChanged, "human review parent changed")
 	}
 	if err := issue.LoadPullRequest(ctx); err != nil {
 		return nil, nil, nil, err
 	}
 	pr := issue.PullRequest
 	if pr == nil || pr.ID != want.PullID || pr.IssueID != issue.ID || pr.BaseRepoID != want.RepositoryID || pr.Index != want.Index || pr.BaseBranch != want.BaseBranch || pr.HasMerged != want.HasMerged {
-		return refuse("human review pull changed")
+		return refuse(ReviewRefusalHumanReviewPullChanged, "human review pull changed")
 	}
 	if err := issue.LoadRepo(ctx); err != nil {
 		return nil, nil, nil, err
@@ -162,7 +164,7 @@ func loadPreparedHumanReview(ctx context.Context, want PreparedHumanReviewTarget
 		return nil, nil, nil, err
 	}
 	if repo.IsArchived || !repo.AllowsPulls(ctx) {
-		return refuse("review workflow unavailable")
+		return refuse(ReviewRefusalReviewWorkflowUnavailable, "review workflow unavailable")
 	}
 	permission, err := access_model.GetUserRepoPermission(ctx, repo, actor)
 	if err != nil {
@@ -170,29 +172,29 @@ func loadPreparedHumanReview(ctx context.Context, want PreparedHumanReviewTarget
 	}
 	for _, kind := range []unit.Type{unit.TypeCode, unit.TypePullRequests} {
 		if kind.UnitGlobalDisabled() || !repo.UnitEnabled(ctx, kind) || !permission.CanRead(kind) {
-			return refuse("reviewer cannot read this pull request")
+			return refuse(ReviewRefusalReviewerCannotReadThisPullRequest, "reviewer cannot read this pull request")
 		}
 	}
 	if user_model.IsBlockedMultiple(ctx, []int64{repo.OwnerID, issue.PosterID}, actor.ID) {
-		return refuse("reviewer is blocked")
+		return refuse(ReviewRefusalReviewerIsBlocked, "reviewer is blocked")
 	}
 	pending, err := GetCurrentReview(ctx, actor, issue)
 	if err != nil && !IsErrReviewNotExist(err) {
 		return nil, nil, nil, err
 	}
 	if pending == nil && want.PendingReviewID != 0 || pending != nil && (pending.ID != want.PendingReviewID || pending.CommitID != want.PendingCommitID) {
-		return refuse("pending draft changed")
+		return refuse(ReviewRefusalPendingDraftChanged, "pending draft changed")
 	}
 	if pending != nil {
 		if pending.ReviewerID != actor.ID || pending.ReviewerTeamID != 0 || pending.OriginalAuthorID != 0 || pending.Official || pending.Dismissed {
-			return refuse("pending draft identity differs")
+			return refuse(ReviewRefusalPendingDraftIdentityDiffers, "pending draft identity differs")
 		}
 		if err := pending.LoadCodeComments(ctx); err != nil {
 			return nil, nil, nil, err
 		}
 		for _, comment := range pending.CodeComments.SortedList() {
 			if comment.IssueID != issue.ID || comment.ReviewID != pending.ID || comment.PosterID != actor.ID || comment.OriginalAuthorID != 0 {
-				return refuse("pending draft comment identity differs")
+				return refuse(ReviewRefusalPendingDraftCommentIdentityDiffers, "pending draft comment identity differs")
 			}
 		}
 	}

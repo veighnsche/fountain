@@ -9,7 +9,6 @@ import (
 	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
 	"errors"
 	"io"
-	"os"
 	"strings"
 
 	sdk "forgejo.org/extension-sdk"
@@ -147,50 +146,6 @@ func reviewSubmitType(event string) issues_model.ReviewType {
 // sdk.ReviewSubmitReceipt, never a divergent duplicate.
 type ReviewSubmitReceipt = sdk.ReviewSubmitReceipt
 
-// mapExactReviewRefusal maps a deterministic exact-review refusal to its
-// bounded operation reason. Changed candidates refuse as stale; identity,
-// source, target and lifecycle mismatches refuse as PR mismatches; denied
-// native review eligibility refuses as authority lost; a conflicting pending
-// draft refuses as pending. Anything unrecognized fails closed as a native
-// refusal.
-func mapExactReviewRefusal(err error) string {
-	var refused issues_model.ErrExactReviewRefused
-	if !errors.As(err, &refused) {
-		if issues_model.IsContentEmptyErr(err) {
-			return nativeoperation_model.ReasonNativeRefused
-		}
-		return nativeoperation_model.ReasonNativeRefused
-	}
-	switch refused.Reason {
-	case "head changed":
-		return nativeoperation_model.ReasonStaleHead
-	case "base changed":
-		return nativeoperation_model.ReasonStaleBaseOrResult
-	case "pending draft exists":
-		return nativeoperation_model.ReasonPendingReviewExists
-	case "cannot review your own pull request",
-		"reviewer is blocked",
-		"reviewer cannot read this pull request":
-		return nativeoperation_model.ReasonAuthorityLost
-	case "invalid object id",
-		"commit must equal the expected head",
-		"unsupported final review type",
-		"invalid inline comment",
-		"invalid inline anchor",
-		"binary-only inline anchor",
-		"duplicate inline anchor",
-		"duplicate inline comment key",
-		"too many inline comments",
-		"merge base unavailable":
-		// Unreachable through the guarded path: intent parsing or the
-		// diff-membership proof already rejects these. Fail closed as
-		// a native refusal rather than a PR mismatch.
-		return nativeoperation_model.ReasonNativeRefused
-	default:
-		return nativeoperation_model.ReasonPRMismatch
-	}
-}
-
 // submitReviewSubmit claims the operation ID and reservation, verifies the
 // exact refs and native authority under the held owner, commits the primary
 // review records with the operation receipt in one SQL transaction, and
@@ -213,67 +168,7 @@ func (s *Service) submitReviewSubmit(ctx context.Context, decision extensionauth
 		HeadOID:      intent.ReviewSubmit.ExpectedHeadOID,
 		PRNumber:     intent.ReviewSubmit.PullRequestNumber,
 	}
-	return s.claimConditionalSubmit(ctx, decision, installationID, intent, scope, s.executeReviewSubmit)
-}
-
-// claimConditionalSubmit runs the shared conditional-submit prologue for
-// review-submit and thread-resolve: capability file, conditional owner,
-// scope claim with busy/inhibited/stale/lookup/reconcile handling, then
-// the caller-selected bounded terminal executor with retain-on-infraerror
-// retirement. The kind-specific Scope is built by the caller and the
-// executor is fixed per caller; there is no kind fallback or dispatch.
-func (s *Service) claimConditionalSubmit(ctx context.Context, decision extensionauth_model.SubmissionDecision, installationID string, intent *ValidIntent, scope Scope, execute func(context.Context, *nativeoperation_model.Operation, *ValidIntent, *execcontext.Execution) (sdk.OperationRecord, terminalResult, error)) (sdk.OperationRecord, error) {
-	dir, err := s.execDir()
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	capabilityPath, secret, err := execcontext.WriteCapabilityFile(dir)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	retire := func() { _ = os.Remove(capabilityPath) }
-	owner := conditionalOwner(installationID, intent.OperationID)
-	encoded, err := encodeScope(scope)
-	if err != nil {
-		retire()
-		return sdk.OperationRecord{}, err
-	}
-	op := operationForSubmission(decision, installationID, intent)
-	claimed, err := nativeoperation_model.ClaimConditional(ctx, op, owner, encoded, execcontext.Verifier(secret))
-	if err != nil {
-		retire()
-		if errors.Is(err, nativeoperation_model.ErrBusy) {
-			return sdk.OperationRecord{}, ErrBusy
-		}
-		if errors.Is(err, nativeoperation_model.ErrInhibited) {
-			return sdk.OperationRecord{}, err
-		}
-		if errors.Is(err, nativeoperation_model.ErrStaleRevision) {
-			return s.recordStaleRevision(ctx, op)
-		}
-		// A concurrent identical submit may have won the insert; reread
-		// and reconcile rather than launching a second execution.
-		existing, lookupErr := nativeoperation_model.LookupOperation(ctx, installationID, intent.OperationID)
-		if lookupErr != nil {
-			return sdk.OperationRecord{}, lookupErr
-		}
-		if existing != nil {
-			return s.reconcileSubmission(existing, decision, intent)
-		}
-		return sdk.OperationRecord{}, err
-	}
-	execution := &execcontext.Execution{Owner: owner, Generation: claimed.Generation, CapabilityPath: capabilityPath}
-	record, terminal, err := execute(ctx, op, intent, execution)
-	if err != nil {
-		// Infrastructure failure before reconciliation: fail closed with
-		// the owner held and the capability kept for later recovery.
-		return sdk.OperationRecord{}, err
-	}
-	if !terminal.retain {
-		// The terminal record already released the owner; retire the file.
-		retire()
-	}
-	return record, nil
+	return s.claimBackgroundSubmit(ctx, decision, installationID, intent, scope)
 }
 
 // executeReviewSubmit runs the guarded submission and reconciles its result.
@@ -282,7 +177,7 @@ func (s *Service) claimConditionalSubmit(ctx context.Context, decision extension
 // participating writers attribute to this execution; terminal records and
 // the owner release run detached so a caller disconnect cannot stick the
 // reservation.
-func (s *Service) executeReviewSubmit(ctx context.Context, op *nativeoperation_model.Operation, intent *ValidIntent, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
+func (s *Service) executeReviewSubmit(ctx context.Context, op *nativeoperation_model.Operation, intent *ValidIntent, _ Scope, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
 	owner := execution.Owner
 	submit := intent.ReviewSubmit
 	// Terminal records and the owner release must complete even when the
@@ -290,23 +185,7 @@ func (s *Service) executeReviewSubmit(ctx context.Context, op *nativeoperation_m
 	// context so cancellation still stops it.
 	releaseCtx := context.WithoutCancel(ctx)
 	owned := execcontext.NewContext(ctx, execution)
-	refuse := func(reason string) (sdk.OperationRecord, terminalResult, error) {
-		recorded, err := nativeoperation_model.SetTerminal(releaseCtx, op.InstallationID, op.OperationID, nativeoperation_model.TerminalOutcome{
-			EffectState:  nativeoperation_model.EffectNotCommitted,
-			Reason:       reason,
-			Cancellation: nativeoperation_model.CancellationNone,
-		}, owner)
-		if err != nil {
-			return sdk.OperationRecord{}, terminalResult{}, err
-		}
-		return ToRecord(recorded), terminalResult{}, nil
-	}
-	if err := s.revalidateSubmission(owned, op); err != nil {
-		if errors.Is(err, ErrAuthorityLost) {
-			return refuse(nativeoperation_model.ReasonAuthorityLost)
-		}
-		return sdk.OperationRecord{}, terminalResult{}, err
-	}
+	refuse := conditionalRefusal(ctx, op, execution)
 	repository, err := repo_model.GetRepositoryByID(owned, op.RepositoryID)
 	if err != nil {
 		return refuse(nativeoperation_model.ReasonNativeRefused)

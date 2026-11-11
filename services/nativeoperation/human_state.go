@@ -7,10 +7,8 @@ import (
 	"context"
 	"encoding/json" //nolint:depguard // Persisted native intent and receipt.
 	"errors"
-	"time"
 
 	sdk "forgejo.org/extension-sdk"
-	extensionauth_model "forgejo.org/models/extensionauth"
 	issues_model "forgejo.org/models/issues"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	access_model "forgejo.org/models/perm/access"
@@ -18,8 +16,6 @@ import (
 	user_model "forgejo.org/models/user"
 	execcontext "forgejo.org/modules/nativeoperation"
 	notify_service "forgejo.org/services/notify"
-
-	"github.com/google/uuid"
 )
 
 const CrashPointHumanStateBeforePrimary = "human-state-before-primary"
@@ -47,32 +43,13 @@ func humanStateIntent(q sdk.HumanStateRequest) (*ValidIntent, error) {
 // SubmitHumanState uses live request admission, never background enrollment.
 // Its native state/history and operation receipt are one SQL primary effect.
 func (s *Service) SubmitHumanState(ctx context.Context, installation string, q sdk.HumanStateRequest, admit HumanStateAdmission) (sdk.OperationRecord, error) {
-	id, err := uuid.Parse(installation)
-	if err != nil || id.String() != installation || admit == nil {
-		return sdk.OperationRecord{}, ErrInvalidIntent
+	submission, record, err := s.beginHumanSubmission(ctx, installation, admit, func() (*ValidIntent, error) { return humanStateIntent(q) })
+	if submission == nil {
+		return record, err
 	}
-	intent, err := humanStateIntent(q)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if admit(ctx) != nil {
-		return sdk.OperationRecord{}, ErrAuthorityLost
-	}
-	existing, err := nativeoperation_model.LookupOperation(ctx, installation, q.OperationID)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if existing != nil {
-		return s.reconcileExisting(existing, intent)
-	}
-	if q.NotAfter <= s.clock() || q.NotAfter > s.clock()+int64(MaxOperationLifetime/time.Second) {
-		return sdk.OperationRecord{}, ErrInvalidIntent
-	}
+	intent := submission.intent
 	scope := Scope{Kind: nativeoperation_model.OwnerConditional, RepositoryID: intent.RepositoryID, IssueID: nativeCommentID(q.Expected.IssueID)}
-	return s.claimConditionalSubmit(ctx, extensionauth_model.SubmissionDecision{ActorID: intent.ActorID}, installation, intent, scope,
+	return submission.run(scope,
 		func(ctx context.Context, op *nativeoperation_model.Operation, _ *ValidIntent, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
 			return s.executeHumanState(ctx, op, q, admit, execution)
 		})

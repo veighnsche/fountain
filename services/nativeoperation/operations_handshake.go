@@ -22,7 +22,7 @@ import (
 // kind set. The handshake generation binds this revision so a same-kind
 // native upgrade invalidates previously registered Soda capability
 // markers; forgetting the bump leaves stale markers authoritative.
-const OperationsImplementationRevision = 4
+const OperationsImplementationRevision = 5
 
 // OperationsGeneration derives a stable handshake generation from the
 // operation implementation revision, the installed build identity and
@@ -56,6 +56,9 @@ type OperationsHandshake struct {
 
 // SupportedOperations returns the current handshake facts.
 func (s *Service) SupportedOperations(_ context.Context) (OperationsHandshake, error) {
+	if err := validateOperationImplementations(operationImplementations()); err != nil {
+		return OperationsHandshake{}, err
+	}
 	kinds := nativeoperation_model.SupportedKinds()
 	return OperationsHandshake{
 		Generation: OperationsGeneration(OperationsImplementationRevision, setting.AppVer, setting.AppBuiltWith, kinds),

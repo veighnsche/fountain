@@ -44,7 +44,7 @@ func (b *humanInlineBuffer) Write(p []byte) (int, error) {
 func ProveHumanInlineAnchor(ctx context.Context, repository *git.Repository, a issues_model.CodeCommentAnchor) (HumanInlineProof, error) {
 	var proof HumanInlineProof
 	refuse := func() (HumanInlineProof, error) {
-		return proof, issues_model.ErrExactReviewRefused{Reason: "invalid inline anchor"}
+		return proof, issues_model.NewExactReviewRefusal(reviewRefusalInvalidInlineAnchor, "invalid inline anchor")
 	}
 	if a.Validate() != nil || a.EndLine > 9007199254740991 {
 		return refuse()

@@ -191,67 +191,14 @@ func ValidateIntent(operationID string, actorID, repositoryID int64, kind, authR
 		ExpectedNativeRevision: expectedRevision,
 		NotAfter:               notAfter,
 	}
-	if kind == nativeoperation_model.KindMerge {
-		merge, err := parseMergeIntent(payload, repositoryID)
-		if err != nil {
-			return nil, err
-		}
-		intent.Merge = merge
-	} else if kind == nativeoperation_model.KindRefPublish {
-		publish, err := ParsePublishPayload(payload)
-		if err != nil {
-			return nil, ErrInvalidIntent
-		}
-		intent.Publish = publish
-	} else if kind == nativeoperation_model.KindIssueGraph {
-		graph, err := parseIssueGraphPayload(payload)
-		if err != nil {
-			return nil, err
-		}
-		intent.IssueGraph = graph
-	} else if kind == nativeoperation_model.KindPRCreate {
-		prcreate, err := parsePRCreatePayload(payload, repositoryID)
-		if err != nil {
-			return nil, err
-		}
-		intent.PRCreate = prcreate
-	} else if kind == nativeoperation_model.KindReviewSubmit {
-		review, err := parseReviewSubmitPayload(payload, repositoryID)
-		if err != nil {
-			return nil, err
-		}
-		intent.ReviewSubmit = review
-	} else if kind == nativeoperation_model.KindThreadResolve {
-		resolve, err := parseThreadResolvePayload(payload, repositoryID)
-		if err != nil {
-			return nil, err
-		}
-		intent.ThreadResolve = resolve
-	} else if kind == nativeoperation_model.KindLifecycleIssue {
-		lifecycle, err := parseLifecycleIssuePayload(payload, repositoryID)
-		if err != nil {
-			return nil, err
-		}
-		intent.LifecycleIssue = lifecycle
-	} else if kind == nativeoperation_model.KindLifecycleReview {
-		lifecycle, err := parseLifecycleReviewPayload(payload, repositoryID)
-		if err != nil {
-			return nil, err
-		}
-		intent.LifecycleReview = lifecycle
-	} else if kind == nativeoperation_model.KindLifecycleNote {
-		lifecycle, err := parseLifecycleNotePayload(payload, repositoryID)
-		if err != nil {
-			return nil, err
-		}
-		intent.LifecycleNote = lifecycle
-	} else if len(payload) > 0 {
-		var probe map[string]any
-		decoder := json.NewDecoder(bytes.NewReader(payload))
-		if err := decoder.Decode(&probe); err != nil {
-			return nil, ErrInvalidIntent
-		}
+	implementation, ok := implementationFor(kind)
+	if !ok || implementation.parse == nil {
+		return nil, ErrKindUnavailable
 	}
+	if err := implementation.parse(intent, payload); err != nil {
+		return nil, err
+	}
+
 	canonical, digest, err := canonicalDigest(intent, payload)
 	if err != nil {
 		return nil, ErrInvalidIntent

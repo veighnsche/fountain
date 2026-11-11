@@ -9,10 +9,8 @@ import (
 	"encoding/hex"
 	"encoding/json" //nolint:depguard // Persisted native intent and receipt.
 	"errors"
-	"time"
 
 	sdk "forgejo.org/extension-sdk"
-	extensionauth_model "forgejo.org/models/extensionauth"
 	issues_model "forgejo.org/models/issues"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	access_model "forgejo.org/models/perm/access"
@@ -21,8 +19,6 @@ import (
 	user_model "forgejo.org/models/user"
 	execcontext "forgejo.org/modules/nativeoperation"
 	notify_service "forgejo.org/services/notify"
-
-	"github.com/google/uuid"
 )
 
 const CrashPointHumanIssueCreateBeforePrimary = "human-issue-create-before-primary"
@@ -48,32 +44,13 @@ func humanIssueCreateIntent(q sdk.HumanIssueCreateRequest) (*ValidIntent, error)
 // journal and conditional owner. It requires no background token/enrollment and
 // exposes no public route. Index allocation belongs to the primary transaction.
 func (s *Service) SubmitHumanIssueCreate(ctx context.Context, installation string, q sdk.HumanIssueCreateRequest, admit HumanIssueCreateAdmission) (sdk.OperationRecord, error) {
-	installationID, err := uuid.Parse(installation)
-	if err != nil || installationID.String() != installation || admit == nil {
-		return sdk.OperationRecord{}, ErrInvalidIntent
+	submission, record, err := s.beginHumanSubmission(ctx, installation, admit, func() (*ValidIntent, error) { return humanIssueCreateIntent(q) })
+	if submission == nil {
+		return record, err
 	}
-	intent, err := humanIssueCreateIntent(q)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if ctx.Err() != nil {
-		return sdk.OperationRecord{}, ctx.Err()
-	}
-	if err := admit(ctx); err != nil {
-		return sdk.OperationRecord{}, ErrAuthorityLost
-	}
-	existing, err := nativeoperation_model.LookupOperation(ctx, installation, q.OperationID)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if existing != nil {
-		return s.reconcileExisting(existing, intent)
-	}
-	if q.NotAfter <= s.clock() || q.NotAfter > s.clock()+int64(MaxOperationLifetime/time.Second) {
-		return sdk.OperationRecord{}, ErrInvalidIntent
-	}
+	intent := submission.intent
 	scope := Scope{Kind: nativeoperation_model.OwnerConditional, RepositoryID: intent.RepositoryID}
-	return s.claimConditionalSubmit(ctx, extensionauth_model.SubmissionDecision{ActorID: intent.ActorID}, installation, intent, scope,
+	return submission.run(scope,
 		func(ctx context.Context, op *nativeoperation_model.Operation, _ *ValidIntent, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
 			return s.executeHumanIssueCreate(ctx, op, q, admit, execution)
 		})

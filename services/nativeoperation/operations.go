@@ -42,13 +42,11 @@ func (s *Service) Submit(ctx context.Context, decision extensionauth_model.Submi
 			return sdk.OperationRecord{}, ErrAuthorityLost
 		}
 	}
-	switch intent.Kind {
-	case nativeoperation_model.KindIssueGraph, nativeoperation_model.KindMerge, nativeoperation_model.KindRefPublish, nativeoperation_model.KindPRCreate, nativeoperation_model.KindReviewSubmit, nativeoperation_model.KindThreadResolve, nativeoperation_model.KindLifecycleIssue, nativeoperation_model.KindLifecycleReview, nativeoperation_model.KindLifecycleNote:
-	default:
-		// Admitted, but the kind's stage is not implemented yet. Report
-		// the missing stage rather than inventing a receipt.
+	implementation, ok := implementationFor(intent.Kind)
+	if !ok || implementation.submit == nil {
 		return sdk.OperationRecord{}, ErrKindUnavailable
 	}
+
 	existing, err := nativeoperation_model.LookupOperation(ctx, installationID, intent.OperationID)
 	if err != nil {
 		return sdk.OperationRecord{}, err
@@ -56,31 +54,7 @@ func (s *Service) Submit(ctx context.Context, decision extensionauth_model.Submi
 	if existing != nil {
 		return s.reconcileSubmission(existing, decision, intent)
 	}
-	if intent.Kind == nativeoperation_model.KindIssueGraph {
-		return s.submitIssueGraph(ctx, decision, installationID, intent)
-	}
-	if intent.Kind == nativeoperation_model.KindRefPublish {
-		return s.submitPublish(ctx, decision, installationID, intent)
-	}
-	if intent.Kind == nativeoperation_model.KindPRCreate {
-		return s.submitPRCreate(ctx, decision, installationID, intent)
-	}
-	if intent.Kind == nativeoperation_model.KindReviewSubmit {
-		return s.submitReviewSubmit(ctx, decision, installationID, intent)
-	}
-	if intent.Kind == nativeoperation_model.KindThreadResolve {
-		return s.submitThreadResolve(ctx, decision, installationID, intent)
-	}
-	if intent.Kind == nativeoperation_model.KindLifecycleIssue {
-		return s.submitLifecycleIssue(ctx, decision, installationID, intent)
-	}
-	if intent.Kind == nativeoperation_model.KindLifecycleReview {
-		return s.submitLifecycleReview(ctx, decision, installationID, intent)
-	}
-	if intent.Kind == nativeoperation_model.KindLifecycleNote {
-		return s.submitLifecycleNote(ctx, decision, installationID, intent)
-	}
-	return s.submitMerge(ctx, decision, installationID, intent)
+	return implementation.submit(s, ctx, decision, installationID, intent)
 }
 
 // Both the initial lookup and a concurrent journal-insert loser must bind the

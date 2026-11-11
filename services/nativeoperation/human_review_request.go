@@ -7,18 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"time"
 
 	sdk "forgejo.org/extension-sdk"
-	extensionauth_model "forgejo.org/models/extensionauth"
 	issues_model "forgejo.org/models/issues"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	"forgejo.org/models/organization"
 	user_model "forgejo.org/models/user"
 	execcontext "forgejo.org/modules/nativeoperation"
 	issue_service "forgejo.org/services/issue"
-
-	"github.com/google/uuid"
 )
 
 const CrashPointHumanReviewRequestBeforePrimary = "human-review-request-before-primary"
@@ -39,44 +35,15 @@ func humanReviewRequestIntent(q sdk.HumanReviewRequestChange) (*ValidIntent, err
 // enrollment. Request rows, native history and exact receipt commit together.
 // Replays and early cancellation use the existing installation-bound journal.
 func (s *Service) SubmitHumanReviewRequest(ctx context.Context, installation string, q sdk.HumanReviewRequestChange, admit HumanReviewAdmission) (sdk.OperationRecord, error) {
-	id, err := uuid.Parse(installation)
-	if err != nil || id.String() != installation || admit == nil {
-		return sdk.OperationRecord{}, ErrInvalidIntent
+	submission, record, err := s.beginHumanSubmission(ctx, installation, admit, func() (*ValidIntent, error) { return humanReviewRequestIntent(q) })
+	if submission == nil {
+		return record, err
 	}
-	intent, err := humanReviewRequestIntent(q)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if ctx.Err() != nil {
-		return sdk.OperationRecord{}, ctx.Err()
-	}
-	if admit(ctx) != nil {
-		return sdk.OperationRecord{}, ErrAuthorityLost
-	}
-	finish := func(r sdk.OperationRecord, err error) (sdk.OperationRecord, error) {
-		if err == nil || errors.Is(err, ErrCancelledBeforeSubmit) {
-			if ctx.Err() != nil || admit(ctx) != nil {
-				return sdk.OperationRecord{}, ErrAuthorityLost
-			}
-		}
-		return r, err
-	}
-	existing, err := nativeoperation_model.LookupOperation(ctx, installation, q.OperationID)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if existing != nil {
-		r, err := s.reconcileExisting(existing, intent)
-		return finish(r, err)
-	}
-	if q.NotAfter <= s.clock() || q.NotAfter > s.clock()+int64(MaxOperationLifetime/time.Second) {
-		return sdk.OperationRecord{}, ErrInvalidIntent
-	}
+	intent := submission.intent
 	scope := Scope{Kind: nativeoperation_model.OwnerConditional, RepositoryID: intent.RepositoryID, IssueID: nativeCommentID(q.Expected.Review.IssueID)}
-	record, err := s.claimConditionalSubmit(ctx, extensionauth_model.SubmissionDecision{ActorID: intent.ActorID}, installation, intent, scope, func(ctx context.Context, op *nativeoperation_model.Operation, _ *ValidIntent, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
+	return submission.run(scope, func(ctx context.Context, op *nativeoperation_model.Operation, _ *ValidIntent, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
 		return s.executeHumanReviewRequest(ctx, op, q, admit, execution)
 	})
-	return finish(record, err)
 }
 
 func (s *Service) executeHumanReviewRequest(ctx context.Context, op *nativeoperation_model.Operation, q sdk.HumanReviewRequestChange, admit HumanReviewAdmission, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
@@ -131,20 +98,9 @@ func (s *Service) executeHumanReviewRequest(ctx context.Context, op *nativeopera
 		case errors.Is(err, ErrHumanReviewRequestMissing), errors.Is(err, ErrHumanReviewRequestTooLarge):
 			return refuse(nativeoperation_model.ReasonStaleConversation)
 		case errors.As(err, &deterministic):
-			reason := nativeoperation_model.ReasonNativeRefused
-			switch deterministic.Reason {
-			case "reviewer head changed":
-				reason = nativeoperation_model.ReasonStaleHead
-			case "reviewer base changed", "reviewer merge base changed":
-				reason = nativeoperation_model.ReasonStaleBaseOrResult
-			case "reviewer policy or selected requests changed", "reviewer history changed":
-				reason = nativeoperation_model.ReasonStaleConversation
-			case "reviewer actor is inactive", "reviewer workflow unavailable", "reviewer actor cannot read pull":
-				reason = nativeoperation_model.ReasonAuthorityLost
-			case "reviewer parent changed", "reviewer pull changed":
-				reason = nativeoperation_model.ReasonPRMismatch
-			case "reviewer primary readback differs", "reviewer history differs from native effect", "created reviewer request differs", "removed reviewer history differs", "reviewer primary did not record expected history", "invalid persisted reviewer history":
-				return sdk.OperationRecord{}, terminalResult{}, err // Unexpected SQL effects retain the fence after rollback.
+			reason, retain := mapHumanReviewRequestRefusal(deterministic)
+			if retain {
+				return sdk.OperationRecord{}, terminalResult{}, err
 			}
 			return refuse(reason)
 		case errors.Is(err, nativeoperation_model.ErrAdmissionLost):

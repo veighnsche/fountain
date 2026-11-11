@@ -404,28 +404,6 @@ func IsContentEmptyErr(err error) bool {
 	return ok
 }
 
-// ErrExactReviewRefused reports a deterministic refusal of an exact-candidate
-// review submission. Reason is a stable short string the conditional-review
-// operation maps to its refusal reasons; callers must not retry with the same
-// target while the reason still holds.
-type ErrExactReviewRefused struct {
-	Reason string
-}
-
-// IsErrExactReviewRefused checks if an error is a ErrExactReviewRefused.
-func IsErrExactReviewRefused(err error) bool {
-	_, ok := err.(ErrExactReviewRefused)
-	return ok
-}
-
-func (err ErrExactReviewRefused) Error() string {
-	return "exact review refused: " + err.Reason
-}
-
-func (err ErrExactReviewRefused) Unwrap() error {
-	return util.ErrInvalidArgument
-}
-
 // ExactReviewTarget binds one final body-only review to its exact candidate.
 // Branch names are short native branch names; OIDs are full object IDs in the
 // repository's object format. CurrentHeadOID and CurrentBaseOID carry the
@@ -451,39 +429,39 @@ type ExactReviewTarget struct {
 // resulting diff would be identical.
 func checkExactReviewTarget(issue *Issue, pr *PullRequest, want ExactReviewTarget) error {
 	if issue.IsClosed || pr.HasMerged {
-		return ErrExactReviewRefused{Reason: "pull request is closed or merged"}
+		return NewExactReviewRefusal(ReviewRefusalPullRequestIsClosedOrMerged, "pull request is closed or merged")
 	}
 	if pr.HeadRepoID != pr.BaseRepoID {
-		return ErrExactReviewRefused{Reason: "cross-repository pull request is not supported"}
+		return NewExactReviewRefusal(ReviewRefusalCrossRepositoryPullRequestIsNotSupported, "cross-repository pull request is not supported")
 	}
 	if want.PRIndex != issue.Index {
-		return ErrExactReviewRefused{Reason: "pr index mismatch"}
+		return NewExactReviewRefusal(ReviewRefusalPRIndexMismatch, "pr index mismatch")
 	}
 	if want.AuthorID != issue.PosterID {
-		return ErrExactReviewRefused{Reason: "pr author mismatch"}
+		return NewExactReviewRefusal(ReviewRefusalPRAuthorMismatch, "pr author mismatch")
 	}
 	if want.HeadRepoID != pr.HeadRepoID {
-		return ErrExactReviewRefused{Reason: "head repository mismatch"}
+		return NewExactReviewRefusal(ReviewRefusalHeadRepositoryMismatch, "head repository mismatch")
 	}
 	if want.HeadBranch != pr.HeadBranch {
-		return ErrExactReviewRefused{Reason: "head branch mismatch"}
+		return NewExactReviewRefusal(ReviewRefusalHeadBranchMismatch, "head branch mismatch")
 	}
 	if want.BaseBranch != pr.BaseBranch {
-		return ErrExactReviewRefused{Reason: "base branch mismatch"}
+		return NewExactReviewRefusal(ReviewRefusalBaseBranchMismatch, "base branch mismatch")
 	}
 	for _, oid := range []string{want.HeadOID, want.BaseOID, want.CommitID, want.CurrentHeadOID, want.CurrentBaseOID} {
 		if !validFullOID(oid) {
-			return ErrExactReviewRefused{Reason: "invalid object id"}
+			return NewExactReviewRefusal(ReviewRefusalInvalidObjectID, "invalid object id")
 		}
 	}
 	if !strings.EqualFold(want.CommitID, want.HeadOID) {
-		return ErrExactReviewRefused{Reason: "commit must equal the expected head"}
+		return NewExactReviewRefusal(ReviewRefusalCommitMustEqualTheExpectedHead, "commit must equal the expected head")
 	}
 	if !strings.EqualFold(want.CurrentHeadOID, want.HeadOID) {
-		return ErrExactReviewRefused{Reason: "head changed"}
+		return NewExactReviewRefusal(ReviewRefusalHeadChanged, "head changed")
 	}
 	if !strings.EqualFold(want.CurrentBaseOID, want.BaseOID) {
-		return ErrExactReviewRefused{Reason: "base changed"}
+		return NewExactReviewRefusal(ReviewRefusalBaseChanged, "base changed")
 	}
 	return nil
 }
@@ -556,35 +534,35 @@ func validExactReviewCommentPath(path string) bool {
 // the conditional caller against the live candidate diff before insert.
 func ValidateExactReviewComments(comments []ExactReviewComment) error {
 	if len(comments) > MaxExactReviewComments {
-		return ErrExactReviewRefused{Reason: "too many inline comments"}
+		return NewExactReviewRefusal(ReviewRefusalTooManyInlineComments, "too many inline comments")
 	}
 	keys := make(map[string]struct{}, len(comments))
 	anchors := make(map[ExactReviewComment]struct{}, len(comments))
 	for _, comment := range comments {
 		if !validExactReviewCommentKey(comment.Key) {
-			return ErrExactReviewRefused{Reason: "invalid inline comment"}
+			return NewExactReviewRefusal(ReviewRefusalInvalidInlineComment, "invalid inline comment")
 		}
 		if !validExactReviewCommentPath(comment.Path) {
-			return ErrExactReviewRefused{Reason: "invalid inline comment"}
+			return NewExactReviewRefusal(ReviewRefusalInvalidInlineComment, "invalid inline comment")
 		}
 		switch comment.Side {
 		case ExactReviewCommentSideOld, ExactReviewCommentSideNew:
 		default:
-			return ErrExactReviewRefused{Reason: "invalid inline comment"}
+			return NewExactReviewRefusal(ReviewRefusalInvalidInlineComment, "invalid inline comment")
 		}
 		if comment.Line < 1 {
-			return ErrExactReviewRefused{Reason: "invalid inline comment"}
+			return NewExactReviewRefusal(ReviewRefusalInvalidInlineComment, "invalid inline comment")
 		}
 		if strings.TrimSpace(comment.Body) == "" {
-			return ErrExactReviewRefused{Reason: "invalid inline comment"}
+			return NewExactReviewRefusal(ReviewRefusalInvalidInlineComment, "invalid inline comment")
 		}
 		if _, dup := keys[comment.Key]; dup {
-			return ErrExactReviewRefused{Reason: "duplicate inline comment key"}
+			return NewExactReviewRefusal(ReviewRefusalDuplicateInlineCommentKey, "duplicate inline comment key")
 		}
 		keys[comment.Key] = struct{}{}
 		anchor := ExactReviewComment{Path: comment.Path, Side: comment.Side, Line: comment.Line}
 		if _, dup := anchors[anchor]; dup {
-			return ErrExactReviewRefused{Reason: "duplicate inline anchor"}
+			return NewExactReviewRefusal(ReviewRefusalDuplicateInlineAnchor, "duplicate inline anchor")
 		}
 		anchors[anchor] = struct{}{}
 	}
@@ -634,13 +612,13 @@ func SubmitExactReviewInline(ctx context.Context, doer *user_model.User, issue *
 		return nil, nil, nil, err
 	}
 	if reviewType != ReviewTypeApprove && reviewType != ReviewTypeReject && reviewType != ReviewTypeComment {
-		return nil, nil, nil, ErrExactReviewRefused{Reason: "unsupported final review type"}
+		return nil, nil, nil, NewExactReviewRefusal(ReviewRefusalUnsupportedFinalReviewType, "unsupported final review type")
 	}
 	if err := ValidateExactReviewComments(comments); err != nil {
 		return nil, nil, nil, err
 	}
 	if len(comments) > 0 && (!validFullOID(want.DiffBaseOID) || want.DiffBaseOID != strings.ToLower(want.DiffBaseOID)) {
-		return nil, nil, nil, ErrExactReviewRefused{Reason: "original diff base unavailable"}
+		return nil, nil, nil, NewExactReviewRefusal(ReviewRefusalOriginalDiffBaseUnavailable, "original diff base unavailable")
 	}
 	if err := issue.LoadPullRequest(ctx); err != nil {
 		return nil, nil, nil, err
@@ -653,7 +631,7 @@ func SubmitExactReviewInline(ctx context.Context, doer *user_model.User, issue *
 		return nil, nil, nil, err
 	}
 	if reviewType != ReviewTypeComment && doer.ID == issue.PosterID && issue.OriginalAuthorID == 0 {
-		return nil, nil, nil, ErrExactReviewRefused{Reason: "cannot review your own pull request"}
+		return nil, nil, nil, NewExactReviewRefusal(ReviewRefusalCannotReviewYourOwnPullRequest, "cannot review your own pull request")
 	}
 
 	ctx, committer, err := db.TxContext(ctx)
@@ -668,21 +646,21 @@ func SubmitExactReviewInline(ctx context.Context, doer *user_model.User, issue *
 			return nil, nil, nil, err
 		}
 	} else if pending != nil {
-		return nil, nil, nil, ErrExactReviewRefused{Reason: "pending draft exists"}
+		return nil, nil, nil, NewExactReviewRefusal(ReviewRefusalPendingDraftExists, "pending draft exists")
 	}
 
 	if err := issue.Repo.LoadOwner(ctx); err != nil {
 		return nil, nil, nil, err
 	}
 	if user_model.IsBlocked(ctx, issue.Repo.OwnerID, doer.ID) || user_model.IsBlocked(ctx, issue.PosterID, doer.ID) {
-		return nil, nil, nil, ErrExactReviewRefused{Reason: "reviewer is blocked"}
+		return nil, nil, nil, NewExactReviewRefusal(ReviewRefusalReviewerIsBlocked, "reviewer is blocked")
 	}
 	permission, err := access_model.GetUserRepoPermission(ctx, issue.Repo, doer)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	if !permission.CanReadIssuesOrPulls(true) {
-		return nil, nil, nil, ErrExactReviewRefused{Reason: "reviewer cannot read this pull request"}
+		return nil, nil, nil, NewExactReviewRefusal(ReviewRefusalReviewerCannotReadThisPullRequest, "reviewer cannot read this pull request")
 	}
 
 	if reviewType != ReviewTypeApprove && len(strings.TrimSpace(content)) == 0 {

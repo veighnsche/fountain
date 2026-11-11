@@ -51,18 +51,18 @@ func CreatePreparedHumanInlineComment(ctx context.Context, content string, draft
 	if err := validatePreparedHumanReviewTarget(ctx, want.Review); err != nil {
 		return nil, err
 	}
-	refuse := func(reason string) (*PreparedHumanInlineResult, error) {
-		return nil, ErrExactReviewRefused{Reason: reason}
+	refuse := func(code ExactReviewRefusalCode, reason string) (*PreparedHumanInlineResult, error) {
+		return nil, NewExactReviewRefusal(code, reason)
 	}
 	a := want.Anchor
 	if a.Validate() != nil || a.EndLine > 9007199254740991 || a.Base != want.Review.MergeBaseOID || a.Head != want.Review.HeadOID || !validFullOID(want.EntryOID) || want.EntryOID != strings.ToLower(want.EntryOID) || !validPreparedInlineDigest(want.DiffDigest) || want.EntryKind != "blob" && (want.EntryKind != "commit" || a.Scope != "file") {
-		return refuse("invalid human inline target")
+		return refuse(ReviewRefusalInvalidHumanInlineTarget, "invalid human inline target")
 	}
 	if a != want.CurrentAnchor || want.EntryOID != want.CurrentEntryOID || want.EntryKind != want.CurrentEntryKind || want.DiffDigest != want.CurrentDiffDigest {
-		return refuse("inline proof changed")
+		return refuse(ReviewRefusalInlineProofChanged, "inline proof changed")
 	}
 	if len(content) > MaxPreparedHumanInlineBodyBytes || !utf8.ValidString(content) || strings.ContainsRune(content, 0) {
-		return refuse("invalid human inline body")
+		return refuse(ReviewRefusalInvalidHumanInlineBody, "invalid human inline body")
 	}
 	if strings.TrimSpace(content) == "" {
 		return nil, ContentEmptyErr{}

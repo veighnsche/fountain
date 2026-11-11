@@ -10,11 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	sdk "forgejo.org/extension-sdk"
 	"forgejo.org/models/db"
-	extensionauth_model "forgejo.org/models/extensionauth"
 	issues_model "forgejo.org/models/issues"
 	nativeoperation_model "forgejo.org/models/nativeoperation"
 	access_model "forgejo.org/models/perm/access"
@@ -24,8 +22,6 @@ import (
 	"forgejo.org/modules/git"
 	execcontext "forgejo.org/modules/nativeoperation"
 	pull_service "forgejo.org/services/pull"
-
-	"github.com/google/uuid"
 )
 
 var errHumanPullCreateChanged = errors.New("human pull creation preparation changed")
@@ -195,45 +191,20 @@ func (s *Service) SubmitHumanPullCreate(ctx context.Context, installation string
 }
 
 func (s *Service) submitHumanPullCreate(ctx context.Context, installation string, q sdk.HumanPullCreateRequest, admit HumanReviewAdmission, complete bool) (sdk.OperationRecord, error) {
-	id, err := uuid.Parse(installation)
-	if err != nil || id.String() != installation || admit == nil || db.InTransaction(ctx) {
+	if db.InTransaction(ctx) {
 		return sdk.OperationRecord{}, ErrInvalidIntent
 	}
-	v, err := humanPullCreateIntent(q)
-	if err != nil {
-		return sdk.OperationRecord{}, err
+	submission, record, err := s.beginHumanSubmission(ctx, installation, admit, func() (*ValidIntent, error) { return humanPullCreateIntent(q) })
+	if submission == nil {
+		return record, err
 	}
-	if ctx.Err() != nil {
-		return sdk.OperationRecord{}, ctx.Err()
-	}
-	if admit(ctx) != nil {
-		return sdk.OperationRecord{}, ErrAuthorityLost
-	}
-	finish := func(r sdk.OperationRecord, err error) (sdk.OperationRecord, error) {
-		if err == nil || errors.Is(err, ErrCancelledBeforeSubmit) {
-			if ctx.Err() != nil || admit(ctx) != nil {
-				return sdk.OperationRecord{}, ErrAuthorityLost
-			}
-		}
-		return r, err
-	}
-	existing, err := nativeoperation_model.LookupOperation(ctx, installation, q.OperationID)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	if existing != nil {
-		r, e := s.reconcileExisting(existing, v)
-		return finish(r, e)
-	}
-	if q.NotAfter <= s.clock() || q.NotAfter > s.clock()+int64(MaxOperationLifetime/time.Second) {
-		return sdk.OperationRecord{}, ErrInvalidIntent
-	}
+	v := submission.intent
 	scope := humanPullCreateScope(q)
 	rawScope, err := encodeScope(scope)
 	if err != nil {
 		return sdk.OperationRecord{}, err
 	}
-	r, err := s.claimConditionalSubmit(ctx, extensionauth_model.SubmissionDecision{ActorID: v.ActorID}, installation, v, scope, func(ctx context.Context, _ *nativeoperation_model.Operation, _ *ValidIntent, x *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
+	return submission.run(scope, func(ctx context.Context, _ *nativeoperation_model.Operation, _ *ValidIntent, x *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
 		owned, settle := execcontext.NewContext(ctx, x), context.WithoutCancel(ctx)
 		refuse := func(reason string) (sdk.OperationRecord, terminalResult, error) {
 			r, err := nativeoperation_model.RefuseHumanPullCreate(settle, humanPullCreateOperation(installation, v), x.Owner, x.Generation, rawScope, reason)
@@ -367,5 +338,4 @@ func (s *Service) submitHumanPullCreate(ctx context.Context, installation string
 		}
 		return record, terminalResult{}, nil
 	})
-	return finish(r, err)
 }

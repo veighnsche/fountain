@@ -34,7 +34,7 @@ func deriveReviewMergeBase(ctx context.Context, repoPath, baseOID, headOID strin
 	}
 	mergeBase := strings.ToLower(strings.TrimSpace(string(stdout)))
 	if !validOID(mergeBase) {
-		return "", issues_model.ErrExactReviewRefused{Reason: "merge base unavailable"}
+		return "", issues_model.NewExactReviewRefusal(reviewRefusalMergeBaseUnavailable, "merge base unavailable")
 	}
 	return mergeBase, nil
 }
@@ -168,13 +168,13 @@ func proveInlineAnchors(diffs map[string][]byte, anchors []inlineAnchor) error {
 	for _, anchor := range anchors {
 		lines, found := parsed[anchor.Path]
 		if !found {
-			return issues_model.ErrExactReviewRefused{Reason: "invalid inline anchor"}
+			return issues_model.NewExactReviewRefusal(reviewRefusalInvalidInlineAnchor, "invalid inline anchor")
 		}
 		if lines.binary {
-			return issues_model.ErrExactReviewRefused{Reason: "binary-only inline anchor"}
+			return issues_model.NewExactReviewRefusal(reviewRefusalBinaryOnlyInlineAnchor, "binary-only inline anchor")
 		}
 		if !lines.hasHunks {
-			return issues_model.ErrExactReviewRefused{Reason: "invalid inline anchor"}
+			return issues_model.NewExactReviewRefusal(reviewRefusalInvalidInlineAnchor, "invalid inline anchor")
 		}
 		var covered bool
 		if anchor.Side == issues_model.ExactReviewCommentSideOld {
@@ -183,7 +183,7 @@ func proveInlineAnchors(diffs map[string][]byte, anchors []inlineAnchor) error {
 			covered = lines.newLines[anchor.Line]
 		}
 		if !covered {
-			return issues_model.ErrExactReviewRefused{Reason: "invalid inline anchor"}
+			return issues_model.NewExactReviewRefusal(reviewRefusalInvalidInlineAnchor, "invalid inline anchor")
 		}
 	}
 	return nil

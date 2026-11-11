@@ -9,7 +9,6 @@ import (
 	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
 	"errors"
 	"io"
-	"os"
 	"strings"
 
 	sdk "forgejo.org/extension-sdk"
@@ -118,19 +117,6 @@ func (s *Service) submitPRCreate(ctx context.Context, decision extensionauth_mod
 	if intent.PRCreate == nil {
 		return sdk.OperationRecord{}, ErrInvalidIntent
 	}
-	dir, err := s.execDir()
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	capabilityPath, secret, err := execcontext.WriteCapabilityFile(dir)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	retire := func() { _ = os.Remove(capabilityPath) }
-	owner := conditionalOwner(installationID, intent.OperationID)
-	// The internal PR ref is allocated at the primary commit, so the claim
-	// binds the verified head/base refs and OIDs; the exact derived-ref
-	// tuple persists under this owner before derived Git writes.
 	scope := Scope{
 		Kind:         nativeoperation_model.OwnerConditional,
 		RepositoryID: intent.RepositoryID,
@@ -139,47 +125,7 @@ func (s *Service) submitPRCreate(ctx context.Context, decision extensionauth_mod
 		HeadRef:      intent.PRCreate.HeadRef,
 		HeadOID:      intent.PRCreate.ExpectedHeadOID,
 	}
-	encoded, err := encodeScope(scope)
-	if err != nil {
-		retire()
-		return sdk.OperationRecord{}, err
-	}
-	op := operationForSubmission(decision, installationID, intent)
-	claimed, err := nativeoperation_model.ClaimConditional(ctx, op, owner, encoded, execcontext.Verifier(secret))
-	if err != nil {
-		retire()
-		if errors.Is(err, nativeoperation_model.ErrBusy) {
-			return sdk.OperationRecord{}, ErrBusy
-		}
-		if errors.Is(err, nativeoperation_model.ErrInhibited) {
-			return sdk.OperationRecord{}, err
-		}
-		if errors.Is(err, nativeoperation_model.ErrStaleRevision) {
-			return s.recordStaleRevision(ctx, op)
-		}
-		// A concurrent identical submit may have won the insert; reread
-		// and reconcile rather than launching a second execution.
-		existing, lookupErr := nativeoperation_model.LookupOperation(ctx, installationID, intent.OperationID)
-		if lookupErr != nil {
-			return sdk.OperationRecord{}, lookupErr
-		}
-		if existing != nil {
-			return s.reconcileSubmission(existing, decision, intent)
-		}
-		return sdk.OperationRecord{}, err
-	}
-	execution := &execcontext.Execution{Owner: owner, Generation: claimed.Generation, CapabilityPath: capabilityPath}
-	record, terminal, err := s.executePRCreate(ctx, op, intent, scope, execution)
-	if err != nil {
-		// Infrastructure failure before reconciliation: fail closed with
-		// the owner held and the capability kept for later recovery.
-		return sdk.OperationRecord{}, err
-	}
-	if !terminal.retain {
-		// The terminal record already released the owner; retire the file.
-		retire()
-	}
-	return record, nil
+	return s.claimBackgroundSubmit(ctx, decision, installationID, intent, scope)
 }
 
 // executePRCreate runs the guarded creation and reconciles its result. It
@@ -195,23 +141,7 @@ func (s *Service) executePRCreate(ctx context.Context, op *nativeoperation_model
 	// context so cancellation still stops it.
 	releaseCtx := context.WithoutCancel(ctx)
 	owned := execcontext.NewContext(ctx, execution)
-	refuse := func(reason string) (sdk.OperationRecord, terminalResult, error) {
-		recorded, err := nativeoperation_model.SetTerminal(releaseCtx, op.InstallationID, op.OperationID, nativeoperation_model.TerminalOutcome{
-			EffectState:  nativeoperation_model.EffectNotCommitted,
-			Reason:       reason,
-			Cancellation: nativeoperation_model.CancellationNone,
-		}, owner)
-		if err != nil {
-			return sdk.OperationRecord{}, terminalResult{}, err
-		}
-		return ToRecord(recorded), terminalResult{}, nil
-	}
-	if err := s.revalidateSubmission(owned, op); err != nil {
-		if errors.Is(err, ErrAuthorityLost) {
-			return refuse(nativeoperation_model.ReasonAuthorityLost)
-		}
-		return sdk.OperationRecord{}, terminalResult{}, err
-	}
+	refuse := conditionalRefusal(ctx, op, execution)
 	repository, err := repo_model.GetRepositoryByID(owned, op.RepositoryID)
 	if err != nil {
 		return refuse(nativeoperation_model.ReasonNativeRefused)

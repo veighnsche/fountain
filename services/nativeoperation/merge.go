@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json" //nolint:depguard // Native protocol and persisted JSON require standard-library semantics.
 	"errors"
-	"os"
 	"strings"
 
 	sdk "forgejo.org/extension-sdk"
@@ -29,16 +28,9 @@ func (s *Service) submitMerge(ctx context.Context, decision extensionauth_model.
 	if err := ctx.Err(); err != nil {
 		return sdk.OperationRecord{}, err
 	}
-	dir, err := s.execDir()
-	if err != nil {
-		return sdk.OperationRecord{}, err
+	if intent.Merge == nil {
+		return sdk.OperationRecord{}, ErrInvalidIntent
 	}
-	capabilityPath, secret, err := execcontext.WriteCapabilityFile(dir)
-	if err != nil {
-		return sdk.OperationRecord{}, err
-	}
-	retire := func() { _ = os.Remove(capabilityPath) }
-	owner := conditionalOwner(installationID, intent.OperationID)
 	scope := Scope{
 		Kind:         nativeoperation_model.OwnerConditional,
 		RepositoryID: intent.RepositoryID,
@@ -49,47 +41,7 @@ func (s *Service) submitMerge(ctx context.Context, decision extensionauth_model.
 		HeadOID:      intent.Merge.ExpectedHeadOID,
 		PRNumber:     intent.Merge.PullRequestNumber,
 	}
-	encoded, err := encodeScope(scope)
-	if err != nil {
-		retire()
-		return sdk.OperationRecord{}, err
-	}
-	op := operationForSubmission(decision, installationID, intent)
-	claimed, err := nativeoperation_model.ClaimConditional(ctx, op, owner, encoded, execcontext.Verifier(secret))
-	if err != nil {
-		retire()
-		if errors.Is(err, nativeoperation_model.ErrBusy) {
-			return sdk.OperationRecord{}, ErrBusy
-		}
-		if errors.Is(err, nativeoperation_model.ErrInhibited) {
-			return sdk.OperationRecord{}, err
-		}
-		if errors.Is(err, nativeoperation_model.ErrStaleRevision) {
-			return s.recordStaleRevision(ctx, op)
-		}
-		// A concurrent identical submit may have won the insert; reread
-		// and reconcile rather than launching a second execution.
-		existing, lookupErr := nativeoperation_model.LookupOperation(ctx, installationID, intent.OperationID)
-		if lookupErr != nil {
-			return sdk.OperationRecord{}, lookupErr
-		}
-		if existing != nil {
-			return s.reconcileSubmission(existing, decision, intent)
-		}
-		return sdk.OperationRecord{}, err
-	}
-	execution := &execcontext.Execution{Owner: owner, Generation: claimed.Generation, CapabilityPath: capabilityPath}
-	record, terminal, err := s.executeMerge(ctx, op, intent, scope, execution)
-	if err != nil {
-		// Infrastructure failure before reconciliation: fail closed with
-		// the owner held and the capability kept for later recovery.
-		return sdk.OperationRecord{}, err
-	}
-	if !terminal.retain {
-		// SetTerminal already released the owner; retire the file.
-		retire()
-	}
-	return record, nil
+	return s.claimBackgroundSubmit(ctx, decision, installationID, intent, scope)
 }
 
 func (s *Service) recordStaleRevision(ctx context.Context, op *nativeoperation_model.Operation) (sdk.OperationRecord, error) {
@@ -133,30 +85,13 @@ type mergeResult struct {
 //
 //nolint:unparam // Keep the common operation helper and callback signature.
 func (s *Service) executeMerge(ctx context.Context, op *nativeoperation_model.Operation, intent *ValidIntent, scope Scope, execution *execcontext.Execution) (sdk.OperationRecord, terminalResult, error) {
-	owner := execution.Owner
 	merge := intent.Merge
 	// Terminal records and the owner release must complete even when the
 	// caller disconnects mid-write; native work below keeps the live
 	// context so cancellation still stops it.
 	releaseCtx := context.WithoutCancel(ctx)
 	owned := execcontext.NewContext(ctx, execution)
-	refuse := func(reason string) (sdk.OperationRecord, terminalResult, error) {
-		recorded, err := nativeoperation_model.SetTerminal(releaseCtx, op.InstallationID, op.OperationID, nativeoperation_model.TerminalOutcome{
-			EffectState:  nativeoperation_model.EffectNotCommitted,
-			Reason:       reason,
-			Cancellation: nativeoperation_model.CancellationNone,
-		}, owner)
-		if err != nil {
-			return sdk.OperationRecord{}, terminalResult{}, err
-		}
-		return ToRecord(recorded), terminalResult{}, nil
-	}
-	if err := s.revalidateSubmission(owned, op); err != nil {
-		if errors.Is(err, ErrAuthorityLost) {
-			return refuse(nativeoperation_model.ReasonAuthorityLost)
-		}
-		return sdk.OperationRecord{}, terminalResult{}, err
-	}
+	refuse := conditionalRefusal(ctx, op, execution)
 	repository, err := repo_model.GetRepositoryByID(owned, intent.RepositoryID)
 	if err != nil {
 		return refuse(nativeoperation_model.ReasonNativeRefused)

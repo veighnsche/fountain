@@ -6,10 +6,6 @@ package nativeoperation
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"os"
-	"path/filepath"
-	"strings"
 
 	sdk "forgejo.org/extension-sdk"
 	git_model "forgejo.org/models/git"
@@ -66,7 +62,7 @@ func (s *Service) recoverHumanMerge(ctx context.Context, a *RecoveryAssessment, 
 		if pr.HasMerged || op.Receipt != "" || op.Completion != "" || scope.CompletionPhase != "" {
 			return fenced(a, ReasonRecoveryUncertainEffect, "human merge no-effect evidence has conflicting bookkeeping")
 		}
-		if err := retireHumanMergeRefLock(repository.RepoPath(), scope); err != nil {
+		if err := retireHumanMergeRefLock(ctx, repository, scope, op, held); err != nil {
 			return fenced(a, ReasonRecoveryMissingEvidence, "stopped human merge target lock differs or could not be retired")
 		}
 		if _, err := nativeoperation_model.RecordHumanMergeEffect(ctx, humanMergeExpectedOperation(op.InstallationID, intent), held.Owner, held.Generation, held.Scope, func(context.Context, *nativeoperation_model.Operation) (nativeoperation_model.TerminalOutcome, error) {
@@ -103,7 +99,7 @@ func (s *Service) recoverHumanMerge(ctx context.Context, a *RecoveryAssessment, 
 	if err != nil {
 		return fenced(a, ReasonRecoveryMissingEvidence, "human merge original actor is missing")
 	}
-	if err := retireHumanMergeRefLock(repository.RepoPath(), scope); err != nil {
+	if err := retireHumanMergeRefLock(ctx, repository, scope, op, held); err != nil {
 		return fenced(a, ReasonRecoveryMissingEvidence, "stopped human merge target lock differs or could not be retired")
 	}
 	op, err = nativeoperation_model.RecordHumanMergeEffect(ctx, humanMergeExpectedOperation(op.InstallationID, intent), held.Owner, held.Generation, held.Scope, func(context.Context, *nativeoperation_model.Operation) (nativeoperation_model.TerminalOutcome, error) {
@@ -148,44 +144,10 @@ func (s *Service) recoverHumanMerge(ctx context.Context, a *RecoveryAssessment, 
 // ref lock. Admission/ref/SQL evidence must already establish a known outcome.
 // An admitted old target never reaches here. Unknown locks stay fenced rather
 // than blocking a newly admitted writer after ownership has been released.
-func retireHumanMergeRefLock(repository string, scope Scope) error {
-	path := filepath.Join(repository, filepath.FromSlash(scope.Ref)+".lock")
-	info, err := os.Lstat(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() || scope.NewOID == "" {
-		return ErrHumanMergePushEvidence
-	}
-	// Never follow a substituted ref-directory symlink outside this repository.
-	dir := repository
-	parts := strings.Split(scope.Ref, "/")
-	for _, part := range parts[:len(parts)-1] {
-		dir = filepath.Join(dir, part)
-		entry, err := os.Lstat(dir)
-		if err != nil || !entry.IsDir() {
-			return ErrHumanMergePushEvidence
-		}
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	opened, err := file.Stat()
-	if err != nil || !os.SameFile(info, opened) {
-		return ErrHumanMergePushEvidence
-	}
-	data, err := io.ReadAll(io.LimitReader(file, int64(len(scope.NewOID)+2)))
-	if err != nil || string(data) != scope.NewOID+"\n" {
-		return ErrHumanMergePushEvidence
-	}
-	current, err := os.Lstat(path)
-	if err != nil || !os.SameFile(info, current) {
-		return ErrHumanMergePushEvidence
-	}
-	return os.Remove(path)
+func retireHumanMergeRefLock(ctx context.Context, repository *repo_model.Repository, scope Scope, op *nativeoperation_model.Operation, held *nativeoperation_model.Reservation) error {
+	return git.RetireStoppedRefLock(ctx, repository.RepoPath(), git.RefLockRetirementProof{
+		StoppedDomain:  nativeoperation_model.OfflineInhibited(),
+		InstallationID: op.InstallationID, OperationID: op.OperationID, Owner: held.Owner, Generation: held.Generation,
+		Ref: scope.Ref, NewOID: scope.NewOID, ObjectFormat: repository.ObjectFormatName,
+	})
 }

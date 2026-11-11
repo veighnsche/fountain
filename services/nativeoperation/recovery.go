@@ -171,24 +171,13 @@ func (s *Service) recoverConditional(ctx context.Context, assessment *RecoveryAs
 	case nativeoperation_model.KindHumanComment:
 		assessment.Family = "conditional-human-comment"
 		return s.recoverHumanComment(ctx, assessment, reservation, scope, op)
-	case nativeoperation_model.KindIssueGraph:
-		assessment.Family = "conditional-issue-graph"
-		return s.recoverConditionalIssueGraph(ctx, assessment, reservation, scope, op)
-	case nativeoperation_model.KindMerge:
-		assessment.Family = "conditional-merge"
-		return s.recoverConditionalMerge(ctx, assessment, reservation, scope, op)
-	case nativeoperation_model.KindRefPublish:
-		assessment.Family = "conditional-publish"
-		return s.recoverConditionalPublish(ctx, assessment, reservation, scope, op)
-	case nativeoperation_model.KindPRCreate:
-		assessment.Family = "conditional-prcreate"
-		return s.recoverConditionalPRCreate(ctx, assessment, reservation, scope, op)
-	case nativeoperation_model.KindReviewSubmit:
-		assessment.Family = "conditional-review"
-		return s.recoverConditionalReviewSubmit(ctx, assessment, reservation, scope, op)
-	default:
+	}
+	implementation, ok := implementationFor(op.Kind)
+	if !ok || implementation.recover == nil {
 		return fenced(assessment, ReasonRecoveryUnknownFamily, fmt.Sprintf("operation kind %q has no offline reconciliation yet", op.Kind))
 	}
+	assessment.Family = implementation.family
+	return implementation.recover(s, ctx, assessment, reservation, scope, op)
 }
 
 // recoverConditionalMerge reconciles one held conditional merge.
