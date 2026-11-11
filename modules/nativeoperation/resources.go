@@ -60,8 +60,9 @@ func PullResource(prID int64, op string) string {
 	return fmt.Sprintf("pull/%d/%s", prID, op)
 }
 
-// PullCreateResource names one PR creation on the named issue. The PR ID
-// is unknowable pre-insert, so recovery fences it.
+// PullCreateResource names one PR creation on the named issue. Before the
+// issue is inserted, its unknown ID is recorded as zero. Recovery fences
+// creation regardless of the anchor because it spans multiple effects.
 func PullCreateResource(issueID int64) string {
 	return fmt.Sprintf("pull/new/%d", issueID)
 }
@@ -234,7 +235,7 @@ func ParseCollabResource(resource string) (CollabClaim, error) {
 	case "pull":
 		if len(parts) == 3 && parts[1] == "new" {
 			id, ok := positive(parts[2])
-			if !ok {
+			if !ok && parts[2] != "0" {
 				break
 			}
 			return CollabClaim{Kind: "pull", ID: id, Op: "create"}, nil

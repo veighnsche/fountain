@@ -101,6 +101,9 @@ Refactor reviews also exposed the following boundary gaps. They are grouped unde
 | R09 | Globally consuming verification would break the documented controller/service handoff; cleanup needs one successful check per authenticated hop. | F09 |
 | R10 | Git object-format validation accepted abbreviated OIDs; stopped lock retirement needs the exact full-width admitted OID. | F10 |
 | R11 | Conditional lifecycle recovery needed to prove the selected label still belongs to its repository or owning organization. | F10 |
+| R12 | Shared SQL extraction left four unused private per-kind lock adapters. | F10 |
+| R13 | Generic repository contribution routing left the unused private feed handler. | F03 |
+| R14 | The shared resource parser rejected the zero issue anchor emitted before ordinary PR creation, preventing exact derived-ref refinement. | F02 |
 
 ## Fixes
 
@@ -740,3 +743,5 @@ All **25** Leave as is dispositions remain justified above: stable compatibility
 - F10 commit: `149066eecc`.
 
 - **F05 required source-format follow-through:** the complete upstream formatter reaches host Go paths omitted from the earlier narrow checks. Applied its mechanical formatting to 123 scoped Go files, preserving normalized syntax/import multisets and every comment text; three new misplaced JSON lint directives move onto their intended imports. Independent SDK tidy now correctly lists its already-pinned go-hclog dependency as direct because the runtime liveness test imports it. No dependency version or behavior changes; optional comment/test cleanup remains skipped. Source equivalence, scope and patch hashes are recorded in final-qualification/source/format-* evidence. The original Swagger generator separately exposes 12 lines of pre-existing pagination documentation drift; its input/template hashes match the brace-only pre-refactor control and this unrelated generated change is not silently included.
+
+- **F02 full-integration correction (R14):** complete SQLite Actions integration found a real regression absent on the brace-only pre-refactor control. Ordinary PR creation claims `pull/new/0` before insertion; the new shared parser required a positive anchor, so hook-time refinement returned not-applicable and a legitimate derived PR ref was refused with scope mismatch. The parser now recognizes only literal zero as the unknown pre-insert anchor for pull creation. Proof, owner, repository and exact ref checks remain; negative/malformed/noncanonical zero and other zero create kinds remain refused. Stopped creation still stays fenced. New regression tests fail against the prior parser and pass against the correction, including forged proof, repository/ref isolation and stopped-owner retention. Existing test assertions were not changed; full fixed integration is being rerun.
